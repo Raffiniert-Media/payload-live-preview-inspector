@@ -24,9 +24,6 @@
       ],
       "payload-live-preview-inspector/client": [
         "../src/exports/client.ts"
-      ],
-      "payload-live-preview-inspector/rsc": [
-        "../src/exports/rsc.ts"
       ]
     },
     "noEmit": true,

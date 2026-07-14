@@ -18,4 +18,28 @@ export const seed = async (payload: Payload) => {
       data: devUser,
     })
   }
+
+  const { totalDocs: postCount } = await payload.count({
+    collection: 'posts',
+  })
+
+  if (!postCount) {
+    await payload.create({
+      collection: 'posts',
+      data: {
+        layout: [
+          {
+            blockType: 'heroBlock',
+            heading: 'Welcome',
+            subheading: 'Hover and click me in the live preview',
+          },
+          {
+            blockType: 'contentBlock',
+            text: 'This block can also be clicked to scroll the admin form to it.',
+          },
+        ],
+        title: 'Hello Live Preview',
+      },
+    })
+  }
 }

@@ -1,0 +1,35 @@
+.hint {
+  color: var(--theme-elevation-400, #8f8f8f);
+  font-size: 12px;
+  padding: 0 calc(var(--base) / 2);
+  white-space: nowrap;
+}
+
+.flash {
+  animation: flash 1.2s ease-out;
+}
+
+@keyframes flash {
+  0% {
+    /*
+     * Mixed toward the field's own resting background (not "transparent")
+     * on purpose: color-mix()'s "transparent" is rgba(0, 0, 0, 0) - mixing
+     * toward it pulls the result toward black, not toward a soft tint.
+     * Mixing toward the real background also means the 100% keyframe below
+     * exactly matches the resting value, so removing this class doesn't
+     * change background-color at all - nothing for a field's own
+     * background-color transition to pick up and re-animate afterwards.
+     */
+    background-color: color-mix(
+      in srgb,
+      var(--payload-live-preview-inspector-flash-color, #3fb950) 15%,
+      var(--theme-input-bg, transparent)
+    );
+    outline: 2px solid var(--payload-live-preview-inspector-flash-color, #3fb950);
+    outline-offset: 2px;
+  }
+  100% {
+    background-color: var(--theme-input-bg, transparent);
+    outline-color: transparent;
+  }
+}

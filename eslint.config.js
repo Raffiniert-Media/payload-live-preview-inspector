@@ -36,7 +36,16 @@ export default [
         ecmaVersion: 'latest',
         projectService: {
           maximumDefaultProjectFileMatchCount_THIS_WILL_SLOW_DOWN_LINTING: 40,
-          allowDefaultProject: ['scripts/*.ts', '*.js', '*.mjs', '*.spec.ts', '*.d.ts'],
+          allowDefaultProject: [
+            'scripts/*.ts',
+            '*.js',
+            '*.mjs',
+            '*.spec.ts',
+            '*.d.ts',
+            // Unit tests are excluded from tsconfig.json (they must not end up in dist/),
+            // so the project service needs to pick them up via the default project.
+            'src/utilities/*.test.ts',
+          ],
         },
         // projectService: true,
         tsconfigRootDir: import.meta.dirname,

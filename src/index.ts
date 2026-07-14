@@ -1,111 +1,83 @@
-import type { CollectionSlug, Config } from 'payload'
-
-import { customEndpointHandler } from './endpoints/customEndpointHandler.js'
+import type { CollectionSlug, Config, GlobalSlug } from 'payload'
 
 export type PayloadLivePreviewInspectorConfig = {
   /**
-   * List of collections to add a custom field
+   * Wait time (ms) for a just-expanded accordion's height animation before scrolling.
+   * @default 350
+   */
+  accordionAnimationMs?: number
+  /**
+   * List of collections to enable click-to-scroll live preview inspection on
    */
   collections?: Partial<Record<CollectionSlug, true>>
   disabled?: boolean
+  /**
+   * Flash outline/background color shown when scrolling to a field.
+   * @default '#3fb950'
+   */
+  flashColor?: string
+  /**
+   * Flash animation duration in ms.
+   * @default 1200
+   */
+  flashDurationMs?: number
+  /**
+   * List of globals to enable click-to-scroll live preview inspection on
+   */
+  globals?: Partial<Record<GlobalSlug, true>>
+  /**
+   * Distance (px) to keep between the scrolled-to field and the viewport top.
+   * @default 100
+   */
+  scrollOffset?: number
 }
 
 export const payloadLivePreviewInspector =
   (pluginOptions: PayloadLivePreviewInspectorConfig) =>
   (config: Config): Config => {
-    if (!config.collections) {
-      config.collections = []
-    }
-
-    config.collections.push({
-      slug: 'plugin-collection',
-      fields: [
-        {
-          name: 'id',
-          type: 'text',
-        },
-      ],
-    })
-
-    if (pluginOptions.collections) {
-      for (const collectionSlug in pluginOptions.collections) {
-        const collection = config.collections.find(
-          (collection) => collection.slug === collectionSlug,
-        )
-
-        if (collection) {
-          collection.fields.push({
-            name: 'addedByPlugin',
-            type: 'text',
-            admin: {
-              position: 'sidebar',
-            },
-          })
-        }
-      }
-    }
-
-    /**
-     * If the plugin is disabled, we still want to keep added collections/fields so the database schema is consistent which is important for migrations.
-     * If your plugin heavily modifies the database schema, you may want to remove this property.
-     */
     if (pluginOptions.disabled) {
       return config
     }
 
-    if (!config.endpoints) {
-      config.endpoints = []
-    }
-
-    if (!config.admin) {
-      config.admin = {}
-    }
-
-    if (!config.admin.components) {
-      config.admin.components = {}
-    }
-
-    if (!config.admin.components.beforeDashboard) {
-      config.admin.components.beforeDashboard = []
-    }
-
-    config.admin.components.beforeDashboard.push(
-      `payload-live-preview-inspector/client#BeforeDashboardClient`,
-    )
-    config.admin.components.beforeDashboard.push(
-      `payload-live-preview-inspector/rsc#BeforeDashboardServer`,
-    )
-
-    config.endpoints.push({
-      handler: customEndpointHandler,
-      method: 'get',
-      path: '/my-plugin-endpoint',
+    const createComponentConfig = () => ({
+      clientProps: {
+        accordionAnimationMs: pluginOptions.accordionAnimationMs,
+        flashColor: pluginOptions.flashColor,
+        flashDurationMs: pluginOptions.flashDurationMs,
+        scrollOffset: pluginOptions.scrollOffset,
+      },
+      path: 'payload-live-preview-inspector/client#LivePreviewInspectorListener' as const,
     })
 
-    const incomingOnInit = config.onInit
+    if (pluginOptions.collections && config.collections) {
+      for (const collectionSlug in pluginOptions.collections) {
+        const collection = config.collections.find((collection) => collection.slug === collectionSlug)
 
-    config.onInit = async (payload) => {
-      // Ensure we are executing any existing onInit functions before running our own.
-      if (incomingOnInit) {
-        await incomingOnInit(payload)
+        if (!collection) {
+          continue
+        }
+
+        collection.admin ??= {}
+        collection.admin.components ??= {}
+        collection.admin.components.edit ??= {}
+        collection.admin.components.edit.beforeDocumentControls ??= []
+        collection.admin.components.edit.beforeDocumentControls.push(createComponentConfig())
       }
+    }
 
-      const { totalDocs } = await payload.count({
-        collection: 'plugin-collection',
-        where: {
-          id: {
-            equals: 'seeded-by-plugin',
-          },
-        },
-      })
+    if (pluginOptions.globals && config.globals) {
+      for (const globalSlug in pluginOptions.globals) {
+        const global = config.globals.find((global) => global.slug === globalSlug)
 
-      if (totalDocs === 0) {
-        await payload.create({
-          collection: 'plugin-collection',
-          data: {
-            id: 'seeded-by-plugin',
-          },
-        })
+        if (!global) {
+          continue
+        }
+
+        global.admin ??= {}
+        global.admin.components ??= {}
+        global.admin.components.elements ??= {}
+        global.admin.components.elements.beforeDocumentControls ??= []
+        global.admin.components.elements.beforeDocumentControls.push(createComponentConfig())
       }
     }
 

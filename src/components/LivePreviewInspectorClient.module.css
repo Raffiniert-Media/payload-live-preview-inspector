@@ -1,0 +1,5 @@
+.hovered {
+  cursor: pointer;
+  outline: 2px dashed #3fb950;
+  outline-offset: 2px;
+}

@@ -1,24 +1,32 @@
 {
   "name": "payload-live-preview-inspector",
   "version": "1.0.0",
-  "description": "A blank template to get started with Payload 3.0",
+  "description": "Click a component in Payload's Live Preview iframe to scroll to and highlight the matching field in the admin panel.",
+  "keywords": [
+    "payload",
+    "payload-cms",
+    "payload-plugin",
+    "plugin",
+    "live-preview",
+    "click-to-scroll",
+    "cms"
+  ],
+  "author": "Raffiniert Media AG",
   "license": "MIT",
   "type": "module",
+  "sideEffects": [
+    "**/*.css"
+  ],
   "exports": {
     ".": {
-      "import": "./src/index.ts",
       "types": "./src/index.ts",
+      "import": "./src/index.ts",
       "default": "./src/index.ts"
     },
     "./client": {
-      "import": "./src/exports/client.ts",
       "types": "./src/exports/client.ts",
+      "import": "./src/exports/client.ts",
       "default": "./src/exports/client.ts"
-    },
-    "./rsc": {
-      "import": "./src/exports/rsc.ts",
-      "types": "./src/exports/rsc.ts",
-      "default": "./src/exports/rsc.ts"
     }
   },
   "main": "./src/index.ts",
@@ -28,9 +36,9 @@
   ],
   "scripts": {
     "build": "pnpm copyfiles && pnpm build:types && pnpm build:swc",
-    "build:swc": "swc ./src -d ./dist --config-file .swcrc --strip-leading-paths",
+    "build:swc": "swc ./src -d ./dist --config-file .swcrc --strip-leading-paths --ignore \"**/*.test.ts\"",
     "build:types": "tsc --outDir dist --rootDir ./src",
-    "clean": "rimraf {dist,*.tsbuildinfo}",
+    "clean": "rimraf dist tsconfig.tsbuildinfo",
     "copyfiles": "copyfiles -u 1 \"src/**/*.{html,css,scss,ttf,woff,woff2,eot,svg,jpg,png,json}\" dist/",
     "dev": "next dev dev --turbo",
     "dev:generate-importmap": "pnpm dev:payload generate:importmap",
@@ -40,16 +48,16 @@
     "generate:types": "pnpm dev:generate-types",
     "lint": "eslint",
     "lint:fix": "eslint ./src --fix",
+    "prepublishOnly": "pnpm clean && pnpm build",
     "test": "pnpm test:int && pnpm test:e2e",
     "test:e2e": "playwright test",
     "test:int": "vitest"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.2.0",
-    "@payloadcms/db-mongodb": "3.84.1",
-    "@payloadcms/db-postgres": "3.84.1",
     "@payloadcms/db-sqlite": "3.84.1",
     "@payloadcms/eslint-config": "3.28.0",
+    "@payloadcms/live-preview-react": "3.84.1",
     "@payloadcms/next": "3.84.1",
     "@payloadcms/richtext-lexical": "3.84.1",
     "@payloadcms/ui": "3.84.1",
@@ -64,7 +72,7 @@
     "eslint": "^9.23.0",
     "eslint-config-next": "16.2.6",
     "graphql": "^16.8.1",
-    "mongodb-memory-server": "10.1.4",
+    "happy-dom": "20.10.6",
     "next": "16.2.6",
     "open": "^10.1.0",
     "payload": "3.84.1",
@@ -72,36 +80,43 @@
     "qs-esm": "8.0.1",
     "react": "19.2.6",
     "react-dom": "19.2.6",
-    "rimraf": "3.0.2",
+    "rimraf": "5.0.10",
     "sharp": "0.34.2",
     "sort-package-json": "^2.10.0",
     "typescript": "5.7.3",
     "vite-tsconfig-paths": "6.0.5",
-    "vitest": "4.0.18"
+    "vitest": "4.1.10"
   },
   "peerDependencies": {
-    "payload": "^3.84.1"
+    "@payloadcms/ui": "^3.84.1",
+    "payload": "^3.84.1",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@payloadcms/ui": {
+      "optional": true
+    },
+    "payload": {
+      "optional": true
+    }
   },
   "engines": {
     "node": "^18.20.2 || >=20.9.0",
     "pnpm": "^9 || ^10 || ^11"
   },
+  "packageManager": "pnpm@10.17.1",
   "publishConfig": {
     "exports": {
       ".": {
-        "import": "./dist/index.js",
         "types": "./dist/index.d.ts",
+        "import": "./dist/index.js",
         "default": "./dist/index.js"
       },
       "./client": {
-        "import": "./dist/exports/client.js",
         "types": "./dist/exports/client.d.ts",
+        "import": "./dist/exports/client.js",
         "default": "./dist/exports/client.js"
-      },
-      "./rsc": {
-        "import": "./dist/exports/rsc.js",
-        "types": "./dist/exports/rsc.d.ts",
-        "default": "./dist/exports/rsc.js"
       }
     },
     "main": "./dist/index.js",
@@ -112,8 +127,9 @@
       "sharp",
       "esbuild",
       "unrs-resolver"
-    ]
-  },
-  "registry": "https://registry.npmjs.org/",
-  "dependencies": {}
+    ],
+    "overrides": {
+      "undici@<7.28.0": "^7.28.0"
+    }
+  }
 }

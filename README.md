@@ -1,218 +1,161 @@
-# Payload Plugin Template
+# payload-live-preview-inspector
 
-A template repo to create a [Payload CMS](https://payloadcms.com) plugin.
+A [Payload CMS](https://payloadcms.com) plugin that brings Storyblok-style click-to-scroll to Payload's built-in [Live Preview](https://payloadcms.com/docs/live-preview/overview): hover a component in the Live Preview iframe to highlight it, click it to smooth-scroll the admin edit form to (and briefly flash) the matching field — expanding any collapsed Array/Blocks accordions and focusing the field along the way.
 
-Payload is built with a robust infrastructure intended to support Plugins with ease. This provides a simple, modular, and reusable way for developers to extend the core capabilities of Payload.
+This plugin does **not** set up Live Preview itself. It adds the click-to-scroll behavior on top of an already-working `admin.livePreview` configuration.
 
-To build your own Payload plugin, all you need is:
+## How it works
 
-- An understanding of the basic Payload concepts
-- And some JavaScript/Typescript experience
+- **In the iframe (your frontend):** `LivePreviewInspectorClient` listens for hover/click on any element carrying a `data-payload-live-preview-path` attribute. Hover highlights the element locally; click posts a message to the parent window with that path.
+- **In the admin panel:** `LivePreviewInspectorListener` is auto-registered by the plugin into the Edit view of every collection/global you enable it for. It listens for that message, resolves the field path (translating any Array/Blocks row ids to their current index via the live form state), expands any collapsed accordions in the way, scrolls to the field, flashes it, and focuses it. It also shows a small hint next to the document controls while you're on the Live Preview tab.
 
-## Background
+Outside of an iframe (i.e. your frontend rendered directly, not inside Live Preview), `LivePreviewInspectorClient` is a no-op — it doesn't attach any listeners.
 
-Here is a short recap on how to integrate plugins with Payload, to learn more visit the [plugin overview page](https://payloadcms.com/docs/plugins/overview).
+## Installation
 
-### How to install a plugin
+```sh
+pnpm add payload-live-preview-inspector
+```
 
-To install any plugin, simply add it to your payload.config() in the Plugin array.
+Requires `payload` and `@payloadcms/ui` in the Payload project (peer dependencies), and `react`/`react-dom` 19 wherever the components are used. `@payloadcms/ui` and `payload` are optional peers — a frontend-only project that only imports from `payload-live-preview-inspector/client` doesn't need either installed.
+
+## Setup
+
+### 1. Admin (Payload config)
+
+Add the plugin and list the collections/globals that should get click-to-scroll. Each of these must already have Live Preview enabled (`admin.livePreview.collections`/`.globals`):
 
 ```ts
-import myPlugin from 'my-plugin'
+import { payloadLivePreviewInspector } from 'payload-live-preview-inspector'
 
-export const config = buildConfig({
+export default buildConfig({
+  admin: {
+    livePreview: {
+      collections: ['posts'],
+      url: ({ data }) => `https://your-frontend.example.com/preview/posts/${data.id}`,
+    },
+  },
   plugins: [
-    // You can pass options to the plugin
-    myPlugin({
-      enabled: true,
+    payloadLivePreviewInspector({
+      collections: {
+        posts: true,
+      },
+      globals: {
+        siteSettings: true,
+      },
     }),
   ],
 })
 ```
 
-### Initialization
-
-The initialization process goes in the following order:
-
-1. Incoming config is validated
-2. **Plugins execute**
-3. Default options are integrated
-4. Sanitization cleans and validates data
-5. Final config gets initialized
-
-## Building the Plugin
-
-When you build a plugin, you are purely building a feature for your project and then abstracting it outside of the project.
-
-### Template Files
-
-In the Payload [plugin template](https://github.com/payloadcms/payload/tree/3.x/templates/plugin), you will see a common file structure that is used across all plugins:
-
-1. root folder
-2. /src folder
-3. /dev folder
-
-#### Root
-
-In the root folder, you will see various files that relate to the configuration of the plugin. We set up our environment in a similar manner in Payload core and across other projects, so hopefully these will look familiar:
-
-- **README**.md\* - This contains instructions on how to use the template. When you are ready, update this to contain instructions on how to use your Plugin.
-- **package**.json\* - Contains necessary scripts and dependencies. Overwrite the metadata in this file to describe your Plugin.
-- .**eslint**.config.js - Eslint configuration for reporting on problematic patterns.
-- .**gitignore** - List specific untracked files to omit from Git.
-- .**prettierrc**.json - Configuration for Prettier code formatting.
-- **tsconfig**.json - Configures the compiler options for TypeScript
-- .**swcrc** - Configuration for SWC, a fast compiler that transpiles and bundles TypeScript.
-- **vitest**.config.js - Config file for Vitest, defining how tests are run and how modules are resolved
-
-**IMPORTANT\***: You will need to modify these files.
-
-#### Dev
-
-In the dev folder, you’ll find a basic payload project, created with `npx create-payload-app` and the blank template.
-
-**IMPORTANT**: Make a copy of the `.env.example` file and rename it to `.env`. Update the `DATABASE_URL` to match the database you are using and your plugin name. Update `PAYLOAD_SECRET` to a unique string.
-**You will not be able to run `pnpm/yarn dev` until you have created this `.env` file.**
-
-`myPlugin` has already been added to the `payload.config()` file in this project.
+Optional styling/timing overrides (all have sensible defaults if omitted):
 
 ```ts
-plugins: [
-  myPlugin({
-    collections: {
-      posts: true,
-    },
-  }),
-]
-```
-
-Later when you rename the plugin or add additional options, **make sure to update it here**.
-
-You may wish to add collections or expand the test project depending on the purpose of your plugin. Just make sure to keep this dev environment as simplified as possible - users should be able to install your plugin without additional configuration required.
-
-When you’re ready to start development, initiate the project with `pnpm/npm/yarn dev` and pull up [http://localhost:3000](http://localhost:3000) in your browser.
-
-#### Src
-
-Now that we have our environment setup and we have a dev project ready to - it’s time to build the plugin!
-
-**index.ts**
-
-The essence of a Payload plugin is simply to extend the payload config - and that is exactly what we are doing in this file.
-
-```ts
-export const myPlugin =
-  (pluginOptions: MyPluginConfig) =>
-  (config: Config): Config => {
-    // do cool stuff with the config here
-
-    return config
-  }
-```
-
-First, we receive the existing payload config along with any plugin options.
-
-From here, you can extend the config as you wish.
-
-Finally, you return the config and that is it!
-
-##### Spread Syntax
-
-Spread syntax (or the spread operator) is a feature in JavaScript that uses the dot notation **(...)** to spread elements from arrays, strings, or objects into various contexts.
-
-We are going to use spread syntax to allow us to add data to existing arrays without losing the existing data. It is crucial to spread the existing data correctly – else this can cause adverse behavior and conflicts with Payload config and other plugins.
-
-Let’s say you want to build a plugin that adds a new collection:
-
-```ts
-config.collections = [
-  ...(config.collections || []),
-  // Add additional collections here
-]
-```
-
-First we spread the `config.collections` to ensure that we don’t lose the existing collections, then you can add any additional collections just as you would in a regular payload config.
-
-This same logic is applied to other properties like admin, hooks, globals:
-
-```ts
-config.globals = [
-  ...(config.globals || []),
-  // Add additional globals here
-]
-
-config.hooks = {
-  ...(incomingConfig.hooks || {}),
-  // Add additional hooks here
-}
-```
-
-Some properties will be slightly different to extend, for instance the onInit property:
-
-```ts
-import { onInitExtension } from './onInitExtension' // example file
-
-config.onInit = async (payload) => {
-  if (incomingConfig.onInit) await incomingConfig.onInit(payload)
-  // Add additional onInit code by defining an onInitExtension function
-  onInitExtension(pluginOptions, payload)
-}
-```
-
-If you wish to add to the onInit, you must include the **async/await**. We don’t use spread syntax in this case, instead you must await the existing `onInit` before running additional functionality.
-
-In the template, we have stubbed out some addition `onInit` actions that seeds in a document to the `plugin-collection`, you can use this as a base point to add more actions - and if not needed, feel free to delete it.
-
-##### Types.ts
-
-If your plugin has options, you should define and provide types for these options.
-
-```ts
-export type MyPluginConfig = {
-  /**
-   * List of collections to add a custom field
-   */
-  collections?: Partial<Record<CollectionSlug, true>>
-  /**
-   * Disable the plugin
-   */
-  disabled?: boolean
-}
-```
-
-If possible, include JSDoc comments to describe the options and their types. This allows a developer to see details about the options in their editor.
-
-##### Testing
-
-Having a test suite for your plugin is essential to ensure quality and stability. **Vitest** is a fast, modern testing framework that works seamlessly with Vite and supports TypeScript out of the box.
-
-Vitest organizes tests into test suites and cases, similar to other testing frameworks. We recommend creating individual tests based on the expected behavior of your plugin from start to finish.
-
-Writing tests with Vitest is very straightforward, and you can learn more about how it works in the [Vitest documentation.](https://vitest.dev/)
-
-For this template, we stubbed out `int.spec.ts` in the `dev` folder where you can write your tests.
-
-```ts
-describe('Plugin tests', () => {
-  // Create tests to ensure expected behavior from the plugin
-  it('some condition that must be met', () => {
-   // Write your test logic here
-   expect(...)
-  })
+payloadLivePreviewInspector({
+  collections: { posts: true },
+  flashColor: '#ff6b00',        // default '#3fb950'
+  flashDurationMs: 1500,        // default 1200
+  scrollOffset: 120,            // default 100
+  accordionAnimationMs: 400,    // default 350 - wait time after expanding an accordion, before scrolling
 })
 ```
 
-## Best practices
+### 2. Frontend
 
-With this tutorial and the plugin template, you should have everything you need to start building your own plugin.
-In addition to the setup, here are other best practices aim we follow:
+Mount `LivePreviewInspectorClient` once, near the root of whatever page renders inside the Live Preview iframe:
 
-- **Providing an enable / disable option:** For a better user experience, provide a way to disable the plugin without uninstalling it. This is especially important if your plugin adds additional webpack aliases, this will allow you to still let the webpack run to prevent errors.
-- **Include tests in your GitHub CI workflow**: If you’ve configured tests for your package, integrate them into your workflow to run the tests each time you commit to the plugin repository. Learn more about [how to configure tests into your GitHub CI workflow.](https://docs.github.com/en/actions/automating-builds-and-tests/building-and-testing-nodejs)
-- **Publish your finished plugin to NPM**: The best way to share and allow others to use your plugin once it is complete is to publish an NPM package. This process is straightforward and well documented, find out more [creating and publishing a NPM package here.](https://docs.npmjs.com/creating-and-publishing-scoped-public-packages/).
-- **Add payload-plugin topic tag**: Apply the tag **payload-plugin **to your GitHub repository. This will boost the visibility of your plugin and ensure it gets listed with [existing payload plugins](https://github.com/topics/payload-plugin).
-- **Use [Semantic Versioning](https://semver.org/) (SemVar)** - With the SemVar system you release version numbers that reflect the nature of changes (major, minor, patch). Ensure all major versions reference their Payload compatibility.
+```tsx
+import { LivePreviewInspectorClient } from 'payload-live-preview-inspector/client'
 
-# Questions
+export default function PreviewPage() {
+  return (
+    <>
+      <LivePreviewInspectorClient hoverColor="#ff6b00" /* optional, defaults to shipped CSS */ />
+      {/* ...your page... */}
+    </>
+  )
+}
+```
 
-Please contact [Payload](mailto:dev@payloadcms.com) with any questions about using this plugin template.
+Then tag every element that should be clickable. The recommended way is `inspectable()` + `pathOf()`: wrap your document data once, and every nested object/array element you access knows its own field path — array/blocks rows are automatically addressed by their stable `id`, so the mapping survives reordering, inserting, or removing rows. You never have to think about paths, indexes, or row ids:
+
+```tsx
+import { inspectable, pathOf } from 'payload-live-preview-inspector/client'
+
+const page = inspectable(data)
+
+<h1 {...pathOf(page, 'title')}>{page.title}</h1>
+
+{page.layout?.map((block) => (
+  <section key={block.id} {...pathOf(block)}>
+    <h2 {...pathOf(block, 'heading')}>{block.heading}</h2>
+  </section>
+))}
+```
+
+`pathOf(node)` addresses the node itself (e.g. a whole block); `pathOf(node, 'fieldName')` addresses a field on it. This is plain JavaScript — no hooks, no context — so it works in Server Components too. One caveat: call `inspectable()` inside the component that renders the data; the path metadata does not survive a server-to-client component boundary.
+
+There is no auto-discovery: an element without a path attribute is simply not clickable, silently.
+
+## Production / performance
+
+Nothing here should worry you for real visitors, but it's worth understanding what runs where:
+
+- `LivePreviewInspectorClient` is a guaranteed no-op outside an iframe — for normal visitors it attaches **no** event listeners and renders nothing. Its only cost is a few kB in the bundle.
+- `inspectable()`'s proxy overhead is negligible (~0.02 ms per render for a 100-block document).
+- The one visible effect: `pathOf()` bakes `data-payload-live-preview-path` attributes into the rendered HTML — roughly 40–60 bytes per tagged element, and they reveal your field structure. Harmless, but unnecessary on public pages.
+
+The cleanest setup is a **dedicated preview route** (like this repo's `dev/app/(frontend)/preview/...`): the public route never imports any of this, so the cost for real visitors is exactly zero.
+
+If instead you share the same components between public and preview rendering, pass your preview signal to `inspectable()` once — everything downstream (every `pathOf()` call) switches off cleanly and silently:
+
+```tsx
+import { draftMode } from 'next/headers'
+
+const { isEnabled } = await draftMode()
+const page = inspectable(data, { enabled: isEnabled })
+// enabled: false → no path attributes in the HTML, pathOf() silently returns {}
+```
+
+No conditionals needed anywhere else — your components stay identical for both cases.
+
+## API reference
+
+Exported from `payload-live-preview-inspector` (admin/config side):
+
+- `payloadLivePreviewInspector(options)` — the plugin.
+  - `options.collections: Partial<Record<CollectionSlug, true>>` / `options.globals: Partial<Record<GlobalSlug, true>>` — which collections/globals get the listener.
+  - `options.disabled` — turns the plugin off entirely.
+  - `options.flashColor`, `options.flashDurationMs`, `options.scrollOffset`, `options.accordionAnimationMs` — see above.
+
+Exported from `payload-live-preview-inspector/client` (frontend + admin components):
+
+- `LivePreviewInspectorClient({ hoverColor?, targetOrigin? })` — mount once in your preview page/layout. `targetOrigin` pins the `postMessage` target to your admin panel's origin (e.g. `'https://cms.example.com'`); when omitted it is auto-detected (see Known limitations).
+- `inspectable(data, options?)` — wraps document data in a path-tracking proxy (see above). `options.enabled: false` turns the whole tree off for public pages (see Production / performance).
+- `pathOf(node, subPath?)` — returns the path attribute for a node obtained through `inspectable()`.
+- `LIVE_PREVIEW_PATH_ATTRIBUTE` — the raw attribute name, if you'd rather set it yourself.
+- `LIVE_PREVIEW_HOVER_CLASS_NAME` — stable, unscoped class name applied to the hovered element, so you can restyle the hover highlight with your own CSS instead of the shipped styles.
+- `LivePreviewInspectorListener` — the admin-side component (you shouldn't need to reference this directly; the plugin registers it for you, with your plugin options passed through as its props).
+
+## Known limitations
+
+- Fields that only render inside a relationship's edit drawer (not the top-level Edit view) aren't reachable — the click silently no-ops.
+- Multi-locale setups or fields duplicated inside drawers can get suffixed DOM ids (Payload's `generateFieldID`); the plain `field-<path>` lookup may occasionally miss in those edge cases.
+- The frontend's `postMessage` falls back to a `'*'` target origin if neither `window.location.ancestorOrigins` (unsupported in Firefox) nor `document.referrer` resolve an origin. The message payload is just a field-path string, so this is low-risk — but you can pin it explicitly via `<LivePreviewInspectorClient targetOrigin="https://cms.example.com" />`.
+- If a tagged Array/Blocks row is deleted between when the frontend was rendered and when you click it, its row id will no longer resolve — the click silently no-ops (same as any other unresolvable path).
+
+## Local development
+
+This repo's `dev/` folder is a full Payload app (SQLite, no external services needed) used to develop and manually test the plugin:
+
+```sh
+pnpm install
+pnpm dev
+```
+
+Log in at `http://localhost:3000/admin` with `dev@payloadcms.com` / `test`, open the seeded "Hello Live Preview" post, and try it on its Live Preview tab.
+
+```sh
+pnpm test:int   # vitest - unit tests for path resolution (src/) + plugin config injection (dev/)
+pnpm test:e2e   # playwright - full hover/click/scroll/flash flow
+```

@@ -43,6 +43,11 @@ next-env.d.ts
 
 /dev/media
 
+# local dev database
+/dev/*.db
+/dev/*.db-shm
+/dev/*.db-wal
+
 # Playwright
 /test-results/
 /playwright-report/
