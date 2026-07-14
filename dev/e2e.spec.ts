@@ -18,7 +18,15 @@ test('clicking a component in the live preview scrolls and highlights the matchi
 
   await page.goto('/admin/collections/posts')
   await page.click('.table tbody tr:first-child a')
-  await page.click('a:has-text("Live Preview")')
+
+  // Payload renders live preview as an inline toggle button (eye icon) in the
+  // document controls, not as a separate view tab/link. The button is in the
+  // DOM before React hydration finishes, so an early click can be swallowed -
+  // retry the click until the iframe actually appears.
+  await expect(async () => {
+    await page.click('#live-preview-toggler')
+    await expect(page.locator('#live-preview-iframe')).toBeVisible({ timeout: 2_000 })
+  }).toPass()
 
   const frame = page.frameLocator('#live-preview-iframe')
   const title = frame.locator('[data-payload-live-preview-path="title"]')

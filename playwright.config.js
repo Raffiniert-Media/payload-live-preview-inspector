@@ -14,8 +14,11 @@ import { defineConfig, devices } from '@playwright/test'
 export default defineConfig({
   testDir: './dev',
   testMatch: '**/e2e.spec.{ts,js}',
-  /* Run tests in files in parallel */
-  fullyParallel: true,
+  /*
+   * All tests share one `next dev` server and one SQLite database - parallel
+   * logins race on the DB write lock and flake. Run serially everywhere.
+   */
+  fullyParallel: false,
   /* Fail the build on CI if you accidentally left test.only in the source code. */
   forbidOnly: !!process.env.CI,
   /*
@@ -28,15 +31,19 @@ export default defineConfig({
   timeout: process.env.CI ? 90_000 : 30_000,
   /* Retry on CI only */
   retries: process.env.CI ? 2 : 0,
-  /* Opt out of parallel tests on CI. */
-  workers: process.env.CI ? 1 : undefined,
+  workers: 1,
   /* Reporter to use. See https://playwright.dev/docs/test-reporters */
   reporter: 'html',
   /* Shared settings for all the projects below. See https://playwright.dev/docs/api/class-testoptions. */
   projects: [
     {
       name: 'chromium',
-      use: { ...devices['Desktop Chrome'] },
+      use: {
+        ...devices['Desktop Chrome'],
+        // Locally, use the installed Google Chrome so no Playwright-managed
+        // browser download is needed. CI installs its own pinned chromium.
+        channel: process.env.CI ? undefined : 'chrome',
+      },
     },
   ],
   use: {
