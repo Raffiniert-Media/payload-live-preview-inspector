@@ -1,5 +1,5 @@
 {
-  "name": "payload-live-preview-inspector",
+  "name": "@raffiniert-media/payload-live-preview-inspector",
   "version": "1.0.0",
   "description": "Click a component in Payload's Live Preview iframe to scroll to and highlight the matching field in the admin panel.",
   "keywords": [
@@ -13,6 +13,14 @@
   ],
   "author": "Raffiniert Media AG",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Raffiniert-Media/payload-live-preview-inspector.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Raffiniert-Media/payload-live-preview-inspector/issues"
+  },
+  "homepage": "https://github.com/Raffiniert-Media/payload-live-preview-inspector#readme",
   "type": "module",
   "sideEffects": [
     "**/*.css"
@@ -107,6 +115,7 @@
   },
   "packageManager": "pnpm@10.17.1",
   "publishConfig": {
+    "access": "public",
     "exports": {
       ".": {
         "types": "./dist/index.d.ts",

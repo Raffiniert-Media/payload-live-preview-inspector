@@ -19,10 +19,10 @@
       "@payload-config": [
         "./payload.config.ts"
       ],
-      "payload-live-preview-inspector": [
+      "@raffiniert-media/payload-live-preview-inspector": [
         "../src/index.ts"
       ],
-      "payload-live-preview-inspector/client": [
+      "@raffiniert-media/payload-live-preview-inspector/client": [
         "../src/exports/client.ts"
       ]
     },

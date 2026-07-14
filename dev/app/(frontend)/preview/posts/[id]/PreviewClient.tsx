@@ -1,7 +1,7 @@
 'use client'
 
 import { useLivePreview } from '@payloadcms/live-preview-react'
-import { inspectable, LivePreviewInspectorClient, pathOf } from 'payload-live-preview-inspector/client'
+import { inspectable, LivePreviewInspectorClient, pathOf } from '@raffiniert-media/payload-live-preview-inspector/client'
 
 import type { Post } from '../../../../../payload-types.js'
 

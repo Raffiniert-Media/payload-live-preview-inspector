@@ -2,7 +2,7 @@ import { sqliteAdapter } from '@payloadcms/db-sqlite'
 import { lexicalEditor } from '@payloadcms/richtext-lexical'
 import path from 'path'
 import { buildConfig } from 'payload'
-import { payloadLivePreviewInspector } from 'payload-live-preview-inspector'
+import { payloadLivePreviewInspector } from '@raffiniert-media/payload-live-preview-inspector'
 import sharp from 'sharp'
 import { fileURLToPath } from 'url'
 

@@ -46,7 +46,7 @@ export const payloadLivePreviewInspector =
         flashDurationMs: pluginOptions.flashDurationMs,
         scrollOffset: pluginOptions.scrollOffset,
       },
-      path: 'payload-live-preview-inspector/client#LivePreviewInspectorListener' as const,
+      path: '@raffiniert-media/payload-live-preview-inspector/client#LivePreviewInspectorListener' as const,
     })
 
     if (pluginOptions.collections && config.collections) {
