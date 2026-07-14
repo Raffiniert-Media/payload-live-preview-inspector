@@ -14,10 +14,10 @@ Outside of an iframe (i.e. your frontend rendered directly, not inside Live Prev
 ## Installation
 
 ```sh
-pnpm add @raffiniert-media/payload-live-preview-inspector
+pnpm add @raffiniert-media-ag/payload-live-preview-inspector
 ```
 
-Requires `payload` and `@payloadcms/ui` in the Payload project (peer dependencies), and `react`/`react-dom` 19 wherever the components are used. `@payloadcms/ui` and `payload` are optional peers — a frontend-only project that only imports from `@raffiniert-media/payload-live-preview-inspector/client` doesn't need either installed.
+Requires `payload` and `@payloadcms/ui` in the Payload project (peer dependencies), and `react`/`react-dom` 19 wherever the components are used. `@payloadcms/ui` and `payload` are optional peers — a frontend-only project that only imports from `@raffiniert-media-ag/payload-live-preview-inspector/client` doesn't need either installed.
 
 ## Setup
 
@@ -26,7 +26,7 @@ Requires `payload` and `@payloadcms/ui` in the Payload project (peer dependencie
 Add the plugin and list the collections/globals that should get click-to-scroll. Each of these must already have Live Preview enabled (`admin.livePreview.collections`/`.globals`):
 
 ```ts
-import { payloadLivePreviewInspector } from '@raffiniert-media/payload-live-preview-inspector'
+import { payloadLivePreviewInspector } from '@raffiniert-media-ag/payload-live-preview-inspector'
 
 export default buildConfig({
   admin: {
@@ -65,7 +65,7 @@ payloadLivePreviewInspector({
 Mount `LivePreviewInspectorClient` once, near the root of whatever page renders inside the Live Preview iframe:
 
 ```tsx
-import { LivePreviewInspectorClient } from '@raffiniert-media/payload-live-preview-inspector/client'
+import { LivePreviewInspectorClient } from '@raffiniert-media-ag/payload-live-preview-inspector/client'
 
 export default function PreviewPage() {
   return (
@@ -80,7 +80,7 @@ export default function PreviewPage() {
 Then tag every element that should be clickable. The recommended way is `inspectable()` + `pathOf()`: wrap your document data once, and every nested object/array element you access knows its own field path — array/blocks rows are automatically addressed by their stable `id`, so the mapping survives reordering, inserting, or removing rows. You never have to think about paths, indexes, or row ids:
 
 ```tsx
-import { inspectable, pathOf } from '@raffiniert-media/payload-live-preview-inspector/client'
+import { inspectable, pathOf } from '@raffiniert-media-ag/payload-live-preview-inspector/client'
 
 const page = inspectable(data)
 
@@ -121,14 +121,14 @@ No conditionals needed anywhere else — your components stay identical for both
 
 ## API reference
 
-Exported from `@raffiniert-media/payload-live-preview-inspector` (admin/config side):
+Exported from `@raffiniert-media-ag/payload-live-preview-inspector` (admin/config side):
 
 - `payloadLivePreviewInspector(options)` — the plugin.
   - `options.collections: Partial<Record<CollectionSlug, true>>` / `options.globals: Partial<Record<GlobalSlug, true>>` — which collections/globals get the listener.
   - `options.disabled` — turns the plugin off entirely.
   - `options.flashColor`, `options.flashDurationMs`, `options.scrollOffset`, `options.accordionAnimationMs` — see above.
 
-Exported from `@raffiniert-media/payload-live-preview-inspector/client` (frontend + admin components):
+Exported from `@raffiniert-media-ag/payload-live-preview-inspector/client` (frontend + admin components):
 
 - `LivePreviewInspectorClient({ hoverColor?, targetOrigin? })` — mount once in your preview page/layout. `targetOrigin` pins the `postMessage` target to your admin panel's origin (e.g. `'https://cms.example.com'`); when omitted it is auto-detected (see Known limitations).
 - `inspectable(data, options?)` — wraps document data in a path-tracking proxy (see above). `options.enabled: false` turns the whole tree off for public pages (see Production / performance).
