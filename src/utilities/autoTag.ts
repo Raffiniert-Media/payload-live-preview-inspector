@@ -135,24 +135,44 @@ export const applyValueMatching = (root: Document | Element, leaves: DocumentLea
 }
 
 /**
- * The topmost tagged element at a viewport point, looking *through* elements
- * that merely cover it - e.g. a full-card overlay link (`<a class="absolute
- * inset-0">`) that swallows every pointer event, so the tagged heading/text
- * beneath it never becomes an event target. `elementsFromPoint` returns the
- * whole stack at the point (topmost first), obscured elements included.
+ * The most specific tagged element at a viewport point, looking *through*
+ * elements that merely cover it - e.g. a full-card overlay link (`<a
+ * class="absolute inset-0">`) that swallows every pointer event, so the
+ * tagged heading/text beneath it never becomes an event target.
+ * `elementsFromPoint` returns the whole stack at the point (topmost first),
+ * obscured elements included.
+ *
+ * "Most specific" = smallest bounding box, not topmost: the overlay itself
+ * is often tagged too (its `aria-label` carries the link label's stega
+ * path), and since it spans the whole card, topmost-wins would resolve
+ * every point on the card to the link. The card-sized overlay only wins
+ * where no smaller tagged element sits underneath. Ties (overlay vs. the
+ * equally-sized card container) go to the element lower in the stack - the
+ * container, not the cover.
  */
 export const findTaggedElementAt = (doc: Document, x: number, y: number): HTMLElement | null => {
   if (typeof doc.elementsFromPoint !== 'function') {
     return null
   }
 
+  let best: HTMLElement | null = null
+  let bestArea = Infinity
+
   for (const el of doc.elementsFromPoint(x, y)) {
-    if (el instanceof HTMLElement && el.hasAttribute(LIVE_PREVIEW_PATH_ATTRIBUTE)) {
-      return el
+    if (!(el instanceof HTMLElement) || !el.hasAttribute(LIVE_PREVIEW_PATH_ATTRIBUTE)) {
+      continue
+    }
+    const rect = el.getBoundingClientRect()
+    const area = rect.width * rect.height
+    // `<=`: the stack is topmost-first, so on equal area the later
+    // (deeper) element wins.
+    if (area <= bestArea) {
+      best = el
+      bestArea = area
     }
   }
 
-  return null
+  return best
 }
 
 const commonAncestor = (els: Element[]): Element | null => {

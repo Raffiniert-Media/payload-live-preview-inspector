@@ -176,6 +176,41 @@ describe('inspectable / pathOf', () => {
       expect(pathOf(page.layout[0], 'heading')).toEqual(attr('layout.$a.heading'))
     })
 
+    it('force-encodes attribute-only display text (alt, ariaLabel, placeholder) even when single-word', () => {
+      const page = inspectable(
+        {
+          ariaLabel: 'Suche',
+          logo: { alt: 'Acme', url: 'https://example.com/api/media/file/acme-logo.svg' },
+          placeholder: 'Name',
+        },
+        { stega: true },
+      )
+
+      expect(findStegaPaths(page.logo.alt)).toEqual(['logo.alt'])
+      expect(stegaClean(page.logo.alt)).toBe('Acme')
+      expect(findStegaPaths(page.ariaLabel)).toEqual(['ariaLabel'])
+      expect(findStegaPaths(page.placeholder)).toEqual(['placeholder'])
+      // Shape-based skips still protect URLs, even under a force key.
+      expect(page.logo.url).toBe('https://example.com/api/media/file/acme-logo.svg')
+      const urlAlt = inspectable({ alt: '/media/acme-logo.svg' }, { stega: true })
+      expect(urlAlt.alt).toBe('/media/acme-logo.svg')
+    })
+
+    it('supports custom encodeKeys for known single-word display fields', () => {
+      const page = inspectable(
+        { buttonLabel: 'Kontakt', variant: 'default' },
+        { stega: { encodeKeys: ['buttonLabel'] } },
+      )
+
+      expect(findStegaPaths(page.buttonLabel)).toEqual(['buttonLabel'])
+      expect(page.variant).toBe('default')
+    })
+
+    it('lets skipKeys win over encodeKeys', () => {
+      const page = inspectable({ alt: 'Acme' }, { stega: { skipKeys: ['alt'] } })
+      expect(page.alt).toBe('Acme')
+    })
+
     it('supports extra skipKeys for prose-shaped but programmatic fields', () => {
       const page = inspectable(
         { cssClasses: 'btn btn-primary is-large', teaser: 'Read the whole story' },

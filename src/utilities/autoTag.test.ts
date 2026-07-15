@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { applyValueMatching, findTaggedElementAt, inferBlockContainers, scanStega } from './autoTag.js'
 import { LIVE_PREVIEW_AUTO_ATTRIBUTE, LIVE_PREVIEW_PATH_ATTRIBUTE } from './pathAttribute.js'
@@ -114,16 +114,21 @@ describe('applyValueMatching', () => {
 
 describe('findTaggedElementAt', () => {
   // happy-dom has no layout engine (and no elementsFromPoint) - stub the
-  // stack a real browser would return at the point, topmost first.
+  // stack a real browser would return at the point (topmost first) and the
+  // elements' box sizes.
   const stubElementsFromPoint = (stack: Element[]) => {
     ;(document as unknown as Record<string, unknown>).elementsFromPoint = () => stack
+  }
+
+  const stubSize = (el: Element, width: number, height: number) => {
+    vi.spyOn(el, 'getBoundingClientRect').mockReturnValue({ height, width } as DOMRect)
   }
 
   afterEach(() => {
     delete (document as unknown as Record<string, unknown>).elementsFromPoint
   })
 
-  it('returns the topmost tagged element in the stack, looking through untagged overlays', () => {
+  it('returns the smallest tagged element in the stack, looking through untagged overlays', () => {
     document.body.innerHTML = `
       <div id="card" ${LIVE_PREVIEW_PATH_ATTRIBUTE}="layout.$a">
         <a id="overlay" href="/x"></a>
@@ -132,6 +137,8 @@ describe('findTaggedElementAt', () => {
     const overlay = document.getElementById('overlay')!
     const heading = document.getElementById('heading')!
     const card = document.getElementById('card')!
+    stubSize(heading, 200, 30)
+    stubSize(card, 400, 300)
 
     // The overlay covers the heading - it comes first in the stack.
     stubElementsFromPoint([overlay, heading, card, document.body])
@@ -139,15 +146,54 @@ describe('findTaggedElementAt', () => {
     expect(findTaggedElementAt(document, 10, 10)?.id).toBe('heading')
   })
 
-  it('falls back to the container when the point is over untagged padding', () => {
+  it('beats a TAGGED card-sized overlay with the smaller element beneath it', () => {
+    // The real full-card-link case: the overlay itself is tagged (its
+    // aria-label carries the link label's stega path) and spans the whole
+    // card - it must not win over the heading under the pointer.
     document.body.innerHTML = `
-      <div id="card" ${LIVE_PREVIEW_PATH_ATTRIBUTE}="layout.$a"><a id="overlay" href="/x"></a></div>`
+      <div id="card" ${LIVE_PREVIEW_PATH_ATTRIBUTE}="layout.$a">
+        <a id="overlay" href="/x" ${LIVE_PREVIEW_PATH_ATTRIBUTE}="layout.$a.link.label"></a>
+        <h3 id="heading" ${LIVE_PREVIEW_PATH_ATTRIBUTE}="layout.$a.title">x</h3>
+      </div>`
+    const overlay = document.getElementById('overlay')!
+    const heading = document.getElementById('heading')!
+    const card = document.getElementById('card')!
+    stubSize(overlay, 400, 300)
+    stubSize(heading, 200, 30)
+    stubSize(card, 400, 300)
+
+    stubElementsFromPoint([overlay, heading, card, document.body])
+
+    expect(findTaggedElementAt(document, 10, 10)?.id).toBe('heading')
+  })
+
+  it('resolves equal-sized overlay vs. container to the container (lower in the stack)', () => {
+    // Pointer over card padding: no small element beneath - the tagged
+    // overlay and the tagged card container have the same box. The
+    // container wins, not the cover.
+    document.body.innerHTML = `
+      <div id="card" ${LIVE_PREVIEW_PATH_ATTRIBUTE}="layout.$a">
+        <a id="overlay" href="/x" ${LIVE_PREVIEW_PATH_ATTRIBUTE}="layout.$a.link.label"></a>
+      </div>`
     const overlay = document.getElementById('overlay')!
     const card = document.getElementById('card')!
+    stubSize(overlay, 400, 300)
+    stubSize(card, 400, 300)
 
     stubElementsFromPoint([overlay, card, document.body])
 
     expect(findTaggedElementAt(document, 10, 10)?.id).toBe('card')
+  })
+
+  it('still returns a tagged overlay when nothing else is tagged', () => {
+    document.body.innerHTML = `
+      <div id="card"><a id="overlay" href="/x" ${LIVE_PREVIEW_PATH_ATTRIBUTE}="layout.$a.link.label"></a></div>`
+    const overlay = document.getElementById('overlay')!
+    stubSize(overlay, 400, 300)
+
+    stubElementsFromPoint([overlay, document.getElementById('card')!, document.body])
+
+    expect(findTaggedElementAt(document, 10, 10)?.id).toBe('overlay')
   })
 
   it('returns null when nothing in the stack is tagged', () => {

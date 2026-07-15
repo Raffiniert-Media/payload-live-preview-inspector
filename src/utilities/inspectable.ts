@@ -19,6 +19,19 @@ export const SERIALIZED_PATH_KEY = '__payloadLivePreviewPath'
 const STEGA_SKIP_KEYS = ['blockName', 'blockType', 'id', 'slug']
 
 /**
+ * Display-text keys that are encoded even when single-word (the two-word
+ * prose rule would skip them). The principle: these values only ever land in
+ * HTML *attributes* (`alt`, `aria-label`, `placeholder`), which the
+ * value-matching layer (text nodes only) can't reach - so without stega they
+ * would be untaggable - and consuming code practically never compares them.
+ * Text-node display fields (`label`, `title`, `heading`, ...) are NOT forced:
+ * they're already double-covered by the two-word rule and value matching,
+ * and comparisons against them do happen (`tabs.find(t => t.label === x)`) -
+ * opt those in per project via `encodeKeys` when needed.
+ */
+const STEGA_FORCE_KEYS = ['alt', 'ariaLabel', 'placeholder']
+
+/**
  * The load-bearing default: only strings with at least two
  * whitespace-separated words are encoded. Single-token values (`'default'`,
  * `'topRight'`, `'primary-dark'`) are exactly what consuming code uses as
@@ -32,6 +45,14 @@ const STEGA_SKIP_KEYS = ['blockName', 'blockType', 'id', 'slug']
 const looksLikeProse = (value: string): boolean => /\S\s+\S/.test(value)
 
 export type StegaOptions = {
+  /**
+   * Field names that are always encoded, even when their value is a single
+   * word (which the default two-word prose rule would skip) - for fields you
+   * *know* are display text, e.g. a button's `label` or a badge's `text`.
+   * `alt` is built in. Shape-based skips (URLs, emails, dates, numbers, ...)
+   * still apply, and `skipKeys` wins over this list.
+   */
+  encodeKeys?: string[]
   /**
    * The final say per string, replacing the default decision. Receives the
    * default (`defaultEncode`) so you can start from it - e.g. force-encode a
@@ -55,6 +76,7 @@ export type StegaOptions = {
 
 type ResolvedStegaOptions = {
   filter: StegaOptions['filter']
+  forceKeys: Set<string>
   skipKeys: Set<string>
 }
 
@@ -101,7 +123,9 @@ const createNode = (value: object, path: null | string, options: NodeOptions): o
         if (options.stega && path !== null && typeof result === 'string' && !Array.isArray(target)) {
           const fieldPath = path ? `${path}.${prop}` : prop
           const defaultEncode =
-            !options.stega.skipKeys.has(prop) && !shouldSkipStega(result) && looksLikeProse(result)
+            !options.stega.skipKeys.has(prop) &&
+            !shouldSkipStega(result) &&
+            (options.stega.forceKeys.has(prop) || looksLikeProse(result))
           const encode = options.stega.filter
             ? options.stega.filter({ defaultEncode, key: prop, path: fieldPath, value: result })
             : defaultEncode
@@ -238,6 +262,7 @@ export const inspectable = <T>(data: T, options?: InspectableOptions): T => {
     stega: stega
       ? {
           filter: typeof stega === 'object' ? stega.filter : undefined,
+          forceKeys: new Set([...(typeof stega === 'object' ? (stega.encodeKeys ?? []) : []), ...STEGA_FORCE_KEYS]),
           skipKeys: new Set([...(typeof stega === 'object' ? (stega.skipKeys ?? []) : []), ...STEGA_SKIP_KEYS]),
         }
       : false,

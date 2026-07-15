@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.4.1
+
+- Fixed: single-word image alt texts ("Acme") were never stega-encoded because of 1.3.1's two-word prose rule, so logo/image elements whose only taggable string is their `alt` stayed unclickable - while multi-word alts ("Acme Industries") worked. Attribute-only display text is now **force-encoded** regardless of word count: the built-in keys are `alt`, `ariaLabel`, and `placeholder` - values that only ever land in HTML attributes, which the value-matching layer (text nodes only) can't reach, and which consuming code practically never compares (shape-based skips - URLs, dates, etc. - still apply).
+- New: `stega.encodeKeys` - declare your own always-encode display-text fields (e.g. a button's `label`), symmetric to `skipKeys` (which wins on conflict).
+- Fixed: on cards with a full-card overlay link, hover/click always resolved to the link label ("read more") or the card container instead of the heading/text under the pointer. Cause: the overlay `<a>` itself gets stega-tagged through its `aria-label`, spans the whole card, and 1.4.0's point resolution picked the *topmost* tagged element - the overlay won everywhere. Point resolution now picks the **smallest** tagged element at the point (the visually most specific target); ties - the card-sized overlay vs. the equally-sized card container - go to the element lower in the stack, so padding clicks land on the container, not the cover. A tagged overlay still wins where nothing more specific is beneath it.
+
 ## 1.4.0
 
 Three targeting fixes, all reported from real consuming sites:

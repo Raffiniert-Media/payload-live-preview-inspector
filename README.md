@@ -6,7 +6,7 @@ This plugin does **not** set up Live Preview itself. It adds the click-to-scroll
 
 ## How it works
 
-- **In the iframe (your frontend):** `LivePreviewInspectorClient` tracks the pointer and highlights the tagged element under it; click posts a message to the parent window with that element's path. Targeting is point-based (`elementsFromPoint`), so tagged text stays hoverable/clickable even beneath a full-card overlay link (`<a class="absolute inset-0">`) that swallows every pointer event. It also blocks link navigation by default (see [Link interception](#link-interception) below).
+- **In the iframe (your frontend):** `LivePreviewInspectorClient` tracks the pointer and highlights the tagged element under it; click posts a message to the parent window with that element's path. Targeting is point-based (`elementsFromPoint`) and picks the *smallest* tagged element at the point, so tagged text stays hoverable/clickable even beneath a full-card overlay link (`<a class="absolute inset-0">`) that swallows every pointer event — including when the overlay itself is tagged via its `aria-label`. It also blocks link navigation by default (see [Link interception](#link-interception) below).
 - **In the admin panel:** `LivePreviewInspectorListener` is auto-registered by the plugin into the Edit view of every collection/global you enable it for. It listens for that message, resolves the field path (translating any Array/Blocks row ids to their current index via the live form state), switches to the tab containing the field if needed (Payload unmounts inactive tab panels), expands any collapsed accordions in the way, scrolls to the field, and - once the scroll actually finishes moving - flashes and focuses it. It also shows a small hint next to the document controls while you're on the Live Preview tab.
 
 Elements get their path attribute through three layers, from most to least precise — explicit tagging always wins, and each layer only fills in what the previous one didn't cover (see [Tagging: three layers](#tagging-three-layers)):
@@ -148,17 +148,21 @@ Every encoded string read from the proxy carries its field path as a run of invi
 
 Also always skipped: the keys `id`, `blockType`, `blockName`, `slug`; values shaped like URLs, relative paths, emails, ISO dates, numbers, hex colors, or uuids; and strings read out of arrays (`hasMany` values are compared with `includes()`).
 
+One built-in exception to the two-word rule: **`alt`, `ariaLabel`, and `placeholder`** are always encoded (shape skips still apply). These values only ever land in HTML *attributes*, which the value-matching layer (text nodes only) can't reach — without stega, an image whose only string is a single-word alt ("Acme") would be untaggable — and consuming code practically never compares them. Text-node display fields (`label`, `title`, `heading`, …) are deliberately *not* forced: single-word instances are covered by value matching, and comparisons against them do happen (`tabs.find(t => t.label === x)`); opt them in via `encodeKeys` where you know they're pure display text.
+
 For the cases the defaults can't know about, pass an options object instead of `true`:
 
 ```ts
 const page = inspectable(data, {
   stega: {
+    // always encode these fields, even single-word - for fields you KNOW
+    // are display text (joins the built-in 'alt'):
+    encodeKeys: ['buttonLabel', 'badge'],
     // never encode these fields, even if their values look like prose
     // (e.g. a field storing a space-separated CSS class list):
     skipKeys: ['cssClasses'],
     // the final say per string - receives the default decision:
-    filter: ({ defaultEncode, key, path, value }) =>
-      key === 'buttonLabel' ? true : defaultEncode, // force-encode a known-rendered single-word field
+    filter: ({ defaultEncode, key, path, value }) => defaultEncode,
   },
 })
 ```
@@ -242,7 +246,7 @@ Exported from `@raffiniert-media-ag/payload-live-preview-inspector` (admin/confi
 
 Exported from `@raffiniert-media-ag/payload-live-preview-inspector/path` (pure data helpers — safe to import anywhere, zero client-bundle impact; all of these are also re-exported from `/client` for convenience):
 
-- `inspectable(data, options?)` — wraps document data in a path-tracking proxy (see above). `options.enabled: false` turns the whole tree off for public pages (see Production / performance); `options.stega: true | { skipKeys?, filter? }` encodes paths into prose-shaped string values (see [Tagging](#tagging-three-layers) for the two-word rule and the fine-tuning options); `options.serializable: true` embeds paths as serialization-surviving marker keys (see [Server/client component boundaries](#serverclient-component-boundaries)).
+- `inspectable(data, options?)` — wraps document data in a path-tracking proxy (see above). `options.enabled: false` turns the whole tree off for public pages (see Production / performance); `options.stega: true | { encodeKeys?, skipKeys?, filter? }` encodes paths into prose-shaped string values (see [Tagging](#tagging-three-layers) for the two-word rule and the fine-tuning options); `options.serializable: true` embeds paths as serialization-surviving marker keys (see [Server/client component boundaries](#serverclient-component-boundaries)).
 - `pathOf(node, subPath?)` — returns the path attribute for a node obtained through `inspectable()` (directly, or across a JSON boundary with `serializable: true`).
 - `stegaClean(value)` — strips stega-encoded blocks from a string, or deeply from every string in a plain object/array tree. Use wherever you need a raw value.
 - `LIVE_PREVIEW_PATH_ATTRIBUTE` — the raw attribute name, if you'd rather set it yourself.

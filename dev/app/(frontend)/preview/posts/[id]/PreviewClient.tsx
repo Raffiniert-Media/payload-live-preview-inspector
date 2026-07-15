@@ -106,8 +106,11 @@ export const PreviewClient = ({ initialData }: Props) => {
             <div key={block.id ?? index} style={{ margin: '2rem 0' }}>
               <Layer>auto: stega text + inferred container — no pathOf(), behind an overlay link</Layer>
               <section data-testid="content-section" style={{ position: 'relative' }}>
+                {/* aria-label rendered through the proxy: the overlay itself gets
+                    stega-tagged (like a real card's link label) - the smaller <p>
+                    beneath it must still win the point resolution. */}
                 <a
-                  aria-label="Mehr erfahren"
+                  aria-label={block.text ?? undefined}
                   data-testid="card-overlay-link"
                   href="/should-not-navigate-either"
                   style={{ inset: 0, position: 'absolute', zIndex: 1 }}
