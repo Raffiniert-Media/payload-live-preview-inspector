@@ -98,11 +98,20 @@ export const PreviewClient = ({ initialData }: Props) => {
         if (block.blockType === 'contentBlock') {
           // Deliberately NOT tagged with pathOf(): the <p>'s text carries a
           // stega-encoded path (auto-tagged by the scanner), and the <section>
-          // is then inferred as the block's container from that leaf.
+          // is then inferred as the block's container from that leaf. The
+          // absolutely-positioned overlay link (the full-card-link pattern)
+          // swallows every pointer event - hover/click must resolve the
+          // tagged <p> beneath it via elementsFromPoint.
           return (
             <div key={block.id ?? index} style={{ margin: '2rem 0' }}>
-              <Layer>auto: stega text + inferred container — no pathOf() anywhere</Layer>
-              <section data-testid="content-section">
+              <Layer>auto: stega text + inferred container — no pathOf(), behind an overlay link</Layer>
+              <section data-testid="content-section" style={{ position: 'relative' }}>
+                <a
+                  aria-label="Mehr erfahren"
+                  data-testid="card-overlay-link"
+                  href="/should-not-navigate-either"
+                  style={{ inset: 0, position: 'absolute', zIndex: 1 }}
+                />
                 <p data-testid="stega-text">{block.text}</p>
               </section>
             </div>
@@ -111,10 +120,19 @@ export const PreviewClient = ({ initialData }: Props) => {
 
         return null
       })}
+      {/* The metaNote field lives in the admin form's "Meta" tab - clicking
+          this exercises the listener's tab sweep (Payload unmounts inactive
+          tab panels, so the field isn't in the DOM until its tab is active). */}
+      <div style={{ marginTop: '4rem' }}>
+        <Layer>manual, but its field is in the admin's Meta tab</Layer>
+        <p data-testid="meta-note" {...pathOf(page, 'metaNote')}>
+          {page.metaNote ?? 'Meta note'}
+        </p>
+      </div>
       {/* Rendered from the RAW (unproxied) data - no pathOf, no stega. Value
           matching asks the admin panel for the field values and tags this
           element because its whole text equals the `title` field's value. */}
-      <div style={{ marginTop: '4rem' }}>
+      <div style={{ marginTop: '2rem' }}>
         <Layer>auto: value matching — raw data, no proxy, no pathOf()</Layer>
         <footer data-testid="match-title" style={{ color: '#888' }}>
           {data.title}

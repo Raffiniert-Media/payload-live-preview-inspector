@@ -134,6 +134,27 @@ export const applyValueMatching = (root: Document | Element, leaves: DocumentLea
   })
 }
 
+/**
+ * The topmost tagged element at a viewport point, looking *through* elements
+ * that merely cover it - e.g. a full-card overlay link (`<a class="absolute
+ * inset-0">`) that swallows every pointer event, so the tagged heading/text
+ * beneath it never becomes an event target. `elementsFromPoint` returns the
+ * whole stack at the point (topmost first), obscured elements included.
+ */
+export const findTaggedElementAt = (doc: Document, x: number, y: number): HTMLElement | null => {
+  if (typeof doc.elementsFromPoint !== 'function') {
+    return null
+  }
+
+  for (const el of doc.elementsFromPoint(x, y)) {
+    if (el instanceof HTMLElement && el.hasAttribute(LIVE_PREVIEW_PATH_ATTRIBUTE)) {
+      return el
+    }
+  }
+
+  return null
+}
+
 const commonAncestor = (els: Element[]): Element | null => {
   let ancestor: Element | null = els[0]
 

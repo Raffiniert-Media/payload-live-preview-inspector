@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.4.0
+
+Three targeting fixes, all reported from real consuming sites:
+
+- **Admin: tab switching.** Payload unmounts inactive tab panels, so clicking an element whose field lives in another tab used to scroll to the nearest rendered ancestor (the "scrolls to the parent instead of the field" symptom). The listener now checks whether the target's actual form field is in the DOM and, if not, sweeps through the form's tab buttons until it appears (nested tabs included), then scrolls/flashes as usual. When no tab contains it, the originally active tabs are restored and the old prefix fallback applies.
+- **Admin: precise field anchoring via form state.** Before resolving, the clicked path is checked against the live form state to find its owning field (a stega path pointing inside a rich-text value collapses to the rich-text field itself). This prevents needless tab sweeps and makes the "is the real field rendered?" check exact.
+- **Client: targeting through overlay links.** The full-card-link pattern (`<a class="absolute inset-0">` covering a card) swallowed every pointer event, so the tagged heading/text beneath it was neither hoverable nor clickable. Hover and click now resolve the topmost *tagged* element at the pointer position via `elementsFromPoint`, looking through untagged overlays; hover tracking moved from `mouseover`/`mouseout` to a frame-throttled `mousemove` so the highlight follows the pointer beneath an overlay (where the event target never changes).
+
 ## 1.3.1
 
 Fixes a production-breaking flaw in stega mode: programmatic string values — Payload select/radio values, CSS-class-map keys, enum discriminants (e.g. `iconColorState: 'default'`) — were stega-encoded, so object-key lookups and strict comparisons in consuming code silently failed (`iconColorStates[value]` → `undefined` → TypeError). The hardcoded 4-key skip-list and shape heuristics couldn't catch plain words like `'default'`.

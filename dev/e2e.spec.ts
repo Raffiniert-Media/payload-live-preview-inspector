@@ -80,11 +80,31 @@ test('stega: auto-tags text rendered without pathOf and scrolls to its field on 
   await expect(text).toHaveAttribute('data-payload-live-preview-path', /^layout\.\$.+\.text$/)
   await expect(text).toHaveAttribute('data-payload-live-preview-auto', 'stega')
 
-  await text.click()
+  // The card is covered by an absolutely-positioned overlay link (the
+  // full-card-link pattern), so every pointer event targets the overlay -
+  // the click must resolve the tagged <p> beneath it via elementsFromPoint
+  // (and not navigate, thanks to disableLinks).
+  await frame.locator('[data-testid="card-overlay-link"]').click()
 
   const textField = page.locator('#field-layout__1__text')
   await expect(textField).toBeInViewport()
   await expect(textField).toHaveClass(/flash/)
+})
+
+test('switches to the admin tab containing the clicked field', async ({ page }) => {
+  await login(page)
+
+  const frame = await openLivePreview(page)
+
+  // The Content tab is active by default; metaNote's field only exists in
+  // the DOM once the listener sweeps to the Meta tab.
+  await expect(page.locator('#field-metaNote')).toHaveCount(0)
+
+  await frame.locator('[data-testid="meta-note"]').click()
+
+  const metaField = page.locator('#field-metaNote')
+  await expect(metaField).toBeInViewport()
+  await expect(metaField).toHaveClass(/flash/)
 })
 
 test('container inference: tags the content block section from its stega leaf', async ({ page }) => {

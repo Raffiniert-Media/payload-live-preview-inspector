@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
-import { beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { applyValueMatching, inferBlockContainers, scanStega } from './autoTag.js'
+import { applyValueMatching, findTaggedElementAt, inferBlockContainers, scanStega } from './autoTag.js'
 import { LIVE_PREVIEW_AUTO_ATTRIBUTE, LIVE_PREVIEW_PATH_ATTRIBUTE } from './pathAttribute.js'
 import { encodeStegaPath } from './stega.js'
 
@@ -109,6 +109,57 @@ describe('applyValueMatching', () => {
 
     expect(pathAttr(document.getElementById('a'))).toBe('title')
     expect(pathAttr(document.getElementById('b'))).toBe('title')
+  })
+})
+
+describe('findTaggedElementAt', () => {
+  // happy-dom has no layout engine (and no elementsFromPoint) - stub the
+  // stack a real browser would return at the point, topmost first.
+  const stubElementsFromPoint = (stack: Element[]) => {
+    ;(document as unknown as Record<string, unknown>).elementsFromPoint = () => stack
+  }
+
+  afterEach(() => {
+    delete (document as unknown as Record<string, unknown>).elementsFromPoint
+  })
+
+  it('returns the topmost tagged element in the stack, looking through untagged overlays', () => {
+    document.body.innerHTML = `
+      <div id="card" ${LIVE_PREVIEW_PATH_ATTRIBUTE}="layout.$a">
+        <a id="overlay" href="/x"></a>
+        <h3 id="heading" ${LIVE_PREVIEW_PATH_ATTRIBUTE}="layout.$a.heading">x</h3>
+      </div>`
+    const overlay = document.getElementById('overlay')!
+    const heading = document.getElementById('heading')!
+    const card = document.getElementById('card')!
+
+    // The overlay covers the heading - it comes first in the stack.
+    stubElementsFromPoint([overlay, heading, card, document.body])
+
+    expect(findTaggedElementAt(document, 10, 10)?.id).toBe('heading')
+  })
+
+  it('falls back to the container when the point is over untagged padding', () => {
+    document.body.innerHTML = `
+      <div id="card" ${LIVE_PREVIEW_PATH_ATTRIBUTE}="layout.$a"><a id="overlay" href="/x"></a></div>`
+    const overlay = document.getElementById('overlay')!
+    const card = document.getElementById('card')!
+
+    stubElementsFromPoint([overlay, card, document.body])
+
+    expect(findTaggedElementAt(document, 10, 10)?.id).toBe('card')
+  })
+
+  it('returns null when nothing in the stack is tagged', () => {
+    document.body.innerHTML = '<p id="plain">x</p>'
+    stubElementsFromPoint([document.getElementById('plain')!, document.body])
+
+    expect(findTaggedElementAt(document, 10, 10)).toBeNull()
+  })
+
+  it('returns null when elementsFromPoint is unavailable', () => {
+    const doc = { elementsFromPoint: undefined } as unknown as Document
+    expect(findTaggedElementAt(doc, 10, 10)).toBeNull()
   })
 })
 

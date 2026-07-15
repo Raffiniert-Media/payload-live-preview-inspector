@@ -6,8 +6,8 @@ This plugin does **not** set up Live Preview itself. It adds the click-to-scroll
 
 ## How it works
 
-- **In the iframe (your frontend):** `LivePreviewInspectorClient` listens for hover/click on any element carrying a `data-payload-live-preview-path` attribute. Hover highlights the element locally; click posts a message to the parent window with that path. It also blocks link navigation by default (see [Link interception](#link-interception) below).
-- **In the admin panel:** `LivePreviewInspectorListener` is auto-registered by the plugin into the Edit view of every collection/global you enable it for. It listens for that message, resolves the field path (translating any Array/Blocks row ids to their current index via the live form state), expands any collapsed accordions in the way, scrolls to the field, and - once the scroll actually finishes moving - flashes and focuses it. It also shows a small hint next to the document controls while you're on the Live Preview tab.
+- **In the iframe (your frontend):** `LivePreviewInspectorClient` tracks the pointer and highlights the tagged element under it; click posts a message to the parent window with that element's path. Targeting is point-based (`elementsFromPoint`), so tagged text stays hoverable/clickable even beneath a full-card overlay link (`<a class="absolute inset-0">`) that swallows every pointer event. It also blocks link navigation by default (see [Link interception](#link-interception) below).
+- **In the admin panel:** `LivePreviewInspectorListener` is auto-registered by the plugin into the Edit view of every collection/global you enable it for. It listens for that message, resolves the field path (translating any Array/Blocks row ids to their current index via the live form state), switches to the tab containing the field if needed (Payload unmounts inactive tab panels), expands any collapsed accordions in the way, scrolls to the field, and - once the scroll actually finishes moving - flashes and focuses it. It also shows a small hint next to the document controls while you're on the Live Preview tab.
 
 Elements get their path attribute through three layers, from most to least precise — explicit tagging always wins, and each layer only fills in what the previous one didn't cover (see [Tagging: three layers](#tagging-three-layers)):
 
@@ -261,6 +261,7 @@ Exported from `@raffiniert-media-ag/payload-live-preview-inspector/listener` (ad
 ## Known limitations
 
 - Fields that only render inside a relationship's edit drawer (not the top-level Edit view) aren't reachable — the click silently no-ops.
+- The tab sweep clicks through the form's tabs to find an unmounted field, which briefly flips tabs while searching (originals are restored when nothing is found). A path that resolves to no real form field falls back to its nearest rendered ancestor, as before.
 - Multi-locale setups or fields duplicated inside drawers can get suffixed DOM ids (Payload's `generateFieldID`); the plain `field-<path>` lookup may occasionally miss in those edge cases.
 - The frontend's `postMessage` falls back to a `'*'` target origin if neither `window.location.ancestorOrigins` (unsupported in Firefox) nor `document.referrer` resolve an origin. The message payload is just a field-path string, so this is low-risk — but you can pin it explicitly via `<LivePreviewInspectorClient targetOrigin="https://cms.example.com" />`.
 - If a tagged Array/Blocks row is deleted between when the frontend was rendered and when you click it, its row id will no longer resolve — the click silently no-ops (same as any other unresolvable path).

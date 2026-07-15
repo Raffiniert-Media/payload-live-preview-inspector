@@ -12,9 +12,12 @@ import {
   collectLeafValues,
   DEFAULT_COLLAPSIBLE_ANIMATION_MS,
   expandCollapsedAncestors,
+  fieldPathFromFormState,
   focusElement,
+  resolveExactFieldElement,
   resolveFieldElement,
   resolveRowIDs,
+  revealTabForElement,
   scrollToElement,
   flashElement as sharedFlashElement,
   waitForElementLayout,
@@ -90,7 +93,8 @@ export const LivePreviewInspectorListener: React.FC<LivePreviewInspectorListener
         return
       }
 
-      const resolvedPath = resolveRowIDs(data.path, getFieldsRef.current())
+      const formState = getFieldsRef.current()
+      const resolvedPath = resolveRowIDs(data.path, formState)
 
       if (!resolvedPath) {
         if (process.env.NODE_ENV !== 'production') {
@@ -100,20 +104,37 @@ export const LivePreviewInspectorListener: React.FC<LivePreviewInspectorListener
         return
       }
 
-      const el = resolveFieldElement(resolvedPath)
-
-      if (!el) {
-        if (process.env.NODE_ENV !== 'production') {
-          // eslint-disable-next-line no-console -- intentional dev-only diagnostic
-          console.warn(`[payload-live-preview-inspector] Could not resolve path "${resolvedPath}" to a field`)
-        }
-        return
-      }
-
-      const didExpand = expandCollapsedAncestors(el)
       const generation = ++revealGeneration
 
       const revealField = async () => {
+        // The path's actual form field (a stega path pointing inside e.g. a
+        // rich-text value collapses to the rich-text field itself).
+        const targetFieldPath = fieldPathFromFormState(resolvedPath, formState)
+        const checkExact = () =>
+          resolveExactFieldElement(resolvedPath) ??
+          (targetFieldPath ? resolveExactFieldElement(targetFieldPath) : null)
+
+        // Payload unmounts inactive tab panels - if neither the exact target
+        // nor its owning field is in the DOM, sweep the tabs until it is.
+        if (!checkExact()) {
+          await revealTabForElement(checkExact)
+          if (generation !== revealGeneration) {
+            return
+          }
+        }
+
+        const el = resolveFieldElement(resolvedPath)
+
+        if (!el) {
+          if (process.env.NODE_ENV !== 'production') {
+            // eslint-disable-next-line no-console -- intentional dev-only diagnostic
+            console.warn(`[payload-live-preview-inspector] Could not resolve path "${resolvedPath}" to a field`)
+          }
+          return
+        }
+
+        const didExpand = expandCollapsedAncestors(el)
+
         if (didExpand) {
           // Collapsed content is `display: none` until React re-renders after
           // the toggle click - wait until the field is actually measurable.

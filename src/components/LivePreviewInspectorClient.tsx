@@ -4,7 +4,7 @@ import { useEffect } from 'react'
 
 import type { DocumentLeafValue } from '../utilities/pathResolution.js'
 
-import { applyValueMatching, inferBlockContainers, scanStega } from '../utilities/autoTag.js'
+import { applyValueMatching, findTaggedElementAt, inferBlockContainers, scanStega } from '../utilities/autoTag.js'
 import { LIVE_PREVIEW_HOVER_CLASS_NAME } from '../utilities/hoverClassName.js'
 import {
   CLICK_MESSAGE_TYPE,
@@ -98,9 +98,15 @@ export const LivePreviewInspectorClient: React.FC<LivePreviewInspectorClientProp
     }
 
     let hovered: HTMLElement | null = null
+    let hoverFrame = 0
 
-    const findTarget = (event: Event): HTMLElement | null =>
-      (event.target as Element | null)?.closest?.(`[${LIVE_PREVIEW_PATH_ATTRIBUTE}]`) as HTMLElement | null
+    // Point-based first: `elementsFromPoint` sees tagged elements *through*
+    // covering overlays (full-card links etc.) that swallow every pointer
+    // event as their target. The `closest()` chain is the fallback for
+    // events without useful coordinates.
+    const findTarget = (event: MouseEvent): HTMLElement | null =>
+      findTaggedElementAt(document, event.clientX, event.clientY) ??
+      ((event.target as Element | null)?.closest?.(`[${LIVE_PREVIEW_PATH_ATTRIBUTE}]`) as HTMLElement | null)
 
     const unhighlight = (el: HTMLElement) => {
       el.classList.remove(classes.hovered, LIVE_PREVIEW_HOVER_CLASS_NAME)
@@ -109,28 +115,38 @@ export const LivePreviewInspectorClient: React.FC<LivePreviewInspectorClientProp
       }
     }
 
-    const onMouseOver = (event: MouseEvent) => {
-      const el = findTarget(event)
-      if (el && el !== hovered) {
-        if (hovered) {
-          unhighlight(hovered)
-        }
+    const setHovered = (el: HTMLElement | null) => {
+      if (el === hovered) {
+        return
+      }
+      if (hovered) {
+        unhighlight(hovered)
+      }
+      if (el) {
         el.classList.add(classes.hovered, LIVE_PREVIEW_HOVER_CLASS_NAME)
         if (hoverColor) {
           el.style.outlineColor = hoverColor
         }
-        hovered = el
       }
+      hovered = el
     }
 
-    const onMouseOut = (event: MouseEvent) => {
-      const el = findTarget(event)
-      if (el && !el.contains(event.relatedTarget as Node | null)) {
-        unhighlight(el)
-        if (hovered === el) {
-          hovered = null
-        }
+    // mousemove (not mouseover): beneath an overlay the event target never
+    // changes while the pointer moves across different tagged elements, so
+    // enter/leave events can't track the highlight - re-resolving the point
+    // each frame can.
+    const onMouseMove = (event: MouseEvent) => {
+      if (hoverFrame) {
+        return
       }
+      hoverFrame = requestAnimationFrame(() => {
+        hoverFrame = 0
+        setHovered(findTarget(event))
+      })
+    }
+
+    const onMouseLeave = () => {
+      setHovered(null)
     }
 
     const onClick = (event: MouseEvent) => {
@@ -159,17 +175,18 @@ export const LivePreviewInspectorClient: React.FC<LivePreviewInspectorClientProp
       window.parent.postMessage({ type: CLICK_MESSAGE_TYPE, path }, targetOrigin ?? resolveTargetOrigin())
     }
 
-    document.addEventListener('mouseover', onMouseOver)
-    document.addEventListener('mouseout', onMouseOut)
+    document.addEventListener('mousemove', onMouseMove)
+    document.documentElement.addEventListener('mouseleave', onMouseLeave)
     document.addEventListener('click', onClick, { capture: true })
 
     return () => {
-      document.removeEventListener('mouseover', onMouseOver)
-      document.removeEventListener('mouseout', onMouseOut)
+      document.removeEventListener('mousemove', onMouseMove)
+      document.documentElement.removeEventListener('mouseleave', onMouseLeave)
       document.removeEventListener('click', onClick, { capture: true })
-      if (hovered) {
-        unhighlight(hovered)
+      if (hoverFrame) {
+        cancelAnimationFrame(hoverFrame)
       }
+      setHovered(null)
     }
   }, [disableLinks, hoverColor, targetOrigin])
 

@@ -24,6 +24,22 @@ export const rowIDFromPath = (path: string): null | string => {
 }
 
 /**
+ * Resolves the full path only - a leaf field's `field-<path>` id or an
+ * Array/Blocks row's `<parent>-row-<index>` wrapper id - with no prefix
+ * fallback. Returns `null` when that exact element isn't in the DOM (e.g.
+ * because it lives inside an inactive tab, which Payload unmounts).
+ */
+export const resolveExactFieldElement = (path: string): HTMLElement | null => {
+  const fieldEl = document.getElementById(fieldIDFromPath(path))
+  if (fieldEl) {
+    return fieldEl
+  }
+
+  const rowID = rowIDFromPath(path)
+  return rowID ? document.getElementById(rowID) : null
+}
+
+/**
  * Resolves a (possibly deep) field path to the closest matching DOM element
  * rendered by Payload's admin form: a leaf field's `field-<path>` id, or an
  * Array/Blocks row's `<parent>-row-<index>` wrapper id. Falls back to
@@ -34,21 +50,32 @@ export const resolveFieldElement = (path: string): HTMLElement | null => {
   let segments = path.split('.')
 
   while (segments.length > 0) {
-    const candidatePath = segments.join('.')
-
-    const fieldEl = document.getElementById(fieldIDFromPath(candidatePath))
-    if (fieldEl) {
-      return fieldEl
+    const el = resolveExactFieldElement(segments.join('.'))
+    if (el) {
+      return el
     }
+    segments = segments.slice(0, -1)
+  }
 
-    const rowID = rowIDFromPath(candidatePath)
-    if (rowID) {
-      const rowEl = document.getElementById(rowID)
-      if (rowEl) {
-        return rowEl
-      }
+  return null
+}
+
+/**
+ * Trims a (possibly too deep) path to the longest prefix that is an actual
+ * form field, using the live form state as the source of truth - e.g. a
+ * stega path pointing inside a rich-text value collapses to the rich-text
+ * field itself. Returns `null` when no prefix is a form-state key (e.g. a
+ * bare row path like `layout.0`, which exists in the DOM but not in form
+ * state).
+ */
+export const fieldPathFromFormState = (path: string, formState: MinimalFormState): null | string => {
+  let segments = path.split('.')
+
+  while (segments.length > 0) {
+    const candidate = segments.join('.')
+    if (formState[candidate] !== undefined) {
+      return candidate
     }
-
     segments = segments.slice(0, -1)
   }
 
@@ -124,6 +151,85 @@ export const collectLeafValues = (formState: MinimalFormState): DocumentLeafValu
   }
 
   return leaves
+}
+
+/** Payload's tabs-field tab button (see `@payloadcms/ui`'s Tabs field). */
+const TAB_BUTTON_SELECTOR = '.tabs-field__tab-button'
+const TAB_BUTTON_ACTIVE_CLASS = 'tabs-field__tab-button--active'
+/** Max wait for a just-activated tab panel to render its fields. */
+const TAB_RENDER_WAIT_MS = 250
+/** Rounds of re-querying tab buttons, so nested tabs revealed by a switch get swept too. */
+const MAX_TAB_SWEEP_ROUNDS = 4
+
+/** Resolves with `check`'s first non-null result, polling every frame up to `timeoutMs`. */
+const waitForElement = (check: () => HTMLElement | null, timeoutMs: number): Promise<HTMLElement | null> =>
+  new Promise((resolve) => {
+    const startedAt = performance.now()
+
+    const tick = () => {
+      const el = check()
+      if (el) {
+        resolve(el)
+        return
+      }
+      if (performance.now() - startedAt >= timeoutMs) {
+        resolve(null)
+        return
+      }
+      requestAnimationFrame(tick)
+    }
+
+    tick()
+  })
+
+/**
+ * Payload unmounts inactive tab panels, so a field inside another tab simply
+ * isn't in the DOM until its tab is active. This clicks through inactive tab
+ * buttons until `check` resolves, re-querying between rounds so nested tabs
+ * revealed by a switch get swept too. When nothing is found anywhere, the
+ * originally active tabs are clicked back so the sweep leaves no UI trace.
+ */
+export const revealTabForElement = async (
+  check: () => HTMLElement | null,
+  tabRenderWaitMs: number = TAB_RENDER_WAIT_MS,
+): Promise<HTMLElement | null> => {
+  const found = check()
+  if (found) {
+    return found
+  }
+
+  const originallyActive = Array.from(
+    document.querySelectorAll<HTMLButtonElement>(`.${TAB_BUTTON_ACTIVE_CLASS}`),
+  )
+  const clicked = new Set<Element>()
+
+  for (let round = 0; round < MAX_TAB_SWEEP_ROUNDS; round++) {
+    const buttons = Array.from(document.querySelectorAll<HTMLButtonElement>(TAB_BUTTON_SELECTOR)).filter(
+      (button) => !clicked.has(button) && !button.classList.contains(TAB_BUTTON_ACTIVE_CLASS),
+    )
+
+    if (buttons.length === 0) {
+      break
+    }
+
+    for (const button of buttons) {
+      clicked.add(button)
+      button.click()
+
+      const el = await waitForElement(check, tabRenderWaitMs)
+      if (el) {
+        return el
+      }
+    }
+  }
+
+  for (const button of originallyActive) {
+    if (button.isConnected && !button.classList.contains(TAB_BUTTON_ACTIVE_CLASS)) {
+      button.click()
+    }
+  }
+
+  return null
 }
 
 /**

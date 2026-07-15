@@ -5,10 +5,13 @@ import {
   collectLeafValues,
   expandCollapsedAncestors,
   fieldIDFromPath,
+  fieldPathFromFormState,
   flashElement,
   focusElement,
+  resolveExactFieldElement,
   resolveFieldElement,
   resolveRowIDs,
+  revealTabForElement,
   rowIDFromPath,
   scrollToElement,
   waitForElementLayout,
@@ -57,6 +60,86 @@ describe('resolveFieldElement', () => {
   it('returns null when nothing in the path resolves', () => {
     document.body.innerHTML = '<div id="unrelated"></div>'
     expect(resolveFieldElement('layout.1.heading')).toBeNull()
+  })
+})
+
+describe('resolveExactFieldElement', () => {
+  it('resolves the full path only - no prefix fallback', () => {
+    document.body.innerHTML = '<div id="layout-row-1"></div>'
+    expect(resolveExactFieldElement('layout.1')?.id).toBe('layout-row-1')
+    // The prefix would resolve, but the exact leaf does not exist.
+    expect(resolveExactFieldElement('layout.1.heading')).toBeNull()
+  })
+})
+
+describe('fieldPathFromFormState', () => {
+  const formState = {
+    'layout.0.rich': { value: {} },
+    title: { value: 'x' },
+  }
+
+  it('returns the path itself when it is a form field', () => {
+    expect(fieldPathFromFormState('title', formState)).toBe('title')
+  })
+
+  it('trims a too-deep path (e.g. stega inside rich text) to its owning field', () => {
+    expect(fieldPathFromFormState('layout.0.rich.root.children.0.text', formState)).toBe('layout.0.rich')
+  })
+
+  it('returns null when no prefix is a form field (e.g. a bare row path)', () => {
+    expect(fieldPathFromFormState('layout.0', formState)).toBeNull()
+  })
+})
+
+describe('revealTabForElement', () => {
+  const buildTabs = (labels: string[], activeIndex: number) => {
+    const bar = document.createElement('div')
+    return labels.map((label, index) => {
+      const button = document.createElement('button')
+      button.className =
+        index === activeIndex ? 'tabs-field__tab-button tabs-field__tab-button--active' : 'tabs-field__tab-button'
+      button.textContent = label
+      bar.append(button)
+      document.body.append(bar)
+      return button
+    })
+  }
+
+  it('returns immediately when the element is already present', async () => {
+    document.body.innerHTML = '<input id="field-title" />'
+    const el = await revealTabForElement(() => document.getElementById('field-title'), 50)
+    expect(el?.id).toBe('field-title')
+  })
+
+  it('clicks through inactive tabs until the element appears', async () => {
+    const [, meta] = buildTabs(['Content', 'Meta'], 0)
+    // Simulate Payload rendering the panel after the tab becomes active.
+    meta.addEventListener('click', () => {
+      meta.classList.add('tabs-field__tab-button--active')
+      document.body.insertAdjacentHTML('beforeend', '<input id="field-metaNote" />')
+    })
+
+    const el = await revealTabForElement(() => document.getElementById('field-metaNote'), 50)
+
+    expect(el?.id).toBe('field-metaNote')
+  })
+
+  it('restores the originally active tab when nothing is found anywhere', async () => {
+    const [content, meta] = buildTabs(['Content', 'Meta'], 0)
+    meta.addEventListener('click', () => {
+      content.classList.remove('tabs-field__tab-button--active')
+      meta.classList.add('tabs-field__tab-button--active')
+    })
+    content.addEventListener('click', () => {
+      meta.classList.remove('tabs-field__tab-button--active')
+      content.classList.add('tabs-field__tab-button--active')
+    })
+
+    const el = await revealTabForElement(() => document.getElementById('field-missing'), 20)
+
+    expect(el).toBeNull()
+    expect(content.classList.contains('tabs-field__tab-button--active')).toBe(true)
+    expect(meta.classList.contains('tabs-field__tab-button--active')).toBe(false)
   })
 })
 

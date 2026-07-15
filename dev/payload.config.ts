@@ -1,8 +1,8 @@
 import { sqliteAdapter } from '@payloadcms/db-sqlite'
 import { lexicalEditor } from '@payloadcms/richtext-lexical'
+import { payloadLivePreviewInspector } from '@raffiniert-media-ag/payload-live-preview-inspector'
 import path from 'path'
 import { buildConfig } from 'payload'
-import { payloadLivePreviewInspector } from '@raffiniert-media-ag/payload-live-preview-inspector'
 import sharp from 'sharp'
 import { fileURLToPath } from 'url'
 
@@ -39,35 +39,56 @@ export default buildConfig({
     {
       slug: 'posts',
       fields: [
+        // Unnamed tabs: they don't add a path segment, but Payload unmounts
+        // the inactive tab's fields - exercises the listener's tab sweep.
         {
-          name: 'title',
-          type: 'text',
-        },
-        {
-          name: 'layout',
-          type: 'blocks',
-          blocks: [
+          type: 'tabs',
+          tabs: [
             {
-              slug: 'heroBlock',
               fields: [
                 {
-                  name: 'heading',
+                  name: 'title',
                   type: 'text',
                 },
                 {
-                  name: 'subheading',
-                  type: 'text',
+                  name: 'layout',
+                  type: 'blocks',
+                  blocks: [
+                    {
+                      slug: 'heroBlock',
+                      fields: [
+                        {
+                          name: 'heading',
+                          type: 'text',
+                        },
+                        {
+                          name: 'subheading',
+                          type: 'text',
+                        },
+                      ],
+                    },
+                    {
+                      slug: 'contentBlock',
+                      fields: [
+                        {
+                          name: 'text',
+                          type: 'textarea',
+                        },
+                      ],
+                    },
+                  ],
                 },
               ],
+              label: 'Content',
             },
             {
-              slug: 'contentBlock',
               fields: [
                 {
-                  name: 'text',
-                  type: 'textarea',
+                  name: 'metaNote',
+                  type: 'text',
                 },
               ],
+              label: 'Meta',
             },
           ],
         },

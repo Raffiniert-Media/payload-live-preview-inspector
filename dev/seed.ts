@@ -38,6 +38,7 @@ export const seed = async (payload: Payload) => {
             text: 'This block can also be clicked to scroll the admin form to it.',
           },
         ],
+        metaNote: 'A note living in the Meta tab',
         title: 'Hello Live Preview',
       },
     })
