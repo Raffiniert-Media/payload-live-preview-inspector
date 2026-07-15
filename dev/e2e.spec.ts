@@ -14,14 +14,25 @@ const openLivePreview = async (page: Page) => {
   await page.goto('/admin/collections/posts')
   await page.click('.table tbody tr:first-child a')
 
+  const toggler = page.locator('#live-preview-toggler')
+  const iframe = page.locator('#live-preview-iframe')
+
   // Payload renders live preview as an inline toggle button (eye icon) in the
   // document controls, not as a separate view tab/link. The button is in the
   // DOM before React hydration finishes, so an early click can be swallowed -
-  // retry the click until the iframe actually appears.
+  // this retries until the iframe appears. Because it's a *toggle*, blindly
+  // re-clicking on every retry is wrong: if the first click actually worked
+  // and only the iframe's render is slow (e.g. a cold Turbopack compile on
+  // CI), a second click would just switch it off again, oscillating forever.
+  // Payload marks the active state with a `--active` class, so only click
+  // when it isn't already on.
   await expect(async () => {
-    await page.click('#live-preview-toggler')
-    await expect(page.locator('#live-preview-iframe')).toBeVisible({ timeout: 2_000 })
-  }).toPass()
+    const isActive = await toggler.evaluate((el) => el.classList.contains('live-preview-toggler--active'))
+    if (!isActive) {
+      await toggler.click()
+    }
+    await expect(iframe).toBeVisible({ timeout: 3_000 })
+  }).toPass({ timeout: 60_000 })
 
   return page.frameLocator('#live-preview-iframe')
 }
