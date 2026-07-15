@@ -24,6 +24,12 @@
       ],
       "@raffiniert-media-ag/payload-live-preview-inspector/client": [
         "../src/exports/client.ts"
+      ],
+      "@raffiniert-media-ag/payload-live-preview-inspector/listener": [
+        "../src/exports/listener.ts"
+      ],
+      "@raffiniert-media-ag/payload-live-preview-inspector/path": [
+        "../src/exports/path.ts"
       ]
     },
     "noEmit": true,

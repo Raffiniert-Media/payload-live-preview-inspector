@@ -4,6 +4,12 @@ import { useForm, useLivePreviewContext } from '@payloadcms/ui'
 import { useEffect, useRef } from 'react'
 
 import {
+  CLICK_MESSAGE_TYPE,
+  DOCUMENT_VALUES_MESSAGE_TYPE,
+  REQUEST_DOCUMENT_VALUES_MESSAGE_TYPE,
+} from '../utilities/messageTypes.js'
+import {
+  collectLeafValues,
   DEFAULT_COLLAPSIBLE_ANIMATION_MS,
   expandCollapsedAncestors,
   focusElement,
@@ -14,8 +20,6 @@ import {
   waitForElementLayout,
 } from '../utilities/pathResolution.js'
 import classes from './LivePreviewInspectorListener.module.css'
-
-const MESSAGE_TYPE = 'payload-live-preview-inspector:click'
 
 export type LivePreviewInspectorListenerProps = {
   /** Maximum wait (ms) for a just-expanded accordion to render its content before scrolling. Defaults to 350. */
@@ -68,12 +72,21 @@ export const LivePreviewInspectorListener: React.FC<LivePreviewInspectorListener
       }
 
       const { data } = event
-      if (
-        !data ||
-        typeof data !== 'object' ||
-        data.type !== MESSAGE_TYPE ||
-        typeof data.path !== 'string'
-      ) {
+      if (!data || typeof data !== 'object') {
+        return
+      }
+
+      if (data.type === REQUEST_DOCUMENT_VALUES_MESSAGE_TYPE) {
+        // The iframe wants the current field values for value matching -
+        // reply with every string leaf, addressed by stable row ids.
+        ;(event.source as Window).postMessage(
+          { type: DOCUMENT_VALUES_MESSAGE_TYPE, leaves: collectLeafValues(getFieldsRef.current()) },
+          expectedOrigin,
+        )
+        return
+      }
+
+      if (data.type !== CLICK_MESSAGE_TYPE || typeof data.path !== 'string') {
         return
       }
 

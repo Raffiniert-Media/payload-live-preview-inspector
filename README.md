@@ -9,7 +9,15 @@ This plugin does **not** set up Live Preview itself. It adds the click-to-scroll
 - **In the iframe (your frontend):** `LivePreviewInspectorClient` listens for hover/click on any element carrying a `data-payload-live-preview-path` attribute. Hover highlights the element locally; click posts a message to the parent window with that path. It also blocks link navigation by default (see [Link interception](#link-interception) below).
 - **In the admin panel:** `LivePreviewInspectorListener` is auto-registered by the plugin into the Edit view of every collection/global you enable it for. It listens for that message, resolves the field path (translating any Array/Blocks row ids to their current index via the live form state), expands any collapsed accordions in the way, scrolls to the field, and - once the scroll actually finishes moving - flashes and focuses it. It also shows a small hint next to the document controls while you're on the Live Preview tab.
 
-Outside of an iframe (i.e. your frontend rendered directly, not inside Live Preview), `LivePreviewInspectorClient` is a no-op — it doesn't attach any listeners.
+Elements get their path attribute through three layers, from most to least precise — explicit tagging always wins, and each layer only fills in what the previous one didn't cover (see [Tagging: three layers](#tagging-three-layers)):
+
+1. **`pathOf()` (explicit)** — you tag an element yourself; exact, works for anything.
+2. **Stega (automatic, opt-in)** — `inspectable(data, { stega: true })` encodes each string field's path into its value as invisible characters; the client decodes them from the rendered DOM and tags the containing elements. Text content needs no `pathOf()` at all.
+3. **Value matching (automatic, zero-config)** — the client asks the admin panel for the document's current field values and tags any element whose whole text equals exactly one field's value. No frontend data changes needed whatsoever.
+
+From auto-tagged leaf elements, the client additionally **infers block containers**: elements whose decoded paths share an Array/Blocks row prefix vote for their common ancestor as that row's container, so clicking a block's padding jumps to the whole row.
+
+Outside of an iframe (i.e. your frontend rendered directly, not inside Live Preview), `LivePreviewInspectorClient` is a no-op — it doesn't attach any listeners, doesn't scan anything, and doesn't touch the DOM.
 
 ## Installation
 
@@ -17,7 +25,18 @@ Outside of an iframe (i.e. your frontend rendered directly, not inside Live Prev
 pnpm add @raffiniert-media-ag/payload-live-preview-inspector
 ```
 
-Requires `payload` and `@payloadcms/ui` in the Payload project (peer dependencies), and `react`/`react-dom` 19 wherever the components are used. `@payloadcms/ui` and `payload` are optional peers — a frontend-only project that only imports from `@raffiniert-media-ag/payload-live-preview-inspector/client` doesn't need either installed.
+Requires `payload` and `@payloadcms/ui` in the Payload project (peer dependencies), and `react`/`react-dom` 19 wherever the components are used. `@payloadcms/ui` and `payload` are optional peers — a frontend-only project that only imports from the `/client` and `/path` subpaths doesn't need either installed.
+
+The package has four entry points, split so that nothing heavy can leak into your frontend bundles:
+
+| Subpath     | Contains                                                          | Import it from                                                                          |
+| ----------- | ----------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| `.`         | `payloadLivePreviewInspector()` plugin                            | `payload.config.ts`                                                                      |
+| `/client`   | `LivePreviewInspectorClient` (a `'use client'` component)         | only the file that mounts the component                                                  |
+| `/path`     | `inspectable`, `pathOf`, `stegaClean`, constants — pure, no components | everywhere else: pages, blocks, Server Components, shared code                       |
+| `/listener` | `LivePreviewInspectorListener` (admin panel, imports `@payloadcms/ui`) | nowhere — the plugin wires it into the import map for you                            |
+
+**Why this matters:** bundlers treat `'use client'` barrels as indivisible units. If a client component imports `pathOf` from `/client`, the entire inspector component lands in a shared chunk that every page loads for every visitor. Importing the helpers from `/path` instead keeps your public bundles completely free of plugin code. (`/client` still re-exports the helpers for convenience/backwards compatibility — use that only in the file that mounts the component anyway.)
 
 ## Setup
 
@@ -80,10 +99,10 @@ export default function PreviewPage() {
 }
 ```
 
-Then tag every element that should be clickable. The recommended way is `inspectable()` + `pathOf()`: wrap your document data once, and every nested object/array element you access knows its own field path — array/blocks rows are automatically addressed by their stable `id`, so the mapping survives reordering, inserting, or removing rows. You never have to think about paths, indexes, or row ids:
+Then tag every element that should be clickable. The recommended way is `inspectable()` + `pathOf()`: wrap your document data once, and every nested object/array element you access knows its own field path — array/blocks rows are automatically addressed by their stable `id`, so the mapping survives reordering, inserting, or removing rows. You never have to think about paths, indexes, or row ids. Import the helpers from the pure `/path` subpath (see [Installation](#installation) for why):
 
 ```tsx
-import { inspectable, pathOf } from '@raffiniert-media-ag/payload-live-preview-inspector/client'
+import { inspectable, pathOf } from '@raffiniert-media-ag/payload-live-preview-inspector/path'
 
 const page = inspectable(data)
 
@@ -96,9 +115,57 @@ const page = inspectable(data)
 ))}
 ```
 
-`pathOf(node)` addresses the node itself (e.g. a whole block); `pathOf(node, 'fieldName')` addresses a field on it. This is plain JavaScript — no hooks, no context — so it works in Server Components too. One caveat: call `inspectable()` inside the component that renders the data; the path metadata does not survive a server-to-client component boundary.
+`pathOf(node)` addresses the node itself (e.g. a whole block); `pathOf(node, 'fieldName')` addresses a field on it. This is plain JavaScript — no hooks, no context — so it works in Server Components too.
 
-There is no auto-discovery: an element without a path attribute is simply not clickable, silently.
+You don't have to tag everything by hand — see the next section for the two automatic layers.
+
+## Tagging: three layers
+
+The client resolves clicks against `data-payload-live-preview-path` attributes, and there are three ways those attributes get onto elements. They compose: an attribute set explicitly via `pathOf()` is never overwritten by an automatic layer, and stega runs before value matching. Elements tagged automatically also carry `data-payload-live-preview-auto="stega" | "match" | "container"` so you can tell the layers apart in devtools.
+
+### 1. `pathOf()` — explicit, most precise
+
+What the [Setup](#2-frontend) section shows. Works for anything (images, numbers, whole blocks, elements without text) and is the only layer that doesn't rely on any heuristic. Use it wherever the automatic layers don't reach.
+
+### 2. Stega — automatic tagging for text content
+
+Pass `stega: true` to `inspectable()`:
+
+```tsx
+const page = inspectable(data, { stega: true })
+
+<h1>{page.title}</h1>               {/* auto-tagged - no pathOf() needed */}
+{page.layout?.map((block) => (
+  <section key={block.id}>          {/* inferred as the block's container */}
+    <h2>{block.heading}</h2>        {/* auto-tagged */}
+  </section>
+))}
+```
+
+Every string read from the proxy carries its field path as a run of invisible (zero-width) characters. Wherever that string ends up in the rendered DOM — however many components, props, or even server-to-client boundaries it passed through — the client's scanner decodes the path and tags the containing element. A few text-bearing attributes (`alt`, `title`, `aria-label`, `placeholder`) are scanned too.
+
+Values that are typically compared or parsed rather than rendered are never encoded: by key (`id`, `blockType`, `blockName`, `slug`) and by shape (URLs, relative paths, emails, ISO dates, numeric strings, hex colors, uuids). For any other value you need raw — comparisons, `new Date()`, sending data to an API — use `stegaClean()`:
+
+```ts
+import { stegaClean } from '@raffiniert-media-ag/payload-live-preview-inspector/path'
+
+stegaClean(page.title)      // the raw string
+stegaClean(page)            // deep-cleans a whole plain-object tree
+```
+
+Trade-off to know about: encoded strings contain extra characters. `===` against literals fails, `.length` is inflated, and truncating with `slice()` can cut a block in half (the tag is then simply lost — never wrong). All of it only exists in preview mode (see [Production](#production--performance)).
+
+### 3. Value matching — zero-config
+
+On by default in `LivePreviewInspectorClient` — nothing to integrate beyond mounting the component. The client asks the admin panel (via the plugin's listener) for the document's current string field values, then tags any element whose entire text content equals exactly one field's value. When you edit a field, the preview re-renders and the mapping refreshes automatically.
+
+It is deliberately conservative: values shared by several fields are never matched (ambiguous), values shorter than 3 characters are ignored, and only whole-element matches count — transformed text (formatted dates, truncated teasers, rich text) simply doesn't match. Wrong tags are avoided at the cost of missing tags; the other two layers fill the gaps. Set `valueMatching={false}` to turn it off.
+
+### Container inference
+
+After the leaf layers run, elements whose paths share an Array/Blocks row prefix (`layout.$abc.…`) vote for their closest common DOM ancestor as that row's container — it gets tagged with the row path (`layout.$abc`), so clicking anywhere in the block jumps to the whole row in the admin. This is skipped when the row is already tagged (e.g. a manual `pathOf(block)`), and never tags `<body>` or an ancestor that also contains a *different* row's elements (interleaved markup). Explicit `pathOf(block)` remains more reliable for blocks that render little or no text.
+
+An element no layer reaches is simply not clickable, silently.
 
 ## Link interception
 
@@ -110,24 +177,37 @@ Set `disableLinks={false}` to restore normal link navigation:
 <LivePreviewInspectorClient disableLinks={false} />
 ```
 
+## Server/client component boundaries
+
+The proxy's path metadata does not survive serialization: pass a wrapped node as a prop from a Server Component into a Client Component and `pathOf()` on the other side comes up empty. Three ways around it, in order of preference:
+
+1. **Stega** (`stega: true`) — encoded strings survive any boundary because the path travels inside the value itself. For text content this makes the problem disappear entirely.
+2. **`serializable: true`** — embeds each object node's path as an enumerable `__payloadLivePreviewPath` property that survives JSON, so `pathOf()` keeps working on the other side. Caveats: the key shows up in `Object.keys()`/spreads of wrapped nodes, and array nodes can't carry it across the boundary (their object children still do).
+3. **Pass `pathOf()` results as props** — `pathOf()` returns a plain `{ 'data-payload-live-preview-path': '…' }` object, which serializes fine.
+
+```tsx
+const page = inspectable(data, { serializable: true, stega: true })
+```
+
 ## Production / performance
 
-Nothing here should worry you for real visitors, but it's worth understanding what runs where:
+Nothing here reaches real visitors, but it's worth understanding what runs where:
 
-- `LivePreviewInspectorClient` is a guaranteed no-op outside an iframe — for normal visitors it attaches **no** event listeners and renders nothing. Its only cost is a few kB in the bundle.
+- `LivePreviewInspectorClient` is a guaranteed no-op outside an iframe — for normal visitors it attaches **no** event listeners, runs **no** scanner, and renders nothing. Its only cost is a few kB in the bundle. The auto-tagging layers (stega decoding, value matching, container inference) only ever execute inside the Live Preview iframe.
 - `inspectable()`'s proxy overhead is negligible (~0.02 ms per render for a 100-block document).
-- The one visible effect: `pathOf()` bakes `data-payload-live-preview-path` attributes into the rendered HTML — roughly 40–60 bytes per tagged element, and they reveal your field structure. Harmless, but unnecessary on public pages.
+- The visible effects — `pathOf()` attributes (roughly 40–60 bytes per tagged element), stega characters inside string values, `serializable` marker keys — all exist only while the tree is enabled. They reveal your field structure and are unnecessary on public pages.
 
-The cleanest setup is a **dedicated preview route** (like this repo's `dev/app/(frontend)/preview/...`): the public route never imports any of this, so the cost for real visitors is exactly zero.
+The cleanest setup is a **dedicated preview route** (like this repo's `dev/app/(frontend)/preview/...`): the public route never imports any of this, so the cost for real visitors is exactly zero. Value matching pairs especially well with this — it needs no data changes at all, so the preview route can be a plain copy of the public one plus the mounted client component.
 
-If instead you share the same components between public and preview rendering, pass your preview signal to `inspectable()` once — everything downstream (every `pathOf()` call) switches off cleanly and silently:
+If instead you share the same components between public and preview rendering, pass your preview signal to `inspectable()` once — `enabled: false` is the single kill switch for **all** output layers (path attributes, stega characters, serialized markers), and everything downstream switches off cleanly and silently:
 
 ```tsx
 import { draftMode } from 'next/headers'
 
 const { isEnabled } = await draftMode()
-const page = inspectable(data, { enabled: isEnabled })
-// enabled: false → no path attributes in the HTML, pathOf() silently returns {}
+const page = inspectable(data, { enabled: isEnabled, stega: true })
+// enabled: false → no path attributes, no stega characters, no markers -
+// nothing of this ends up in the HTML served to real visitors.
 ```
 
 No conditionals needed anywhere else — your components stay identical for both cases.
@@ -141,14 +221,23 @@ Exported from `@raffiniert-media-ag/payload-live-preview-inspector` (admin/confi
   - `options.disabled` — turns the plugin off entirely.
   - `options.flashColor`, `options.flashDurationMs`, `options.scrollOffset`, `options.accordionAnimationMs` — see above.
 
-Exported from `@raffiniert-media-ag/payload-live-preview-inspector/client` (frontend + admin components):
+Exported from `@raffiniert-media-ag/payload-live-preview-inspector/path` (pure data helpers — safe to import anywhere, zero client-bundle impact; all of these are also re-exported from `/client` for convenience):
 
-- `LivePreviewInspectorClient({ disableLinks?, hoverColor?, targetOrigin? })` — mount once in your preview page/layout. `disableLinks` (default `true`) blocks link navigation inside the iframe (see [Link interception](#link-interception)). `targetOrigin` pins the `postMessage` target to your admin panel's origin (e.g. `'https://cms.example.com'`); when omitted it is auto-detected (see Known limitations).
-- `inspectable(data, options?)` — wraps document data in a path-tracking proxy (see above). `options.enabled: false` turns the whole tree off for public pages (see Production / performance).
-- `pathOf(node, subPath?)` — returns the path attribute for a node obtained through `inspectable()`.
+- `inspectable(data, options?)` — wraps document data in a path-tracking proxy (see above). `options.enabled: false` turns the whole tree off for public pages (see Production / performance); `options.stega: true` encodes paths into string values (see [Tagging](#tagging-three-layers)); `options.serializable: true` embeds paths as serialization-surviving marker keys (see [Server/client component boundaries](#serverclient-component-boundaries)).
+- `pathOf(node, subPath?)` — returns the path attribute for a node obtained through `inspectable()` (directly, or across a JSON boundary with `serializable: true`).
+- `stegaClean(value)` — strips stega-encoded blocks from a string, or deeply from every string in a plain object/array tree. Use wherever you need a raw value.
 - `LIVE_PREVIEW_PATH_ATTRIBUTE` — the raw attribute name, if you'd rather set it yourself.
+- `LIVE_PREVIEW_AUTO_ATTRIBUTE` — marker attribute (`"stega" | "match" | "container"`) identifying auto-tagged elements.
+- `SERIALIZED_PATH_KEY` — the marker key used by `serializable: true`, e.g. to strip it before forwarding data elsewhere.
 - `LIVE_PREVIEW_HOVER_CLASS_NAME` — stable, unscoped class name applied to the hovered element, so you can restyle the hover highlight with your own CSS instead of the shipped styles.
-- `LivePreviewInspectorListener` — the admin-side component (you shouldn't need to reference this directly; the plugin registers it for you, with your plugin options passed through as its props).
+
+Exported from `@raffiniert-media-ag/payload-live-preview-inspector/client` (import only where you mount the component):
+
+- `LivePreviewInspectorClient({ disableLinks?, hoverColor?, stega?, targetOrigin?, valueMatching? })` — mount once in your preview page/layout. `disableLinks` (default `true`) blocks link navigation inside the iframe (see [Link interception](#link-interception)). `stega` (default `true`) decodes stega-encoded paths from the rendered DOM. `valueMatching` (default `true`) tags elements by matching their text against the document's field values. `targetOrigin` pins the `postMessage` target to your admin panel's origin (e.g. `'https://cms.example.com'`); when omitted it is auto-detected (see Known limitations).
+
+Exported from `@raffiniert-media-ag/payload-live-preview-inspector/listener` (admin panel only):
+
+- `LivePreviewInspectorListener` — the admin-side component (you shouldn't need to reference this directly; the plugin registers it in the import map for you, with your plugin options passed through as its props). Kept on its own subpath because it imports `@payloadcms/ui`, which must never reach a frontend bundle.
 
 ## Known limitations
 
@@ -158,6 +247,10 @@ Exported from `@raffiniert-media-ag/payload-live-preview-inspector/client` (fron
 - If a tagged Array/Blocks row is deleted between when the frontend was rendered and when you click it, its row id will no longer resolve — the click silently no-ops (same as any other unresolvable path).
 - `disableLinks` only intercepts normal left-clicks; a middle-click or Cmd/Ctrl-click to open a link in a new tab bypasses it (usually what you'd want anyway).
 - Scroll-then-reveal timing relies on the `scrollend` event (supported in all current evergreen browsers). If a browser doesn't fire it, a 1s fallback timeout still reveals the field, just without the exact "waits for the scroll to finish" precision.
+- Stega only reaches values that end up as rendered text (or in `alt`/`title`/`aria-label`/`placeholder`). Images, numbers, booleans, selects rendered as icons — anything without a string in the DOM — still needs `pathOf()`. String operations in your frontend that reshape the value (`slice()`, `split()`, regexes) can destroy the encoded block; the element is then simply untagged, never mistagged.
+- Stega characters live inside string values while previewing: text copied out of the preview iframe carries them, and screen-reader behavior on zero-width characters varies. Both are preview-only concerns; public pages never contain them (with `enabled` wired correctly).
+- Value matching requires exact whole-element text equality with exactly one field's current value. Formatted dates, truncated teasers, values rendered inside larger sentences, and rich text don't match — by design (missing a tag beats guessing wrong).
+- Container inference is a heuristic: a block that renders no taggable leaf at all gets no container, and heavily interleaved markup makes it back off. `pathOf(block)` is the reliable way to tag those.
 
 ## Local development
 

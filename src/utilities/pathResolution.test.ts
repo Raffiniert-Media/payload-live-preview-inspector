@@ -2,6 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import {
+  collectLeafValues,
   expandCollapsedAncestors,
   fieldIDFromPath,
   flashElement,
@@ -81,6 +82,54 @@ describe('resolveRowIDs', () => {
       'layout.0.nested': { rows: [{ id: 'nested-a' }, { id: 'nested-b' }] },
     }
     expect(resolveRowIDs('layout.$row-a.nested.$nested-b.text', formState)).toBe('layout.0.nested.1.text')
+  })
+})
+
+describe('collectLeafValues', () => {
+  it('collects string leaves with row indexes translated to stable row ids', () => {
+    const formState = {
+      layout: { rows: [{ id: 'a' }, { id: 'b' }] },
+      'layout.0.heading': { value: 'Welcome' },
+      'layout.1.text': { value: 'Some content' },
+      title: { value: 'Hello' },
+    }
+
+    expect(collectLeafValues(formState)).toEqual([
+      { path: 'layout.$a.heading', value: 'Welcome' },
+      { path: 'layout.$b.text', value: 'Some content' },
+      { path: 'title', value: 'Hello' },
+    ])
+  })
+
+  it('resolves nested rows through each array level', () => {
+    const formState = {
+      layout: { rows: [{ id: 'a' }] },
+      'layout.0.nested': { rows: [{ id: 'x' }] },
+      'layout.0.nested.0.label': { value: 'Deep' },
+    }
+
+    expect(collectLeafValues(formState)).toEqual([{ path: 'layout.$a.nested.$x.label', value: 'Deep' }])
+  })
+
+  it('skips non-string and empty values', () => {
+    const formState = {
+      checkbox: { value: true },
+      count: { value: 3 },
+      empty: { value: '   ' },
+      missing: undefined,
+      richText: { value: { root: {} } },
+      title: { value: 'Hello' },
+    }
+
+    expect(collectLeafValues(formState)).toEqual([{ path: 'title', value: 'Hello' }])
+  })
+
+  it('keeps a numeric segment as-is when its parent has no rows', () => {
+    const formState = {
+      'group.0.label': { value: 'Odd but possible' },
+    }
+
+    expect(collectLeafValues(formState)).toEqual([{ path: 'group.0.label', value: 'Odd but possible' }])
   })
 })
 

@@ -1,7 +1,10 @@
-import { isRowIDSegment, rowIDFromSegment } from './pathAttribute.js'
+import { isRowIDSegment, rowIDFromSegment, rowIDSegment } from './pathAttribute.js'
 
 /** Structurally compatible with `@payloadcms/ui`'s `FormState`, without depending on it. */
-export type MinimalFormState = Record<string, { rows?: Array<{ id: string }> } | undefined>
+export type MinimalFormState = Record<string, { rows?: Array<{ id: string }>; value?: unknown } | undefined>
+
+/** A string-valued form field, addressed by a `$rowId`-based path. */
+export type DocumentLeafValue = { path: string; value: string }
 
 export const DEFAULT_COLLAPSIBLE_ANIMATION_MS = 350
 export const DEFAULT_SCROLL_OFFSET = 100
@@ -80,6 +83,47 @@ export const resolveRowIDs = (path: string, formState: MinimalFormState): null |
   }
 
   return resolved.join('.')
+}
+
+/** The inverse of `resolveRowIDs`: `layout.0.heading` → `layout.$abc.heading`. */
+const toRowIDPath = (path: string, formState: MinimalFormState): string => {
+  const segments = path.split('.')
+  const resolved: string[] = []
+  let indexedPrefix = ''
+
+  for (const segment of segments) {
+    let resolvedSegment = segment
+    if (/^\d+$/.test(segment)) {
+      const rowId = formState[indexedPrefix]?.rows?.[Number(segment)]?.id
+      if (rowId) {
+        resolvedSegment = rowIDSegment(rowId)
+      }
+    }
+    resolved.push(resolvedSegment)
+    indexedPrefix = indexedPrefix ? `${indexedPrefix}.${segment}` : segment
+  }
+
+  return resolved.join('.')
+}
+
+/**
+ * Collects every string-valued leaf of the live form state, addressed via
+ * stable row ids (`layout.$abc.heading`) rather than current indexes, so a
+ * match made in the Live Preview iframe stays valid after rows are
+ * reordered. Sent to the iframe for value matching.
+ */
+export const collectLeafValues = (formState: MinimalFormState): DocumentLeafValue[] => {
+  const leaves: DocumentLeafValue[] = []
+
+  for (const [path, field] of Object.entries(formState)) {
+    const value = field?.value
+    if (typeof value !== 'string' || value.trim() === '') {
+      continue
+    }
+    leaves.push({ path: toRowIDPath(path, formState), value })
+  }
+
+  return leaves
 }
 
 /**

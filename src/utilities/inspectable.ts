@@ -1,13 +1,35 @@
 import { LIVE_PREVIEW_PATH_ATTRIBUTE, rowIDSegment } from './pathAttribute.js'
+import { encodeStegaPath, shouldSkipStega } from './stega.js'
 
 const PATH_META = Symbol.for('payload-live-preview-inspector:path')
 
 /**
+ * With `serializable: true`, each object node also carries its path under
+ * this enumerable key, so it survives serialization (e.g. being passed as a
+ * prop across a server-to-client component boundary, where the proxy itself
+ * is stripped). `pathOf()` reads it as a fallback to the proxy metadata.
+ */
+export const SERIALIZED_PATH_KEY = '__payloadLivePreviewPath'
+
+/**
+ * Keys whose string values are compared programmatically by virtually every
+ * consumer (`block.blockType === 'heroBlock'`, `key={block.id}`, slug
+ * routing) - stega mode never encodes these.
+ */
+const STEGA_SKIP_KEYS = new Set(['blockName', 'blockType', 'id', 'slug'])
+
+type NodeOptions = {
+  serializable: boolean
+  stega: boolean
+}
+
+/**
  * `path` is `null` for a tree wrapped with `{ enabled: false }`: nodes still
  * identify themselves to `pathOf()` (which then silently emits nothing)
- * without generating any path attributes.
+ * without generating any path attributes, stega characters, or serialized
+ * markers.
  */
-const createNode = (value: object, path: null | string): object => {
+const createNode = (value: object, path: null | string, options: NodeOptions): object => {
   // Cache child proxies so repeated access to the same property returns the
   // same reference (keeps e.g. React memo/dependency comparisons stable).
   const childCache = new Map<PropertyKey, { proxy: object; raw: unknown }>()
@@ -18,13 +40,34 @@ const createNode = (value: object, path: null | string): object => {
         return path
       }
 
+      if (prop === SERIALIZED_PATH_KEY && options.serializable && path !== null) {
+        return path
+      }
+
       const result = Reflect.get(target, prop, receiver)
 
-      // Primitives can't carry path metadata - they're read via
-      // `pathOf(parent, 'fieldName')` instead. Symbols (iterators etc.) and
-      // functions (array methods - called with the proxy as `this`, so
-      // element access still goes through this trap) pass through untouched.
-      if (typeof prop === 'symbol' || result === null || typeof result !== 'object') {
+      // Symbols (iterators etc.) and functions (array methods - called with
+      // the proxy as `this`, so element access still goes through this trap)
+      // pass through untouched.
+      if (typeof prop === 'symbol') {
+        return result
+      }
+
+      // Primitives can't carry proxy metadata - they're read via
+      // `pathOf(parent, 'fieldName')` instead, unless stega mode bakes the
+      // path invisibly into string values here. Strings read out of arrays
+      // (`hasMany` values) stay raw: consumers compare those (`includes()`).
+      if (result === null || typeof result !== 'object') {
+        if (
+          options.stega &&
+          path !== null &&
+          typeof result === 'string' &&
+          !Array.isArray(target) &&
+          !STEGA_SKIP_KEYS.has(prop) &&
+          !shouldSkipStega(result)
+        ) {
+          return `${result}${encodeStegaPath(path ? `${path}.${prop}` : prop)}`
+        }
         return result
       }
 
@@ -48,23 +91,68 @@ const createNode = (value: object, path: null | string): object => {
         childPath = path ? `${path}.${segment}` : segment
       }
 
-      const proxy = createNode(result, childPath)
+      const proxy = createNode(result, childPath, options)
       childCache.set(prop, { proxy, raw: result })
       return proxy
+    },
+    getOwnPropertyDescriptor(target, prop) {
+      if (
+        prop === SERIALIZED_PATH_KEY &&
+        options.serializable &&
+        path !== null &&
+        !Array.isArray(target) &&
+        !Reflect.has(target, SERIALIZED_PATH_KEY)
+      ) {
+        return { configurable: true, enumerable: true, value: path, writable: false }
+      }
+      return Reflect.getOwnPropertyDescriptor(target, prop)
+    },
+    ownKeys(target) {
+      const keys = Reflect.ownKeys(target)
+      // Arrays can't carry the marker through JSON - their object children
+      // still do, which is what `pathOf()` gets called on anyway.
+      if (options.serializable && path !== null && !Array.isArray(target) && !keys.includes(SERIALIZED_PATH_KEY)) {
+        keys.push(SERIALIZED_PATH_KEY)
+      }
+      return keys
     },
   })
 }
 
 export type InspectableOptions = {
   /**
-   * When `false`, the whole tree renders no path attributes: `pathOf()`
-   * silently returns `{}` for every node (no dev warnings), keeping public
-   * pages free of live-preview markup. Pass your preview signal here when
-   * the same components render both public and preview traffic, e.g.
+   * When `false`, the whole tree is inert: no path attributes, no stega
+   * characters, no serialized markers - `pathOf()` silently returns `{}` for
+   * every node (no dev warnings), keeping public pages free of live-preview
+   * markup. Pass your preview signal here when the same components render
+   * both public and preview traffic, e.g.
    * `inspectable(data, { enabled: draftMode().isEnabled })` in Next.js.
    * @default true
    */
   enabled?: boolean
+  /**
+   * Additionally embeds each object node's path as an enumerable
+   * `__payloadLivePreviewPath` property that survives serialization - so a
+   * node passed as a prop from a Server Component to a Client Component
+   * (where the proxy itself is stripped) still works with `pathOf()`.
+   * Array nodes can't carry the marker across a JSON boundary; their object
+   * children still do. Note that the key shows up in `Object.keys()` and
+   * spreads of wrapped nodes.
+   * @default false
+   */
+  serializable?: boolean
+  /**
+   * Encodes each string field's path into its value as invisible zero-width
+   * characters. `LivePreviewInspectorClient` decodes them from the rendered
+   * DOM inside the Live Preview iframe and tags the containing elements
+   * automatically - no `pathOf()` needed for text content. Values that are
+   * typically compared or parsed rather than rendered are skipped, both by
+   * key (`id`, `blockType`, `blockName`, `slug`) and by shape (URLs, emails,
+   * ISO dates, numeric strings, hex colors, uuids); use `stegaClean()`
+   * wherever you need any other value raw.
+   * @default false
+   */
+  stega?: boolean
 }
 
 /**
@@ -86,15 +174,19 @@ export type InspectableOptions = {
  * ```
  *
  * Plain JavaScript - no hooks, no context - so it works in Server Components
- * too. Caveat: wrap the data inside the component that renders it; the path
- * metadata does not survive a server-to-client component boundary.
+ * too. Caveat: wrap the data inside the component that renders it; the proxy
+ * metadata does not survive a server-to-client component boundary (see the
+ * `serializable` and `stega` options for two ways around that).
  */
 export const inspectable = <T>(data: T, options?: InspectableOptions): T => {
   if (data === null || typeof data !== 'object') {
     return data
   }
 
-  return createNode(data, options?.enabled === false ? null : '') as T
+  return createNode(data, options?.enabled === false ? null : '', {
+    serializable: options?.serializable === true,
+    stega: options?.stega === true,
+  }) as T
 }
 
 /**
@@ -105,10 +197,19 @@ export const inspectable = <T>(data: T, options?: InspectableOptions): T => {
  * isn't inspectable or the resulting path would be empty.
  */
 export const pathOf = (node: unknown, subPath?: string): Record<string, string> => {
-  const basePath =
+  let basePath =
     node !== null && typeof node === 'object'
       ? ((node as Record<symbol, unknown>)[PATH_META] as null | string | undefined)
       : undefined
+
+  // A node that crossed a serialization boundary lost its proxy, but keeps
+  // the marker key when wrapped with `serializable: true`.
+  if (basePath === undefined && node !== null && typeof node === 'object') {
+    const serialized = (node as Record<string, unknown>)[SERIALIZED_PATH_KEY]
+    if (typeof serialized === 'string') {
+      basePath = serialized
+    }
+  }
 
   // `null` means the tree was wrapped with `{ enabled: false }` - emit
   // nothing, intentionally and silently.
@@ -120,7 +221,7 @@ export const pathOf = (node: unknown, subPath?: string): Record<string, string> 
     if (process.env.NODE_ENV !== 'production') {
       // eslint-disable-next-line no-console -- intentional dev-only diagnostic
       console.warn(
-        '[payload-live-preview-inspector] pathOf() received a value that did not come from inspectable() - no path attribute was generated.',
+        '[payload-live-preview-inspector] pathOf() received a value that did not come from inspectable() - no path attribute was generated. If the value crossed a server/client component boundary, wrap the data with inspectable(data, { serializable: true }).',
       )
     }
     return {}

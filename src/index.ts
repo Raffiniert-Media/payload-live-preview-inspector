@@ -46,7 +46,9 @@ export const payloadLivePreviewInspector =
         flashDurationMs: pluginOptions.flashDurationMs,
         scrollOffset: pluginOptions.scrollOffset,
       },
-      path: '@raffiniert-media-ag/payload-live-preview-inspector/client#LivePreviewInspectorListener' as const,
+      // Own subpath (not /client): the listener imports @payloadcms/ui, which
+      // must never be reachable from the frontend-facing /client barrel.
+      path: '@raffiniert-media-ag/payload-live-preview-inspector/listener#LivePreviewInspectorListener' as const,
     })
 
     if (pluginOptions.collections && config.collections) {

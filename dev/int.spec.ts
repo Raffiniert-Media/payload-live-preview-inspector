@@ -20,7 +20,7 @@ describe('Plugin integration tests', () => {
 
     expect(beforeDocumentControls).toContainEqual(
       expect.objectContaining({
-        path: '@raffiniert-media-ag/payload-live-preview-inspector/client#LivePreviewInspectorListener',
+        path: '@raffiniert-media-ag/payload-live-preview-inspector/listener#LivePreviewInspectorListener',
       }),
     )
   })
@@ -30,7 +30,7 @@ describe('Plugin integration tests', () => {
 
     expect(beforeDocumentControls ?? []).not.toContainEqual(
       expect.objectContaining({
-        path: '@raffiniert-media-ag/payload-live-preview-inspector/client#LivePreviewInspectorListener',
+        path: '@raffiniert-media-ag/payload-live-preview-inspector/listener#LivePreviewInspectorListener',
       }),
     )
   })
@@ -41,7 +41,7 @@ describe('Plugin integration tests', () => {
 
     expect(beforeDocumentControls).toContainEqual(
       expect.objectContaining({
-        path: '@raffiniert-media-ag/payload-live-preview-inspector/client#LivePreviewInspectorListener',
+        path: '@raffiniert-media-ag/payload-live-preview-inspector/listener#LivePreviewInspectorListener',
       }),
     )
   })

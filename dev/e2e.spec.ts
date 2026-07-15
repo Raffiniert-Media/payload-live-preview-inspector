@@ -54,12 +54,64 @@ test('clicking a component in the live preview scrolls and highlights the matchi
   await login(page)
 
   const frame = await openLivePreview(page)
-  const title = frame.locator('[data-payload-live-preview-path="title"]')
+  // The h1 specifically - value matching auto-tags the footer with the same
+  // "title" path (covered by its own test below).
+  const title = frame.locator('h1[data-payload-live-preview-path="title"]')
 
   await title.hover()
   await expect(title).toHaveClass(/payload-live-preview-inspector-hovered/)
 
   await title.click()
+
+  const titleField = page.locator('#field-title')
+  await expect(titleField).toBeInViewport()
+  await expect(titleField).toHaveClass(/flash/)
+})
+
+test('stega: auto-tags text rendered without pathOf and scrolls to its field on click', async ({ page }) => {
+  await login(page)
+
+  const frame = await openLivePreview(page)
+
+  // The content block's <p> renders `block.text` through the stega-enabled
+  // proxy and carries no pathOf() attribute in the JSX - the scanner decodes
+  // the invisible path and tags it.
+  const text = frame.locator('[data-testid="stega-text"]')
+  await expect(text).toHaveAttribute('data-payload-live-preview-path', /^layout\.\$.+\.text$/)
+  await expect(text).toHaveAttribute('data-payload-live-preview-auto', 'stega')
+
+  await text.click()
+
+  const textField = page.locator('#field-layout__1__text')
+  await expect(textField).toBeInViewport()
+  await expect(textField).toHaveClass(/flash/)
+})
+
+test('container inference: tags the content block section from its stega leaf', async ({ page }) => {
+  await login(page)
+
+  const frame = await openLivePreview(page)
+
+  // The <section> around the stega-tagged <p> has no pathOf() either - it is
+  // inferred as the block row's container from the leaf inside it.
+  const section = frame.locator('[data-testid="content-section"]')
+  await expect(section).toHaveAttribute('data-payload-live-preview-path', /^layout\.\$[^.]+$/)
+  await expect(section).toHaveAttribute('data-payload-live-preview-auto', 'container')
+})
+
+test('value matching: tags an element rendered from raw, unproxied data', async ({ page }) => {
+  await login(page)
+
+  const frame = await openLivePreview(page)
+
+  // The footer renders the raw `data.title` - no proxy, no stega, no pathOf.
+  // The scanner asks the admin panel for the field values and matches the
+  // footer's text against the unique `title` value.
+  const footer = frame.locator('[data-testid="match-title"]')
+  await expect(footer).toHaveAttribute('data-payload-live-preview-path', 'title', { timeout: 15_000 })
+  await expect(footer).toHaveAttribute('data-payload-live-preview-auto', 'match')
+
+  await footer.click()
 
   const titleField = page.locator('#field-title')
   await expect(titleField).toBeInViewport()
