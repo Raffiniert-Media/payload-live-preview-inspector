@@ -97,9 +97,10 @@ export const LivePreviewInspectorListener: React.FC<LivePreviewInspectorListener
       const didExpand = expandCollapsedAncestors(el)
 
       const revealField = () => {
-        scrollToElement(el, scrollOffset)
-        sharedFlashElement(el, { className: classes.flash, color: flashColor, durationMs: flashDurationMs })
-        focusElement(el)
+        void scrollToElement(el, scrollOffset).then(() => {
+          sharedFlashElement(el, { className: classes.flash, color: flashColor, durationMs: flashDurationMs })
+          focusElement(el)
+        })
       }
 
       if (didExpand) {

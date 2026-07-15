@@ -1,6 +1,8 @@
+import type { Page } from '@playwright/test'
+
 import { expect, test } from '@playwright/test'
 
-const login = async (page: import('@playwright/test').Page) => {
+const login = async (page: Page) => {
   await page.goto('/admin')
   await page.fill('#field-email', 'dev@payloadcms.com')
   await page.fill('#field-password', 'test')
@@ -8,14 +10,7 @@ const login = async (page: import('@playwright/test').Page) => {
   await expect(page).toHaveTitle(/Dashboard/)
 }
 
-test('should render admin panel logo', async ({ page }) => {
-  await login(page)
-  await expect(page.locator('.graphic-icon')).toBeVisible()
-})
-
-test('clicking a component in the live preview scrolls and highlights the matching field', async ({ page }) => {
-  await login(page)
-
+const openLivePreview = async (page: Page) => {
   await page.goto('/admin/collections/posts')
   await page.click('.table tbody tr:first-child a')
 
@@ -28,7 +23,18 @@ test('clicking a component in the live preview scrolls and highlights the matchi
     await expect(page.locator('#live-preview-iframe')).toBeVisible({ timeout: 2_000 })
   }).toPass()
 
-  const frame = page.frameLocator('#live-preview-iframe')
+  return page.frameLocator('#live-preview-iframe')
+}
+
+test('should render admin panel logo', async ({ page }) => {
+  await login(page)
+  await expect(page.locator('.graphic-icon')).toBeVisible()
+})
+
+test('clicking a component in the live preview scrolls and highlights the matching field', async ({ page }) => {
+  await login(page)
+
+  const frame = await openLivePreview(page)
   const title = frame.locator('[data-payload-live-preview-path="title"]')
 
   await title.hover()
@@ -39,4 +45,18 @@ test('clicking a component in the live preview scrolls and highlights the matchi
   const titleField = page.locator('#field-title')
   await expect(titleField).toBeInViewport()
   await expect(titleField).toHaveClass(/flash/)
+})
+
+test('disables link navigation inside the live preview iframe by default', async ({ page }) => {
+  await login(page)
+
+  const frame = await openLivePreview(page)
+  const link = frame.locator('[data-testid="live-preview-test-link"]')
+
+  await link.click()
+
+  // The link's own onClick (simulating a client-side router, like Next.js'
+  // <Link>) never ran - our capture-phase interceptor stopped the event
+  // before it reached the link's bubble-phase handler.
+  await expect(link).not.toHaveAttribute('data-navigated', 'true')
 })

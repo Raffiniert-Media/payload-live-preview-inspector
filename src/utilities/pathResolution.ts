@@ -115,9 +115,50 @@ export const expandCollapsedAncestors = (el: HTMLElement): boolean => {
   return expanded
 }
 
-export const scrollToElement = (el: HTMLElement, offset: number = DEFAULT_SCROLL_OFFSET): void => {
+/** Safety net in case `scrollend` never fires (e.g. an older browser). */
+const SCROLL_END_FALLBACK_MS = 1000
+
+/**
+ * Smooth-scrolls to `el` and resolves once the scroll actually finishes (via
+ * the `scrollend` event), or immediately if the field is already visible
+ * in the viewport. Callers use this to delay revealing the field
+ * (flash/focus) until the page has stopped moving, instead of racing the
+ * scroll animation - but only when a real, noticeable scroll is happening.
+ * A field that's already on screen is rarely pixel-perfect at `offset`, so
+ * still nudging it there is worthwhile, but not worth delaying the reveal
+ * over - that nudge just happens in the background.
+ */
+export const scrollToElement = (el: HTMLElement, offset: number = DEFAULT_SCROLL_OFFSET): Promise<void> => {
   const bounds = el.getBoundingClientRect()
-  window.scrollBy({ behavior: 'smooth', top: bounds.top - offset })
+  const delta = bounds.top - offset
+
+  if (Math.abs(delta) < 1) {
+    return Promise.resolve()
+  }
+
+  window.scrollBy({ behavior: 'smooth', top: delta })
+
+  const alreadyInViewport = bounds.top >= 0 && bounds.top <= window.innerHeight
+  if (alreadyInViewport) {
+    return Promise.resolve()
+  }
+
+  return new Promise((resolve) => {
+    let settled = false
+
+    const settle = () => {
+      if (settled) {
+        return
+      }
+      settled = true
+      window.removeEventListener('scrollend', settle)
+      clearTimeout(fallback)
+      resolve()
+    }
+
+    const fallback = setTimeout(settle, SCROLL_END_FALLBACK_MS)
+    window.addEventListener('scrollend', settle, { once: true })
+  })
 }
 
 export const focusElement = (el: HTMLElement): void => {

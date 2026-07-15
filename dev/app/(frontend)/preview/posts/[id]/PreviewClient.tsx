@@ -21,6 +21,23 @@ export const PreviewClient = ({ initialData }: Props) => {
     <main style={{ fontFamily: 'sans-serif', margin: '0 auto', maxWidth: 640, padding: '2rem' }}>
       <LivePreviewInspectorClient />
       <h1 {...pathOf(page, 'title')}>{page.title}</h1>
+      {/* Exercises `disableLinks` against a client-side-routed link (like
+          Next.js' <Link>, which navigates via history.pushState in its own
+          onClick regardless of preventDefault) without depending on Next's
+          own types for it - see LivePreviewInspectorClient's `disableLinks`
+          doc comment for why this needs the capture phase. */}
+      <a
+        data-testid="live-preview-test-link"
+        href="/should-not-navigate"
+        onClick={(event) => {
+          // Marks that this handler ran, so the test can assert it never did
+          // - a real router's <Link> would call `router.push()` here instead.
+          event.preventDefault()
+          event.currentTarget.dataset.navigated = 'true'
+        }}
+      >
+        A link that should not navigate in Live Preview
+      </a>
       {page.layout?.map((block, index) => {
         if (block.blockType === 'heroBlock') {
           return (

@@ -16,6 +16,15 @@ export const LIVE_PREVIEW_HOVER_CLASS_NAME = 'payload-live-preview-inspector-hov
 
 export type LivePreviewInspectorClientProps = {
   /**
+   * When true, clicking a link (`<a href>`) inside the Live Preview iframe -
+   * including client-side router links like Next.js' `<Link>` - does nothing
+   * instead of navigating away. Live Preview is normally used to inspect
+   * fields, not to browse, so this is on by default; set to `false` to
+   * restore normal link navigation.
+   * @default true
+   */
+  disableLinks?: boolean
+  /**
    * Outline color used to highlight the hovered element. Defaults to the
    * shipped CSS (`LivePreviewInspectorClient.module.css`) if omitted.
    */
@@ -51,6 +60,7 @@ const resolveTargetOrigin = (): string => {
 }
 
 export const LivePreviewInspectorClient: React.FC<LivePreviewInspectorClientProps> = ({
+  disableLinks = true,
   hoverColor,
   targetOrigin,
 }) => {
@@ -97,6 +107,18 @@ export const LivePreviewInspectorClient: React.FC<LivePreviewInspectorClientProp
     }
 
     const onClick = (event: MouseEvent) => {
+      if (disableLinks) {
+        const link = (event.target as Element | null)?.closest?.('a[href]')
+        if (link) {
+          // Capture-phase + stopPropagation so this runs before (and blocks)
+          // a client-side router's own click handler (e.g. Next.js' <Link>),
+          // which navigates via history.pushState regardless of
+          // preventDefault - a bubble-phase listener would be too late.
+          event.preventDefault()
+          event.stopPropagation()
+        }
+      }
+
       const el = findTarget(event)
       if (!el) {
         return
@@ -112,17 +134,17 @@ export const LivePreviewInspectorClient: React.FC<LivePreviewInspectorClientProp
 
     document.addEventListener('mouseover', onMouseOver)
     document.addEventListener('mouseout', onMouseOut)
-    document.addEventListener('click', onClick)
+    document.addEventListener('click', onClick, { capture: true })
 
     return () => {
       document.removeEventListener('mouseover', onMouseOver)
       document.removeEventListener('mouseout', onMouseOut)
-      document.removeEventListener('click', onClick)
+      document.removeEventListener('click', onClick, { capture: true })
       if (hovered) {
         unhighlight(hovered)
       }
     }
-  }, [hoverColor, targetOrigin])
+  }, [disableLinks, hoverColor, targetOrigin])
 
   return null
 }

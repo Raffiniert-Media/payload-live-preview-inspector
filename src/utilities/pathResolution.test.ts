@@ -142,9 +142,77 @@ describe('scrollToElement', () => {
     const scrollBy = vi.fn()
     vi.stubGlobal('scrollBy', scrollBy)
 
-    scrollToElement(el, 80)
+    void scrollToElement(el, 80)
 
     expect(scrollBy).toHaveBeenCalledWith({ behavior: 'smooth', top: 420 })
+  })
+
+  it('resolves once "scrollend" fires when the element is off-screen', async () => {
+    const el = document.createElement('div')
+    document.body.append(el)
+    // Beyond happy-dom's default 768px innerHeight - genuinely off-screen.
+    vi.spyOn(el, 'getBoundingClientRect').mockReturnValue({ top: 2000 } as DOMRect)
+    vi.stubGlobal('scrollBy', vi.fn())
+
+    let resolved = false
+    void scrollToElement(el, 80).then(() => {
+      resolved = true
+    })
+
+    await Promise.resolve()
+    expect(resolved).toBe(false)
+
+    window.dispatchEvent(new Event('scrollend'))
+    await Promise.resolve()
+
+    expect(resolved).toBe(true)
+  })
+
+  it('resolves immediately when the element is already in position', async () => {
+    const el = document.createElement('div')
+    document.body.append(el)
+    vi.spyOn(el, 'getBoundingClientRect').mockReturnValue({ top: 80 } as DOMRect)
+    const scrollBy = vi.fn()
+    vi.stubGlobal('scrollBy', scrollBy)
+
+    await scrollToElement(el, 80)
+
+    expect(scrollBy).not.toHaveBeenCalled()
+  })
+
+  it('resolves immediately (without waiting for "scrollend") when already visible in the viewport, even if not exactly at the offset', async () => {
+    const el = document.createElement('div')
+    document.body.append(el)
+    // On screen (within happy-dom's default 768px innerHeight) but nowhere
+    // near the 80px offset - still nudged toward it, but not worth a wait.
+    vi.spyOn(el, 'getBoundingClientRect').mockReturnValue({ top: 300 } as DOMRect)
+    const scrollBy = vi.fn()
+    vi.stubGlobal('scrollBy', scrollBy)
+
+    await scrollToElement(el, 80)
+
+    expect(scrollBy).toHaveBeenCalledWith({ behavior: 'smooth', top: 220 })
+  })
+
+  it('falls back to resolving after a timeout if "scrollend" never fires', async () => {
+    vi.useFakeTimers()
+    const el = document.createElement('div')
+    document.body.append(el)
+    vi.spyOn(el, 'getBoundingClientRect').mockReturnValue({ top: 2000 } as DOMRect)
+    vi.stubGlobal('scrollBy', vi.fn())
+
+    let resolved = false
+    void scrollToElement(el, 80).then(() => {
+      resolved = true
+    })
+
+    await vi.advanceTimersByTimeAsync(999)
+    expect(resolved).toBe(false)
+
+    await vi.advanceTimersByTimeAsync(1)
+    expect(resolved).toBe(true)
+
+    vi.useRealTimers()
   })
 })
 

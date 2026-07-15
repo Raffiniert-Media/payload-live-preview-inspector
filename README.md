@@ -6,8 +6,8 @@ This plugin does **not** set up Live Preview itself. It adds the click-to-scroll
 
 ## How it works
 
-- **In the iframe (your frontend):** `LivePreviewInspectorClient` listens for hover/click on any element carrying a `data-payload-live-preview-path` attribute. Hover highlights the element locally; click posts a message to the parent window with that path.
-- **In the admin panel:** `LivePreviewInspectorListener` is auto-registered by the plugin into the Edit view of every collection/global you enable it for. It listens for that message, resolves the field path (translating any Array/Blocks row ids to their current index via the live form state), expands any collapsed accordions in the way, scrolls to the field, flashes it, and focuses it. It also shows a small hint next to the document controls while you're on the Live Preview tab.
+- **In the iframe (your frontend):** `LivePreviewInspectorClient` listens for hover/click on any element carrying a `data-payload-live-preview-path` attribute. Hover highlights the element locally; click posts a message to the parent window with that path. It also blocks link navigation by default (see [Link interception](#link-interception) below).
+- **In the admin panel:** `LivePreviewInspectorListener` is auto-registered by the plugin into the Edit view of every collection/global you enable it for. It listens for that message, resolves the field path (translating any Array/Blocks row ids to their current index via the live form state), expands any collapsed accordions in the way, scrolls to the field, and - once the scroll actually finishes moving - flashes and focuses it. It also shows a small hint next to the document controls while you're on the Live Preview tab.
 
 Outside of an iframe (i.e. your frontend rendered directly, not inside Live Preview), `LivePreviewInspectorClient` is a no-op — it doesn't attach any listeners.
 
@@ -70,7 +70,10 @@ import { LivePreviewInspectorClient } from '@raffiniert-media-ag/payload-live-pr
 export default function PreviewPage() {
   return (
     <>
-      <LivePreviewInspectorClient hoverColor="#ff6b00" /* optional, defaults to shipped CSS */ />
+      <LivePreviewInspectorClient
+        hoverColor="#ff6b00" // optional, defaults to shipped CSS
+        disableLinks={false} // optional, defaults to true - see "Link interception" below
+      />
       {/* ...your page... */}
     </>
   )
@@ -96,6 +99,16 @@ const page = inspectable(data)
 `pathOf(node)` addresses the node itself (e.g. a whole block); `pathOf(node, 'fieldName')` addresses a field on it. This is plain JavaScript — no hooks, no context — so it works in Server Components too. One caveat: call `inspectable()` inside the component that renders the data; the path metadata does not survive a server-to-client component boundary.
 
 There is no auto-discovery: an element without a path attribute is simply not clickable, silently.
+
+## Link interception
+
+By default, `LivePreviewInspectorClient` prevents any `<a href>` inside the Live Preview iframe from navigating - Live Preview is normally used to inspect fields, not to browse away from the page you're editing. This also blocks client-side router links (Next.js' `<Link>`, React Router's `<Link>`, etc.), which navigate via `history.pushState` in their own click handler regardless of `preventDefault()` - the click is intercepted in the capture phase, before it ever reaches the link's own handler.
+
+Set `disableLinks={false}` to restore normal link navigation:
+
+```tsx
+<LivePreviewInspectorClient disableLinks={false} />
+```
 
 ## Production / performance
 
@@ -130,7 +143,7 @@ Exported from `@raffiniert-media-ag/payload-live-preview-inspector` (admin/confi
 
 Exported from `@raffiniert-media-ag/payload-live-preview-inspector/client` (frontend + admin components):
 
-- `LivePreviewInspectorClient({ hoverColor?, targetOrigin? })` — mount once in your preview page/layout. `targetOrigin` pins the `postMessage` target to your admin panel's origin (e.g. `'https://cms.example.com'`); when omitted it is auto-detected (see Known limitations).
+- `LivePreviewInspectorClient({ disableLinks?, hoverColor?, targetOrigin? })` — mount once in your preview page/layout. `disableLinks` (default `true`) blocks link navigation inside the iframe (see [Link interception](#link-interception)). `targetOrigin` pins the `postMessage` target to your admin panel's origin (e.g. `'https://cms.example.com'`); when omitted it is auto-detected (see Known limitations).
 - `inspectable(data, options?)` — wraps document data in a path-tracking proxy (see above). `options.enabled: false` turns the whole tree off for public pages (see Production / performance).
 - `pathOf(node, subPath?)` — returns the path attribute for a node obtained through `inspectable()`.
 - `LIVE_PREVIEW_PATH_ATTRIBUTE` — the raw attribute name, if you'd rather set it yourself.
@@ -143,6 +156,8 @@ Exported from `@raffiniert-media-ag/payload-live-preview-inspector/client` (fron
 - Multi-locale setups or fields duplicated inside drawers can get suffixed DOM ids (Payload's `generateFieldID`); the plain `field-<path>` lookup may occasionally miss in those edge cases.
 - The frontend's `postMessage` falls back to a `'*'` target origin if neither `window.location.ancestorOrigins` (unsupported in Firefox) nor `document.referrer` resolve an origin. The message payload is just a field-path string, so this is low-risk — but you can pin it explicitly via `<LivePreviewInspectorClient targetOrigin="https://cms.example.com" />`.
 - If a tagged Array/Blocks row is deleted between when the frontend was rendered and when you click it, its row id will no longer resolve — the click silently no-ops (same as any other unresolvable path).
+- `disableLinks` only intercepts normal left-clicks; a middle-click or Cmd/Ctrl-click to open a link in a new tab bypasses it (usually what you'd want anyway).
+- Scroll-then-reveal timing relies on the `scrollend` event (supported in all current evergreen browsers). If a browser doesn't fire it, a 1s fallback timeout still reveals the field, just without the exact "waits for the scroll to finish" precision.
 
 ## Local development
 
