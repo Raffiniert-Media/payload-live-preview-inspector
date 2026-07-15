@@ -27,8 +27,10 @@ export default defineConfig({
    * list → a document's edit view (form, sidebar, live preview panel) can
    * comfortably exceed Playwright's 30s default before anything is even slow
    * by app standards - bump it well above what a warm local dev server needs.
+   * `dev/e2e.spec.ts`'s own retry loops (for hydration-swallowed clicks) can
+   * use up to 90s of that on their own, so there's real headroom above it.
    */
-  timeout: process.env.CI ? 90_000 : 30_000,
+  timeout: process.env.CI ? 150_000 : 30_000,
   /* Retry on CI only */
   retries: process.env.CI ? 2 : 0,
   workers: 1,
