@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.3.1
+
+Fixes a production-breaking flaw in stega mode: programmatic string values — Payload select/radio values, CSS-class-map keys, enum discriminants (e.g. `iconColorState: 'default'`) — were stega-encoded, so object-key lookups and strict comparisons in consuming code silently failed (`iconColorStates[value]` → `undefined` → TypeError). The hardcoded 4-key skip-list and shape heuristics couldn't catch plain words like `'default'`.
+
+- **Changed default:** stega now only encodes prose-shaped strings — **two or more whitespace-separated words**. Single-token values are never encoded; they are exactly what consuming code compares against, and select/enum values practically never contain whitespace, so they're safe by construction instead of by audit. The trade-off: single-word *display* text (a `'Kontakt'` heading) is no longer stega-tagged — the value-matching layer or `pathOf()` covers those, and a missing tag is harmless while a corrupted enum is not.
+- **New:** `stega` accepts an options object: `{ skipKeys: [...] }` excludes additional field names (e.g. a field storing a space-separated CSS class list), and `{ filter: ({ defaultEncode, key, path, value }) => boolean }` gets the final say per string — force-encode a known-rendered single-word field, or exclude more. `StegaOptions` is exported.
+- README's stega section now documents the select/enum hazard explicitly, including how to opt fields in/out.
+
 ## 1.3.0
 
 Two automatic tagging layers on top of explicit `pathOf()` tagging, a fix for the server/client component boundary caveat, and a bundle-size fix that splits the package into purpose-specific entry points.

@@ -9,6 +9,12 @@
  */
 export { LivePreviewInspectorClient } from '../components/LivePreviewInspectorClient.js'
 export { LIVE_PREVIEW_HOVER_CLASS_NAME } from '../utilities/hoverClassName.js'
-export { inspectable, type InspectableOptions, pathOf, SERIALIZED_PATH_KEY } from '../utilities/inspectable.js'
+export {
+  inspectable,
+  type InspectableOptions,
+  pathOf,
+  SERIALIZED_PATH_KEY,
+  type StegaOptions,
+} from '../utilities/inspectable.js'
 export { LIVE_PREVIEW_AUTO_ATTRIBUTE, LIVE_PREVIEW_PATH_ATTRIBUTE } from '../utilities/pathAttribute.js'
 export { stegaClean } from '../utilities/stega.js'

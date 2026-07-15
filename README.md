@@ -142,9 +142,28 @@ const page = inspectable(data, { stega: true })
 ))}
 ```
 
-Every string read from the proxy carries its field path as a run of invisible (zero-width) characters. Wherever that string ends up in the rendered DOM — however many components, props, or even server-to-client boundaries it passed through — the client's scanner decodes the path and tags the containing element. A few text-bearing attributes (`alt`, `title`, `aria-label`, `placeholder`) are scanned too.
+Every encoded string read from the proxy carries its field path as a run of invisible (zero-width) characters. Wherever that string ends up in the rendered DOM — however many components, props, or even server-to-client boundaries it passed through — the client's scanner decodes the path and tags the containing element. A few text-bearing attributes (`alt`, `title`, `aria-label`, `placeholder`) are scanned too.
 
-Values that are typically compared or parsed rather than rendered are never encoded: by key (`id`, `blockType`, `blockName`, `slug`) and by shape (URLs, relative paths, emails, ISO dates, numeric strings, hex colors, uuids). For any other value you need raw — comparisons, `new Date()`, sending data to an API — use `stegaClean()`:
+**What gets encoded — and the select/enum hazard.** Only prose-shaped values are encoded: **a string must contain at least two whitespace-separated words**. This is the load-bearing safety rule, not an optimization. Single-token values — `'default'`, `'topRight'`, `'primary-dark'` — are exactly what consuming code uses as object keys, `switch` discriminants, CSS-class-map lookups, and strict-comparison targets; encoding one of them makes `iconColorStates[block.iconColorState]` silently return `undefined` and crash in production. Payload **select/radio values, enum-like fields, and variant tokens practically never contain whitespace, so they are safe by construction** — you don't have to enumerate or audit them. The flip side: single-word *display* text (a `'Kontakt'` heading) isn't stega-tagged either; that's intentional — a missing tag is harmless (the value-matching layer or `pathOf()` covers it), a corrupted enum is not.
+
+Also always skipped: the keys `id`, `blockType`, `blockName`, `slug`; values shaped like URLs, relative paths, emails, ISO dates, numbers, hex colors, or uuids; and strings read out of arrays (`hasMany` values are compared with `includes()`).
+
+For the cases the defaults can't know about, pass an options object instead of `true`:
+
+```ts
+const page = inspectable(data, {
+  stega: {
+    // never encode these fields, even if their values look like prose
+    // (e.g. a field storing a space-separated CSS class list):
+    skipKeys: ['cssClasses'],
+    // the final say per string - receives the default decision:
+    filter: ({ defaultEncode, key, path, value }) =>
+      key === 'buttonLabel' ? true : defaultEncode, // force-encode a known-rendered single-word field
+  },
+})
+```
+
+For any encoded value you need raw — comparisons, `new Date()`, sending data to an API — use `stegaClean()`:
 
 ```ts
 import { stegaClean } from '@raffiniert-media-ag/payload-live-preview-inspector/path'
@@ -153,7 +172,7 @@ stegaClean(page.title)      // the raw string
 stegaClean(page)            // deep-cleans a whole plain-object tree
 ```
 
-Trade-off to know about: encoded strings contain extra characters. `===` against literals fails, `.length` is inflated, and truncating with `slice()` can cut a block in half (the tag is then simply lost — never wrong). All of it only exists in preview mode (see [Production](#production--performance)).
+Trade-off to know about: encoded strings contain extra characters. `===` against literals fails, `.length` is inflated, and truncating with `slice()` can cut a block in half (the tag is then simply lost — never wrong). The two-word rule keeps this away from programmatic values, but prose you compare or parse still needs `stegaClean()` (or a `skipKeys` entry). All of it only exists in preview mode (see [Production](#production--performance)).
 
 ### 3. Value matching — zero-config
 
@@ -223,7 +242,7 @@ Exported from `@raffiniert-media-ag/payload-live-preview-inspector` (admin/confi
 
 Exported from `@raffiniert-media-ag/payload-live-preview-inspector/path` (pure data helpers — safe to import anywhere, zero client-bundle impact; all of these are also re-exported from `/client` for convenience):
 
-- `inspectable(data, options?)` — wraps document data in a path-tracking proxy (see above). `options.enabled: false` turns the whole tree off for public pages (see Production / performance); `options.stega: true` encodes paths into string values (see [Tagging](#tagging-three-layers)); `options.serializable: true` embeds paths as serialization-surviving marker keys (see [Server/client component boundaries](#serverclient-component-boundaries)).
+- `inspectable(data, options?)` — wraps document data in a path-tracking proxy (see above). `options.enabled: false` turns the whole tree off for public pages (see Production / performance); `options.stega: true | { skipKeys?, filter? }` encodes paths into prose-shaped string values (see [Tagging](#tagging-three-layers) for the two-word rule and the fine-tuning options); `options.serializable: true` embeds paths as serialization-surviving marker keys (see [Server/client component boundaries](#serverclient-component-boundaries)).
 - `pathOf(node, subPath?)` — returns the path attribute for a node obtained through `inspectable()` (directly, or across a JSON boundary with `serializable: true`).
 - `stegaClean(value)` — strips stega-encoded blocks from a string, or deeply from every string in a plain object/array tree. Use wherever you need a raw value.
 - `LIVE_PREVIEW_PATH_ATTRIBUTE` — the raw attribute name, if you'd rather set it yourself.
@@ -247,7 +266,7 @@ Exported from `@raffiniert-media-ag/payload-live-preview-inspector/listener` (ad
 - If a tagged Array/Blocks row is deleted between when the frontend was rendered and when you click it, its row id will no longer resolve — the click silently no-ops (same as any other unresolvable path).
 - `disableLinks` only intercepts normal left-clicks; a middle-click or Cmd/Ctrl-click to open a link in a new tab bypasses it (usually what you'd want anyway).
 - Scroll-then-reveal timing relies on the `scrollend` event (supported in all current evergreen browsers). If a browser doesn't fire it, a 1s fallback timeout still reveals the field, just without the exact "waits for the scroll to finish" precision.
-- Stega only reaches values that end up as rendered text (or in `alt`/`title`/`aria-label`/`placeholder`). Images, numbers, booleans, selects rendered as icons — anything without a string in the DOM — still needs `pathOf()`. String operations in your frontend that reshape the value (`slice()`, `split()`, regexes) can destroy the encoded block; the element is then simply untagged, never mistagged.
+- Stega only reaches values that end up as rendered text (or in `alt`/`title`/`aria-label`/`placeholder`), and only when they contain two or more words. Images, numbers, booleans, selects rendered as icons, single-word display text — anything the two-word rule or the DOM excludes — still needs `pathOf()` or value matching. String operations in your frontend that reshape the value (`slice()`, `split()`, regexes) can destroy the encoded block; the element is then simply untagged, never mistagged.
 - Stega characters live inside string values while previewing: text copied out of the preview iframe carries them, and screen-reader behavior on zero-width characters varies. Both are preview-only concerns; public pages never contain them (with `enabled` wired correctly).
 - Value matching requires exact whole-element text equality with exactly one field's current value. Formatted dates, truncated teasers, values rendered inside larger sentences, and rich text don't match — by design (missing a tag beats guessing wrong).
 - Container inference is a heuristic: a block that renders no taggable leaf at all gets no container, and heavily interleaved markup makes it back off. `pathOf(block)` is the reliable way to tag those.

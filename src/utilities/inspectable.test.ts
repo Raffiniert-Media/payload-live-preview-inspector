@@ -107,18 +107,38 @@ describe('inspectable / pathOf', () => {
   })
 
   describe('stega', () => {
-    it('encodes each string field path into its value', () => {
-      const page = inspectable({ layout: [{ id: 'a', heading: 'Hi' }], title: 'Hello' }, { stega: true })
+    it('encodes each prose string field path into its value', () => {
+      const page = inspectable(
+        { layout: [{ id: 'a', heading: 'Hi there friend' }], title: 'Hello world' },
+        { stega: true },
+      )
 
       expect(findStegaPaths(page.title)).toEqual(['title'])
-      expect(stegaClean(page.title)).toBe('Hello')
+      expect(stegaClean(page.title)).toBe('Hello world')
       expect(findStegaPaths(page.layout[0].heading)).toEqual(['layout.$a.heading'])
-      expect(stegaClean(page.layout[0].heading)).toBe('Hi')
+      expect(stegaClean(page.layout[0].heading)).toBe('Hi there friend')
     })
 
     it('leaves strings untouched when stega is off (default)', () => {
-      const page = inspectable({ title: 'Hello' })
-      expect(page.title).toBe('Hello')
+      const page = inspectable({ title: 'Hello world' })
+      expect(page.title).toBe('Hello world')
+    })
+
+    it('never encodes single-token values - select/radio values and enum-like fields stay raw', () => {
+      const page = inspectable(
+        { heading: 'Kontakt', iconColorState: 'default', size: 'primary-dark', tagPosition: 'topRight' },
+        { stega: true },
+      )
+
+      const iconColorStates = { default: { base: '#000' } } as Record<string, { base: string }>
+      expect(iconColorStates[page.iconColorState].base).toBe('#000')
+
+      expect(page.iconColorState).toBe('default')
+      expect(page.tagPosition).toBe('topRight')
+      expect(page.size).toBe('primary-dark')
+      // Single-word display text isn't stega-tagged either - value matching
+      // or pathOf() cover it. Better untagged than a production TypeError.
+      expect(page.heading).toBe('Kontakt')
     })
 
     it('skips programmatically-compared keys like id, blockType, and slug', () => {
@@ -140,20 +160,58 @@ describe('inspectable / pathOf', () => {
     })
 
     it('skips strings read out of arrays (hasMany values are compared)', () => {
-      const page = inspectable({ tags: ['featured', 'news'] }, { stega: true })
+      const page = inspectable({ tags: ['featured stories', 'news'] }, { stega: true })
 
-      expect(page.tags[0]).toBe('featured')
+      expect(page.tags[0]).toBe('featured stories')
       expect(page.tags.includes('news')).toBe(true)
     })
 
     it('encodes nothing when the tree is disabled', () => {
-      const page = inspectable({ title: 'Hello' }, { enabled: false, stega: true })
-      expect(page.title).toBe('Hello')
+      const page = inspectable({ title: 'Hello world' }, { enabled: false, stega: true })
+      expect(page.title).toBe('Hello world')
     })
 
     it('does not interfere with pathOf()', () => {
       const page = inspectable({ layout: [{ id: 'a', heading: 'Hi' }] }, { stega: true })
       expect(pathOf(page.layout[0], 'heading')).toEqual(attr('layout.$a.heading'))
+    })
+
+    it('supports extra skipKeys for prose-shaped but programmatic fields', () => {
+      const page = inspectable(
+        { cssClasses: 'btn btn-primary is-large', teaser: 'Read the whole story' },
+        { stega: { skipKeys: ['cssClasses'] } },
+      )
+
+      expect(page.cssClasses).toBe('btn btn-primary is-large')
+      expect(findStegaPaths(page.teaser)).toEqual(['teaser'])
+    })
+
+    it('lets a filter override the default decision in both directions', () => {
+      const page = inspectable(
+        { buttonLabel: 'Kontakt', teaser: 'Read the whole story' },
+        {
+          stega: {
+            filter: ({ defaultEncode, key }) => (key === 'buttonLabel' ? true : key === 'teaser' ? false : defaultEncode),
+          },
+        },
+      )
+
+      expect(findStegaPaths(page.buttonLabel)).toEqual(['buttonLabel'])
+      expect(page.teaser).toBe('Read the whole story')
+    })
+
+    it('passes the full field path and value to the filter', () => {
+      const seen: Array<{ defaultEncode: boolean; key: string; path: string; value: string }> = []
+      const page = inspectable(
+        { layout: [{ id: 'a', heading: 'Hi there' }] },
+        { stega: { filter: (args) => (seen.push(args), args.defaultEncode) } },
+      )
+
+      void page.layout[0].heading
+
+      expect(seen).toEqual([
+        { defaultEncode: true, key: 'heading', path: 'layout.$a.heading', value: 'Hi there' },
+      ])
     })
   })
 

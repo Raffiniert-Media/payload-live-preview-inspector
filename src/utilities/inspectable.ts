@@ -16,11 +16,51 @@ export const SERIALIZED_PATH_KEY = '__payloadLivePreviewPath'
  * consumer (`block.blockType === 'heroBlock'`, `key={block.id}`, slug
  * routing) - stega mode never encodes these.
  */
-const STEGA_SKIP_KEYS = new Set(['blockName', 'blockType', 'id', 'slug'])
+const STEGA_SKIP_KEYS = ['blockName', 'blockType', 'id', 'slug']
+
+/**
+ * The load-bearing default: only strings with at least two
+ * whitespace-separated words are encoded. Single-token values (`'default'`,
+ * `'topRight'`, `'primary-dark'`) are exactly what consuming code uses as
+ * object keys, switch discriminants, and strict-comparison targets - Payload
+ * select/radio values, CSS-class-map keys and enum-like fields practically
+ * never contain whitespace, so they are safe by construction, without any
+ * word-list guessing. The cost is asymmetric: a skipped single-word heading
+ * merely isn't stega-tagged (value matching or `pathOf()` cover it); an
+ * encoded enum value crashes consuming code.
+ */
+const looksLikeProse = (value: string): boolean => /\S\s+\S/.test(value)
+
+export type StegaOptions = {
+  /**
+   * The final say per string, replacing the default decision. Receives the
+   * default (`defaultEncode`) so you can start from it - e.g. force-encode a
+   * known-rendered single-word field, or exclude one more programmatic one:
+   *
+   * ```ts
+   * filter: ({ defaultEncode, key }) =>
+   *   key === 'buttonLabel' ? true : key === 'cssClasses' ? false : defaultEncode
+   * ```
+   *
+   * `path` is the full field path (`layout.$abc.heading`). Skipped entirely
+   * for strings read out of arrays (`hasMany` values are always raw).
+   */
+  filter?: (args: { defaultEncode: boolean; key: string; path: string; value: string }) => boolean
+  /**
+   * Additional field names that are never encoded, on top of the built-in
+   * `id`, `blockType`, `blockName`, `slug`.
+   */
+  skipKeys?: string[]
+}
+
+type ResolvedStegaOptions = {
+  filter: StegaOptions['filter']
+  skipKeys: Set<string>
+}
 
 type NodeOptions = {
   serializable: boolean
-  stega: boolean
+  stega: false | ResolvedStegaOptions
 }
 
 /**
@@ -58,15 +98,17 @@ const createNode = (value: object, path: null | string, options: NodeOptions): o
       // path invisibly into string values here. Strings read out of arrays
       // (`hasMany` values) stay raw: consumers compare those (`includes()`).
       if (result === null || typeof result !== 'object') {
-        if (
-          options.stega &&
-          path !== null &&
-          typeof result === 'string' &&
-          !Array.isArray(target) &&
-          !STEGA_SKIP_KEYS.has(prop) &&
-          !shouldSkipStega(result)
-        ) {
-          return `${result}${encodeStegaPath(path ? `${path}.${prop}` : prop)}`
+        if (options.stega && path !== null && typeof result === 'string' && !Array.isArray(target)) {
+          const fieldPath = path ? `${path}.${prop}` : prop
+          const defaultEncode =
+            !options.stega.skipKeys.has(prop) && !shouldSkipStega(result) && looksLikeProse(result)
+          const encode = options.stega.filter
+            ? options.stega.filter({ defaultEncode, key: prop, path: fieldPath, value: result })
+            : defaultEncode
+
+          if (encode) {
+            return `${result}${encodeStegaPath(fieldPath)}`
+          }
         }
         return result
       }
@@ -142,17 +184,24 @@ export type InspectableOptions = {
    */
   serializable?: boolean
   /**
-   * Encodes each string field's path into its value as invisible zero-width
+   * Encodes string field paths into the values as invisible zero-width
    * characters. `LivePreviewInspectorClient` decodes them from the rendered
    * DOM inside the Live Preview iframe and tags the containing elements
-   * automatically - no `pathOf()` needed for text content. Values that are
-   * typically compared or parsed rather than rendered are skipped, both by
-   * key (`id`, `blockType`, `blockName`, `slug`) and by shape (URLs, emails,
-   * ISO dates, numeric strings, hex colors, uuids); use `stegaClean()`
-   * wherever you need any other value raw.
+   * automatically - no `pathOf()` needed for text content.
+   *
+   * Only prose-shaped values (two or more whitespace-separated words) are
+   * encoded: single-token values (`'default'`, `'topRight'`) are what
+   * consuming code uses as object keys / enum discriminants / comparison
+   * targets - Payload select/radio values stay raw by construction. Also
+   * always skipped: the keys `id`, `blockType`, `blockName`, `slug`, values
+   * shaped like URLs, emails, ISO dates, numbers, hex colors or uuids, and
+   * strings read out of arrays (`hasMany`). Single-word *display* text (a
+   * `'Kontakt'` heading) simply isn't stega-tagged - the value-matching
+   * layer or `pathOf()` covers it. Fine-tune with `skipKeys`/`filter`, and
+   * use `stegaClean()` wherever you need an encoded value raw.
    * @default false
    */
-  stega?: boolean
+  stega?: boolean | StegaOptions
 }
 
 /**
@@ -183,9 +232,15 @@ export const inspectable = <T>(data: T, options?: InspectableOptions): T => {
     return data
   }
 
+  const stega = options?.stega
   return createNode(data, options?.enabled === false ? null : '', {
     serializable: options?.serializable === true,
-    stega: options?.stega === true,
+    stega: stega
+      ? {
+          filter: typeof stega === 'object' ? stega.filter : undefined,
+          skipKeys: new Set([...(typeof stega === 'object' ? (stega.skipKeys ?? []) : []), ...STEGA_SKIP_KEYS]),
+        }
+      : false,
   }) as T
 }
 
