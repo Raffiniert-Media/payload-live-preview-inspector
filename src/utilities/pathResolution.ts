@@ -142,38 +142,52 @@ export const waitForElementLayout = (
     check()
   })
 
+/** Safety net in case `scrollend` never fires (e.g. an older browser). */
+const SCROLL_END_FALLBACK_MS = 1000
+/** How many times to re-measure and correct after the scroll settles, in case layout shifted mid-scroll. */
+const MAX_SCROLL_CORRECTIONS = 2
 const SCROLL_CONVERGENCE_THRESHOLD_PX = 1
-/** Consecutive frames the element must hold within the threshold to count as arrived. */
-const SCROLL_SETTLE_FRAMES = 3
-/** Consecutive motionless frames after which the scroll is considered stalled and re-aimed. */
-const SCROLL_STALL_FRAMES = 3
-/** Absolute cap on the whole scroll, in case layout never stops churning. */
-const SCROLL_MAX_DURATION_MS = 4000
 
-let cancelActiveScroll: (() => void) | undefined
+const waitForScrollEnd = (): Promise<void> =>
+  new Promise((resolve) => {
+    let settled = false
+
+    const settle = () => {
+      if (settled) {
+        return
+      }
+      settled = true
+      window.removeEventListener('scrollend', settle)
+      clearTimeout(fallback)
+      resolve()
+    }
+
+    const fallback = setTimeout(settle, SCROLL_END_FALLBACK_MS)
+    window.addEventListener('scrollend', settle, { once: true })
+  })
 
 /**
- * Smooth-scrolls to `el` and resolves once the element actually sits at
- * `offset` - `true` when it arrived (or got as close as the page allows),
- * `false` when the scroll was interrupted by the user or superseded by a
- * newer `scrollToElement` call, so callers know not to flash/focus a field
- * the viewport never reached. A field already visible in the viewport
- * resolves `true` immediately; the nudge toward `offset` still happens, just
- * in the background, so the reveal isn't delayed over a minor adjustment.
+ * Smooth-scrolls to `el` and resolves once the scroll actually finishes (via
+ * the `scrollend` event, with a timeout fallback for browsers that don't
+ * fire it), or immediately if the field is already visible in the viewport.
+ * Callers use this to delay revealing the field (flash/focus) until the page
+ * has stopped moving. A field that's already on screen is rarely
+ * pixel-perfect at `offset`, so still nudging it there is worthwhile, but
+ * not worth delaying the reveal over - that nudge just happens in the
+ * background. Scrolling is instant instead of animated when the user
+ * prefers reduced motion.
  *
- * A single `scrollBy` with a pre-measured delta isn't enough: on long pages,
- * content above the target keeps loading in (rich-text editors hydrating,
- * image previews) while the smooth scroll is in flight, moving the target
- * out from under the animation. So this re-measures every animation frame,
- * and whenever the scroll comes to rest short of the target it re-aims a
- * smooth scroll at the element's *current* position, until the position
- * converges and holds still. This also avoids the `scrollend` event, which
- * older Safari versions don't fire.
+ * The initial delta is measured before the scroll runs, so anything that
+ * shifts layout while a long scroll animation is in flight (an accordion
+ * still rendering, images/fonts loading in) can leave the element short of
+ * `offset` once it stops. Rather than requiring the user to click again,
+ * this re-measures once the scroll settles and issues further corrections
+ * (using the same `behavior` as the initial scroll, so a correction never
+ * looks like an abrupt jump after a smooth animation) until the position
+ * converges or the retry budget runs out.
  */
-export const scrollToElement = (el: HTMLElement, offset: number = DEFAULT_SCROLL_OFFSET): Promise<boolean> => {
-  cancelActiveScroll?.()
-
-  const behavior: ScrollBehavior = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+export const scrollToElement = async (el: HTMLElement, offset: number = DEFAULT_SCROLL_OFFSET): Promise<void> => {
+  const behavior: ScrollBehavior = window.matchMedia('(prefers-reduced-motion: reduce)').matches
     ? 'instant'
     : 'smooth'
 
@@ -181,84 +195,29 @@ export const scrollToElement = (el: HTMLElement, offset: number = DEFAULT_SCROLL
   const delta = bounds.top - offset
 
   if (Math.abs(delta) < SCROLL_CONVERGENCE_THRESHOLD_PX) {
-    return Promise.resolve(true)
+    return
   }
 
   window.scrollBy({ behavior, top: delta })
 
   const alreadyInViewport = bounds.top >= 0 && bounds.top <= window.innerHeight
   if (alreadyInViewport) {
-    return Promise.resolve(true)
+    return
   }
 
-  return new Promise((resolve) => {
-    let raf = 0
-    let settleFrames = 0
-    let stallFrames = 0
-    let fruitlessRetargets = 0
-    let lastScrollY = window.scrollY
-    const startedAt = performance.now()
+  await waitForScrollEnd()
 
-    const finish = (arrived: boolean) => {
-      cancelAnimationFrame(raf)
-      window.removeEventListener('wheel', interrupt)
-      window.removeEventListener('touchstart', interrupt)
-      if (cancelActiveScroll === interrupt) {
-        cancelActiveScroll = undefined
-      }
-      resolve(arrived)
+  for (let attempt = 0; attempt < MAX_SCROLL_CORRECTIONS; attempt++) {
+    const correctedBounds = el.getBoundingClientRect()
+    const correctedDelta = correctedBounds.top - offset
+
+    if (Math.abs(correctedDelta) < SCROLL_CONVERGENCE_THRESHOLD_PX) {
+      return
     }
 
-    const interrupt = () => finish(false)
-    cancelActiveScroll = interrupt
-
-    window.addEventListener('wheel', interrupt, { passive: true })
-    window.addEventListener('touchstart', interrupt, { passive: true })
-
-    const tick = (now: DOMHighResTimeStamp) => {
-      const remaining = el.getBoundingClientRect().top - offset
-
-      if (Math.abs(remaining) < SCROLL_CONVERGENCE_THRESHOLD_PX) {
-        settleFrames += 1
-        if (settleFrames >= SCROLL_SETTLE_FRAMES) {
-          finish(true)
-          return
-        }
-      } else {
-        settleFrames = 0
-
-        if (window.scrollY === lastScrollY) {
-          stallFrames += 1
-          if (stallFrames >= SCROLL_STALL_FRAMES) {
-            fruitlessRetargets += 1
-            if (fruitlessRetargets > 1) {
-              // Re-aiming didn't move the page at all - it can't get any
-              // closer (e.g. the field sits near the bottom edge). Reveal
-              // at the best position reachable.
-              finish(true)
-              return
-            }
-            window.scrollBy({ behavior, top: remaining })
-            stallFrames = 0
-          }
-        } else {
-          stallFrames = 0
-          fruitlessRetargets = 0
-        }
-      }
-
-      lastScrollY = window.scrollY
-
-      if (now - startedAt >= SCROLL_MAX_DURATION_MS) {
-        finish(true)
-        return
-      }
-
-      raf = requestAnimationFrame(tick)
-    }
-
-    raf = requestAnimationFrame(tick)
-  })
+    window.scrollBy({ behavior, top: correctedDelta })
+    await waitForScrollEnd()
+  }
 }
 
 export const focusElement = (el: HTMLElement): void => {

@@ -110,8 +110,8 @@ export const LivePreviewInspectorListener: React.FC<LivePreviewInspectorListener
           }
         }
 
-        const arrived = await scrollToElement(el, scrollOffset)
-        if (!arrived || generation !== revealGeneration) {
+        await scrollToElement(el, scrollOffset)
+        if (generation !== revealGeneration) {
           return
         }
 

@@ -136,201 +136,162 @@ describe('expandCollapsedAncestors', () => {
 })
 
 describe('scrollToElement', () => {
-  const scrollY = () => window.scrollY
-  const setScrollY = (y: number) => vi.stubGlobal('scrollY', y)
-
-  /** Stubs `window.scrollBy` so the requested delta lands instantly. */
-  const stubInstantScrollBy = () => {
-    const scrollBy = vi.fn(({ top }: { top: number }) => setScrollY(scrollY() + top))
-    vi.stubGlobal('scrollBy', scrollBy)
-    return scrollBy
-  }
-
-  const useFrameTimers = () =>
-    vi.useFakeTimers({
-      toFake: ['setTimeout', 'clearTimeout', 'requestAnimationFrame', 'cancelAnimationFrame', 'performance'],
-    })
-
   afterEach(() => {
     vi.useRealTimers()
     vi.unstubAllGlobals()
   })
 
-  it('resolves true without scrolling when the element is already in position', async () => {
+  it('scrolls by the element top minus the offset', () => {
+    const el = document.createElement('div')
+    document.body.append(el)
+    vi.spyOn(el, 'getBoundingClientRect').mockReturnValue({ top: 500 } as DOMRect)
+    const scrollBy = vi.fn()
+    vi.stubGlobal('scrollBy', scrollBy)
+
+    void scrollToElement(el, 80)
+
+    expect(scrollBy).toHaveBeenCalledWith({ behavior: 'smooth', top: 420 })
+  })
+
+  it('scrolls instantly instead of animating when the user prefers reduced motion', () => {
+    const el = document.createElement('div')
+    document.body.append(el)
+    vi.spyOn(el, 'getBoundingClientRect').mockReturnValue({ top: 500 } as DOMRect)
+    const scrollBy = vi.fn()
+    vi.stubGlobal('scrollBy', scrollBy)
+    vi.stubGlobal('matchMedia', vi.fn().mockReturnValue({ matches: true }))
+
+    void scrollToElement(el, 80)
+
+    expect(scrollBy).toHaveBeenCalledWith({ behavior: 'instant', top: 420 })
+  })
+
+  it('resolves immediately when the element is already in position', async () => {
     const el = document.createElement('div')
     document.body.append(el)
     vi.spyOn(el, 'getBoundingClientRect').mockReturnValue({ top: 80 } as DOMRect)
     const scrollBy = vi.fn()
     vi.stubGlobal('scrollBy', scrollBy)
 
-    await expect(scrollToElement(el, 80)).resolves.toBe(true)
+    await scrollToElement(el, 80)
 
     expect(scrollBy).not.toHaveBeenCalled()
   })
 
-  it('resolves true immediately when already visible in the viewport, while still nudging toward the offset', async () => {
+  it('resolves immediately (without waiting for "scrollend") when already visible in the viewport, even if not exactly at the offset', async () => {
     const el = document.createElement('div')
     document.body.append(el)
-    // On screen (within happy-dom's default 768px innerHeight) but not at
-    // the 80px offset - nudged there in the background, without a wait.
+    // On screen (within happy-dom's default 768px innerHeight) but nowhere
+    // near the 80px offset - still nudged toward it, but not worth a wait.
     vi.spyOn(el, 'getBoundingClientRect').mockReturnValue({ top: 300 } as DOMRect)
     const scrollBy = vi.fn()
     vi.stubGlobal('scrollBy', scrollBy)
 
-    await expect(scrollToElement(el, 80)).resolves.toBe(true)
+    await scrollToElement(el, 80)
 
     expect(scrollBy).toHaveBeenCalledWith({ behavior: 'smooth', top: 220 })
   })
 
-  it('scrolls to an off-screen element and resolves true once its position holds still', async () => {
-    useFrameTimers()
-    setScrollY(0)
+  it('resolves once "scrollend" fires when the element is off-screen and lands on target', async () => {
     const el = document.createElement('div')
     document.body.append(el)
+    const rect = vi.spyOn(el, 'getBoundingClientRect')
     // Beyond happy-dom's default 768px innerHeight - genuinely off-screen.
-    vi.spyOn(el, 'getBoundingClientRect').mockImplementation(() => ({ top: 2000 - scrollY() }) as DOMRect)
-    const scrollBy = stubInstantScrollBy()
+    rect.mockReturnValueOnce({ top: 2000 } as DOMRect)
+    // Settled exactly at the offset once the scroll finishes - no correction needed.
+    rect.mockReturnValue({ top: 80 } as DOMRect)
+    vi.stubGlobal('scrollBy', vi.fn())
 
-    let result: boolean | undefined
-    void scrollToElement(el, 80).then((arrived) => {
-      result = arrived
+    let resolved = false
+    void scrollToElement(el, 80).then(() => {
+      resolved = true
     })
 
-    expect(scrollBy).toHaveBeenCalledWith({ behavior: 'smooth', top: 1920 })
-    expect(result).toBeUndefined()
+    await Promise.resolve()
+    expect(resolved).toBe(false)
 
-    // Arrived, but the position must hold still for a few frames first.
-    await vi.advanceTimersByTimeAsync(16 * 2)
-    expect(result).toBeUndefined()
+    window.dispatchEvent(new Event('scrollend'))
+    await Promise.resolve()
+    await Promise.resolve()
 
-    await vi.advanceTimersByTimeAsync(16 * 2)
-    expect(result).toBe(true)
-    expect(scrollBy).toHaveBeenCalledTimes(1)
+    expect(resolved).toBe(true)
   })
 
-  it('re-aims at the element\'s current position when layout shifts while the scroll is in flight', async () => {
-    useFrameTimers()
-    setScrollY(0)
+  it('re-measures after the scroll settles and issues further corrections until it converges', async () => {
     const el = document.createElement('div')
     document.body.append(el)
-    let shift = 0
-    vi.spyOn(el, 'getBoundingClientRect').mockImplementation(
-      () => ({ top: 2000 + shift - scrollY() }) as DOMRect,
-    )
-    const scrollBy = stubInstantScrollBy()
-
-    let result: boolean | undefined
-    void scrollToElement(el, 80).then((arrived) => {
-      result = arrived
-    })
-
-    // Content above the target grows while the scroll is "in flight", moving
-    // the target 300px further down than the initial measurement said.
-    shift = 300
-
-    await vi.advanceTimersByTimeAsync(16 * 10)
-
-    expect(result).toBe(true)
-    expect(scrollBy).toHaveBeenNthCalledWith(1, { behavior: 'smooth', top: 1920 })
-    expect(scrollBy).toHaveBeenNthCalledWith(2, { behavior: 'smooth', top: 300 })
-    expect(scrollBy).toHaveBeenCalledTimes(2)
-  })
-
-  it('resolves true at the closest reachable position when the page cannot scroll any further', async () => {
-    useFrameTimers()
-    setScrollY(0)
-    const el = document.createElement('div')
-    document.body.append(el)
-    vi.spyOn(el, 'getBoundingClientRect').mockImplementation(() => ({ top: 2000 - scrollY() }) as DOMRect)
-    // The document ends: scrolling clamps at 1000px, 920px short of the target.
-    const scrollBy = vi.fn(({ top }: { top: number }) => setScrollY(Math.min(1000, scrollY() + top)))
+    const rect = vi.spyOn(el, 'getBoundingClientRect')
+    rect.mockReturnValueOnce({ top: 2000 } as DOMRect) // before the first (smooth) scroll
+    rect.mockReturnValueOnce({ top: 40 } as DOMRect) // layout shifted mid-scroll - still short of the offset
+    rect.mockReturnValue({ top: 80 } as DOMRect) // converged after the correction
+    const scrollBy = vi.fn()
     vi.stubGlobal('scrollBy', scrollBy)
 
-    let result: boolean | undefined
-    void scrollToElement(el, 80).then((arrived) => {
-      result = arrived
+    let resolved = false
+    void scrollToElement(el, 80).then(() => {
+      resolved = true
     })
 
-    await vi.advanceTimersByTimeAsync(16 * 10)
+    window.dispatchEvent(new Event('scrollend'))
+    await Promise.resolve()
+    await Promise.resolve()
 
-    expect(result).toBe(true)
-    // One re-aim attempt, then it stops trying instead of looping forever.
+    expect(resolved).toBe(false)
+    expect(scrollBy).toHaveBeenNthCalledWith(1, { behavior: 'smooth', top: 1920 })
+    expect(scrollBy).toHaveBeenNthCalledWith(2, { behavior: 'smooth', top: -40 })
+
+    window.dispatchEvent(new Event('scrollend'))
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(resolved).toBe(true)
     expect(scrollBy).toHaveBeenCalledTimes(2)
   })
 
-  it('resolves false when the user interrupts the scroll', async () => {
-    useFrameTimers()
-    setScrollY(0)
+  it('stops retrying once the correction budget is exhausted', async () => {
     const el = document.createElement('div')
     document.body.append(el)
+    // Never converges, e.g. content keeps shifting on every measurement.
     vi.spyOn(el, 'getBoundingClientRect').mockReturnValue({ top: 2000 } as DOMRect)
     const scrollBy = vi.fn()
     vi.stubGlobal('scrollBy', scrollBy)
 
-    let result: boolean | undefined
-    void scrollToElement(el, 80).then((arrived) => {
-      result = arrived
+    let resolved = false
+    void scrollToElement(el, 80).then(() => {
+      resolved = true
     })
 
-    window.dispatchEvent(new Event('wheel'))
-    await vi.advanceTimersByTimeAsync(16 * 10)
+    // Initial scroll + 2 corrections, each waiting for its own "scrollend".
+    for (let i = 0; i < 3; i++) {
+      window.dispatchEvent(new Event('scrollend'))
+      await Promise.resolve()
+      await Promise.resolve()
+    }
 
-    expect(result).toBe(false)
-    // No re-aiming after the user took over.
-    expect(scrollBy).toHaveBeenCalledTimes(1)
+    expect(resolved).toBe(true)
+    expect(scrollBy).toHaveBeenCalledTimes(3)
   })
 
-  it('resolves false when superseded by a newer scrollToElement call', async () => {
-    useFrameTimers()
-    setScrollY(0)
+  it('falls back to resolving after a timeout if "scrollend" never fires', async () => {
+    vi.useFakeTimers()
     const el = document.createElement('div')
     document.body.append(el)
-    vi.spyOn(el, 'getBoundingClientRect').mockImplementation(() => ({ top: 2000 - scrollY() }) as DOMRect)
-    stubInstantScrollBy()
-
-    let firstResult: boolean | undefined
-    void scrollToElement(el, 80).then((arrived) => {
-      firstResult = arrived
-    })
-
-    const second = document.createElement('div')
-    document.body.append(second)
-    vi.spyOn(second, 'getBoundingClientRect').mockImplementation(() => ({ top: 5000 - scrollY() }) as DOMRect)
-
-    let secondResult: boolean | undefined
-    void scrollToElement(second, 80).then((arrived) => {
-      secondResult = arrived
-    })
-
-    await vi.advanceTimersByTimeAsync(16 * 10)
-
-    expect(firstResult).toBe(false)
-    expect(secondResult).toBe(true)
-  })
-
-  it('resolves true after a hard time cap if layout never stops churning', async () => {
-    useFrameTimers()
-    setScrollY(0)
-    const el = document.createElement('div')
-    document.body.append(el)
-    // The page keeps moving (scrollY changes every measurement) but the
-    // element never converges on the offset.
-    vi.spyOn(el, 'getBoundingClientRect').mockImplementation(() => {
-      setScrollY(scrollY() + 1)
-      return { top: 2000 } as DOMRect
-    })
+    const rect = vi.spyOn(el, 'getBoundingClientRect')
+    rect.mockReturnValueOnce({ top: 2000 } as DOMRect)
+    // Converged by the time the fallback fires, so no further correction round is needed.
+    rect.mockReturnValue({ top: 80 } as DOMRect)
     vi.stubGlobal('scrollBy', vi.fn())
 
-    let result: boolean | undefined
-    void scrollToElement(el, 80).then((arrived) => {
-      result = arrived
+    let resolved = false
+    void scrollToElement(el, 80).then(() => {
+      resolved = true
     })
 
-    await vi.advanceTimersByTimeAsync(3900)
-    expect(result).toBeUndefined()
+    await vi.advanceTimersByTimeAsync(999)
+    expect(resolved).toBe(false)
 
-    await vi.advanceTimersByTimeAsync(200)
-    expect(result).toBe(true)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(resolved).toBe(true)
   })
 })
 

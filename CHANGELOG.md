@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.2.1
+
+- Simplified `scrollToElement`'s correction logic from 1.2.0: instead of re-measuring every animation frame and tracking stall/retarget counters, it now waits for the `scrollend` event (as before 1.2.0) and, if the field is still short of `offset`, re-measures and issues up to 2 further corrections. Same fix for the "requires 2-3 clicks" issue, much less code to reason about.
+- Fixed: those corrections now use the same `behavior` as the initial scroll (smooth, unless reduced motion is preferred) instead of always snapping instantly, so a correction never looks like an abrupt jump after a smooth animation.
+
 ## 1.2.0
 
 - Fixed: on long pages, scrolling to a field could land short of it, requiring 2-3 clicks to converge. The target position was measured once up front, so content loading in above the field (rich-text editors hydrating, image previews) while the smooth scroll was in flight moved the field out from under the animation. `scrollToElement` now re-measures every animation frame and, whenever the scroll comes to rest short of the target, seamlessly re-aims at the field's current position until it converges and holds still. A user scroll (wheel/touch) or a newer click cancels the pending scroll, and flash/focus only fire when the field was actually reached.
