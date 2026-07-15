@@ -2,7 +2,7 @@ import type { CollectionSlug, Config, GlobalSlug } from 'payload'
 
 export type PayloadLivePreviewInspectorConfig = {
   /**
-   * Wait time (ms) for a just-expanded accordion's height animation before scrolling.
+   * Maximum wait (ms) for a just-expanded accordion to render its content before scrolling.
    * @default 350
    */
   accordionAnimationMs?: number

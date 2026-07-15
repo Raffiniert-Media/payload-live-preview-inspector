@@ -11,13 +11,14 @@ import {
   resolveRowIDs,
   scrollToElement,
   flashElement as sharedFlashElement,
+  waitForElementLayout,
 } from '../utilities/pathResolution.js'
 import classes from './LivePreviewInspectorListener.module.css'
 
 const MESSAGE_TYPE = 'payload-live-preview-inspector:click'
 
 export type LivePreviewInspectorListenerProps = {
-  /** Wait time (ms) for a just-expanded accordion's height animation before scrolling. Defaults to 350. */
+  /** Maximum wait (ms) for a just-expanded accordion to render its content before scrolling. Defaults to 350. */
   accordionAnimationMs?: number
   /** Flash outline/background color. Defaults to the shipped CSS (`#3fb950`). */
   flashColor?: string
@@ -57,7 +58,9 @@ export const LivePreviewInspectorListener: React.FC<LivePreviewInspectorListener
       return
     }
 
-    let revealTimeout: ReturnType<typeof setTimeout> | undefined
+    // Bumped on every click (and on cleanup) so a still-pending reveal from
+    // an earlier click doesn't flash/focus after a newer one took over.
+    let revealGeneration = 0
 
     const handleMessage = (event: MessageEvent) => {
       if (event.origin !== expectedOrigin || event.source !== iframeRef.current?.contentWindow) {
@@ -95,28 +98,35 @@ export const LivePreviewInspectorListener: React.FC<LivePreviewInspectorListener
       }
 
       const didExpand = expandCollapsedAncestors(el)
+      const generation = ++revealGeneration
 
-      const revealField = () => {
-        void scrollToElement(el, scrollOffset).then(() => {
-          sharedFlashElement(el, { className: classes.flash, color: flashColor, durationMs: flashDurationMs })
-          focusElement(el)
-        })
+      const revealField = async () => {
+        if (didExpand) {
+          // Collapsed content is `display: none` until React re-renders after
+          // the toggle click - wait until the field is actually measurable.
+          await waitForElementLayout(el, accordionAnimationMs)
+          if (generation !== revealGeneration) {
+            return
+          }
+        }
+
+        const arrived = await scrollToElement(el, scrollOffset)
+        if (!arrived || generation !== revealGeneration) {
+          return
+        }
+
+        sharedFlashElement(el, { className: classes.flash, color: flashColor, durationMs: flashDurationMs })
+        focusElement(el)
       }
 
-      if (didExpand) {
-        // Wait for the accordion's height animation to finish before measuring/scrolling.
-        clearTimeout(revealTimeout)
-        revealTimeout = setTimeout(revealField, accordionAnimationMs)
-      } else {
-        revealField()
-      }
+      void revealField()
     }
 
     window.addEventListener('message', handleMessage)
 
     return () => {
       window.removeEventListener('message', handleMessage)
-      clearTimeout(revealTimeout)
+      revealGeneration += 1
     }
   }, [iframeRef, activeURL, accordionAnimationMs, flashColor, flashDurationMs, scrollOffset])
 

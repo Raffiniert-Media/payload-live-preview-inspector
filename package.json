@@ -1,6 +1,6 @@
 {
   "name": "@raffiniert-media-ag/payload-live-preview-inspector",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Click a component in Payload's Live Preview iframe to scroll to and highlight the matching field in the admin panel.",
   "keywords": [
     "payload",

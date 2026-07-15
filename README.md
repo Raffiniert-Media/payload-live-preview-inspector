@@ -56,7 +56,7 @@ payloadLivePreviewInspector({
   flashColor: '#ff6b00',        // default '#3fb950'
   flashDurationMs: 1500,        // default 1200
   scrollOffset: 120,            // default 100
-  accordionAnimationMs: 400,    // default 350 - wait time after expanding an accordion, before scrolling
+  accordionAnimationMs: 400,    // default 350 - max wait for a just-expanded accordion to render, before scrolling
 })
 ```
 
