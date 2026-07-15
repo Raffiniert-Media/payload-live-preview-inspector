@@ -76,6 +76,7 @@ payloadLivePreviewInspector({
   flashDurationMs: 1500,        // default 1200
   scrollOffset: 120,            // default 100
   accordionAnimationMs: 400,    // default 350 - max wait for a just-expanded accordion to render, before scrolling
+  tabSwitchWaitMs: 2500,        // default 1500 - max wait, per candidate tab, for a just-activated tab to render its fields
 })
 ```
 
@@ -242,7 +243,7 @@ Exported from `@raffiniert-media-ag/payload-live-preview-inspector` (admin/confi
 - `payloadLivePreviewInspector(options)` — the plugin.
   - `options.collections: Partial<Record<CollectionSlug, true>>` / `options.globals: Partial<Record<GlobalSlug, true>>` — which collections/globals get the listener.
   - `options.disabled` — turns the plugin off entirely.
-  - `options.flashColor`, `options.flashDurationMs`, `options.scrollOffset`, `options.accordionAnimationMs` — see above.
+  - `options.flashColor`, `options.flashDurationMs`, `options.scrollOffset`, `options.accordionAnimationMs`, `options.tabSwitchWaitMs` — see above.
 
 Exported from `@raffiniert-media-ag/payload-live-preview-inspector/path` (pure data helpers — safe to import anywhere, zero client-bundle impact; all of these are also re-exported from `/client` for convenience):
 
@@ -266,6 +267,7 @@ Exported from `@raffiniert-media-ag/payload-live-preview-inspector/listener` (ad
 
 - Fields that only render inside a relationship's edit drawer (not the top-level Edit view) aren't reachable — the click silently no-ops.
 - The tab sweep clicks through the form's tabs to find an unmounted field, which briefly flips tabs while searching (originals are restored when nothing is found). A path that resolves to no real form field falls back to its nearest rendered ancestor, as before.
+- If a tab's fields take longer than `tabSwitchWaitMs` to render after activating it (a heavy rich-text editor, deeply nested blocks), the sweep gives up on that tab too early, tries the rest, and reverts - looking like the click "did nothing" after briefly flipping through tabs. Raise `tabSwitchWaitMs` if this happens on your heavier tabs.
 - Multi-locale setups or fields duplicated inside drawers can get suffixed DOM ids (Payload's `generateFieldID`); the plain `field-<path>` lookup may occasionally miss in those edge cases.
 - The frontend's `postMessage` falls back to a `'*'` target origin if neither `window.location.ancestorOrigins` (unsupported in Firefox) nor `document.referrer` resolve an origin. The message payload is just a field-path string, so this is low-risk — but you can pin it explicitly via `<LivePreviewInspectorClient targetOrigin="https://cms.example.com" />`.
 - If a tagged Array/Blocks row is deleted between when the frontend was rendered and when you click it, its row id will no longer resolve — the click silently no-ops (same as any other unresolvable path).

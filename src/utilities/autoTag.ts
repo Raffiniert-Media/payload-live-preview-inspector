@@ -142,13 +142,20 @@ export const applyValueMatching = (root: Document | Element, leaves: DocumentLea
  * `elementsFromPoint` returns the whole stack at the point (topmost first),
  * obscured elements included.
  *
- * "Most specific" = smallest bounding box, not topmost: the overlay itself
- * is often tagged too (its `aria-label` carries the link label's stega
- * path), and since it spans the whole card, topmost-wins would resolve
- * every point on the card to the link. The card-sized overlay only wins
- * where no smaller tagged element sits underneath. Ties (overlay vs. the
- * equally-sized card container) go to the element lower in the stack - the
- * container, not the cover.
+ * "Most specific" = smallest bounding box first: the overlay itself is
+ * often tagged too (its `aria-label` carries e.g. a link label's stega
+ * path), and since it spans the whole card, always preferring the topmost
+ * element would resolve every point on the card to the link. The card-sized
+ * overlay only wins where no smaller tagged element sits underneath.
+ *
+ * Ties (equal-sized boxes - e.g. a wrapper that tightly hugs its only
+ * child, so parent and child share the same rect) go to the element with
+ * the deeper (longer) path: a leaf field's path is always at least as long
+ * as its containing row's, so this prefers the more specific target over a
+ * same-sized container without depending on DOM/paint order, which - unlike
+ * path length - doesn't reliably correlate with semantic specificity for
+ * siblings (an overlay `<a>` and a content `<p>` are siblings, not
+ * ancestor/descendant).
  */
 export const findTaggedElementAt = (doc: Document, x: number, y: number): HTMLElement | null => {
   if (typeof doc.elementsFromPoint !== 'function') {
@@ -157,18 +164,25 @@ export const findTaggedElementAt = (doc: Document, x: number, y: number): HTMLEl
 
   let best: HTMLElement | null = null
   let bestArea = Infinity
+  let bestDepth = -1
 
   for (const el of doc.elementsFromPoint(x, y)) {
-    if (!(el instanceof HTMLElement) || !el.hasAttribute(LIVE_PREVIEW_PATH_ATTRIBUTE)) {
+    if (!(el instanceof HTMLElement)) {
       continue
     }
+    const path = el.getAttribute(LIVE_PREVIEW_PATH_ATTRIBUTE)
+    if (path === null) {
+      continue
+    }
+
     const rect = el.getBoundingClientRect()
     const area = rect.width * rect.height
-    // `<=`: the stack is topmost-first, so on equal area the later
-    // (deeper) element wins.
-    if (area <= bestArea) {
+    const depth = path.split('.').length
+
+    if (area < bestArea || (area === bestArea && depth > bestDepth)) {
       best = el
       bestArea = area
+      bestDepth = depth
     }
   }
 

@@ -11,6 +11,7 @@ import {
 import {
   collectLeafValues,
   DEFAULT_COLLAPSIBLE_ANIMATION_MS,
+  DEFAULT_TAB_SWITCH_WAIT_MS,
   expandCollapsedAncestors,
   fieldPathFromFormState,
   focusElement,
@@ -33,6 +34,16 @@ export type LivePreviewInspectorListenerProps = {
   flashDurationMs?: number
   /** Distance (px) to keep between the scrolled-to field and the viewport top. Defaults to 100. */
   scrollOffset?: number
+  /**
+   * Maximum wait (ms), per candidate tab, for a just-activated tab's fields
+   * to render before assuming the target isn't in that tab. Increase this if
+   * a heavier tab (a rich-text editor, deeply nested blocks) needs more time
+   * to mount than the default allows - too short a value here is what makes
+   * the tab switch look like it "does nothing": it gives up on the correct
+   * tab before its content appears, tries the rest, then reverts. Defaults
+   * to 1500.
+   */
+  tabSwitchWaitMs?: number
 }
 
 export const LivePreviewInspectorListener: React.FC<LivePreviewInspectorListenerProps> = ({
@@ -40,6 +51,7 @@ export const LivePreviewInspectorListener: React.FC<LivePreviewInspectorListener
   flashColor,
   flashDurationMs,
   scrollOffset,
+  tabSwitchWaitMs = DEFAULT_TAB_SWITCH_WAIT_MS,
 }) => {
   const { iframeRef, isLivePreviewing, loadedURL, url } = useLivePreviewContext()
   const activeURL = loadedURL || url
@@ -117,7 +129,7 @@ export const LivePreviewInspectorListener: React.FC<LivePreviewInspectorListener
         // Payload unmounts inactive tab panels - if neither the exact target
         // nor its owning field is in the DOM, sweep the tabs until it is.
         if (!checkExact()) {
-          await revealTabForElement(checkExact)
+          await revealTabForElement(checkExact, tabSwitchWaitMs)
           if (generation !== revealGeneration) {
             return
           }
@@ -162,7 +174,7 @@ export const LivePreviewInspectorListener: React.FC<LivePreviewInspectorListener
       window.removeEventListener('message', handleMessage)
       revealGeneration += 1
     }
-  }, [iframeRef, activeURL, accordionAnimationMs, flashColor, flashDurationMs, scrollOffset])
+  }, [iframeRef, activeURL, accordionAnimationMs, flashColor, flashDurationMs, scrollOffset, tabSwitchWaitMs])
 
   if (!isLivePreviewing) {
     return null

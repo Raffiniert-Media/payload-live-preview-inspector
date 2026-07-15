@@ -30,6 +30,16 @@ export type PayloadLivePreviewInspectorConfig = {
    * @default 100
    */
   scrollOffset?: number
+  /**
+   * Maximum wait (ms), per candidate tab, for a just-activated tab's fields
+   * to render before assuming the target isn't in that tab. Increase this if
+   * a heavier tab (a rich-text editor, deeply nested blocks) needs more time
+   * to mount than the default allows - too short a value here is what makes
+   * the tab switch look like it does nothing: it gives up on the correct tab
+   * before its content appears, tries the rest, then reverts.
+   * @default 1500
+   */
+  tabSwitchWaitMs?: number
 }
 
 export const payloadLivePreviewInspector =
@@ -45,6 +55,7 @@ export const payloadLivePreviewInspector =
         flashColor: pluginOptions.flashColor,
         flashDurationMs: pluginOptions.flashDurationMs,
         scrollOffset: pluginOptions.scrollOffset,
+        tabSwitchWaitMs: pluginOptions.tabSwitchWaitMs,
       },
       // Own subpath (not /client): the listener imports @payloadcms/ui, which
       // must never be reachable from the frontend-facing /client barrel.

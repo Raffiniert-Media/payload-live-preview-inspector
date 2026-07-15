@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import {
   collectLeafValues,
+  DEFAULT_TAB_SWITCH_WAIT_MS,
   expandCollapsedAncestors,
   fieldIDFromPath,
   fieldPathFromFormState,
@@ -140,6 +141,33 @@ describe('revealTabForElement', () => {
     expect(el).toBeNull()
     expect(content.classList.contains('tabs-field__tab-button--active')).toBe(true)
     expect(meta.classList.contains('tabs-field__tab-button--active')).toBe(false)
+  })
+
+  it('defaults to a generous per-tab wait (1500ms), not a couple of frames', () => {
+    // Regression guard: a too-short default (250ms) let the sweep give up on
+    // the correct tab before a heavier tab's fields (rich-text editors,
+    // deeply nested blocks) finished rendering, so it tried the rest and
+    // reverted - looking like the click did nothing. Configurable via the
+    // plugin's `tabSwitchWaitMs` option.
+    expect(DEFAULT_TAB_SWITCH_WAIT_MS).toBeGreaterThanOrEqual(1000)
+  })
+
+  it('still finds the field when a tab genuinely takes a while to render it', async () => {
+    // Simulates the real regression: the tab's fields don't appear
+    // synchronously on click, but slightly later (e.g. a rich-text editor
+    // finishing its own render pass) - comfortably within the default
+    // per-tab budget, but well past the old hardcoded 250ms.
+    const [, meta] = buildTabs(['Content', 'Meta'], 0)
+    meta.addEventListener('click', () => {
+      meta.classList.add('tabs-field__tab-button--active')
+      setTimeout(() => {
+        document.body.insertAdjacentHTML('beforeend', '<input id="field-metaNote" />')
+      }, 300)
+    })
+
+    const el = await revealTabForElement(() => document.getElementById('field-metaNote'), DEFAULT_TAB_SWITCH_WAIT_MS)
+
+    expect(el?.id).toBe('field-metaNote')
   })
 })
 

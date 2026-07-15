@@ -81,10 +81,14 @@ test('stega: auto-tags text rendered without pathOf and scrolls to its field on 
   await expect(text).toHaveAttribute('data-payload-live-preview-auto', 'stega')
 
   // The card is covered by an absolutely-positioned overlay link (the
-  // full-card-link pattern), so every pointer event targets the overlay -
-  // the click must resolve the tagged <p> beneath it via elementsFromPoint
-  // (and not navigate, thanks to disableLinks).
-  await frame.locator('[data-testid="card-overlay-link"]').click()
+  // full-card-link pattern) that is itself tagged (its aria-label carries
+  // the same stega path as the <p>). Clicking at the <p>'s own position -
+  // force: true, since the overlay is what actually receives the native
+  // event - must still resolve to the smaller, more specific <p> rather
+  // than the overlay or the card container (and not navigate, thanks to
+  // disableLinks): our click handler resolves by pointer position via
+  // elementsFromPoint, not by the event's native target.
+  await text.click({ force: true })
 
   const textField = page.locator('#field-layout__1__text')
   await expect(textField).toBeInViewport()

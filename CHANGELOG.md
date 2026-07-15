@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.4.2
+
+- Fixed: 1.4.1's overlay-targeting fix picked the smallest tagged element at a point, but broke ties (equal-sized boxes - e.g. a wrapper that tightly hugs its only child, so parent and child share the same rect) by stack order, which doesn't reliably track specificity for *siblings* (an overlay `<a>` and the content `<p>` it covers are siblings, not ancestor/descendant). In practice this could still resolve a click to a same-sized container instead of the more specific field beneath a card-covering overlay. Ties now go to the element with the **deeper path** instead - a leaf field's path is always at least as long as its containing row's, so the more specific target wins regardless of paint/DOM order.
+- Fixed: with several tabs, the tab sweep from 1.4.0 could intermittently "flip through tabs and revert" without ever landing on the field - it gave up on each candidate tab after only 250ms, too little time for a heavier tab (a rich-text editor, deeply nested blocks) to finish rendering its fields, so it moved on and eventually reverted having found nothing. The per-tab wait is now 1500ms by default, and configurable via the new `tabSwitchWaitMs` plugin option (also on `LivePreviewInspectorListener`) for tabs that need even more headroom.
+
 ## 1.4.1
 
 - Fixed: single-word image alt texts ("Acme") were never stega-encoded because of 1.3.1's two-word prose rule, so logo/image elements whose only taggable string is their `alt` stayed unclickable - while multi-word alts ("Acme Industries") worked. Attribute-only display text is now **force-encoded** regardless of word count: the built-in keys are `alt`, `ariaLabel`, and `placeholder` - values that only ever land in HTML attributes, which the value-matching layer (text nodes only) can't reach, and which consuming code practically never compares (shape-based skips - URLs, dates, etc. - still apply).

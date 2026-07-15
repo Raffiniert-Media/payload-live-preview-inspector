@@ -167,10 +167,11 @@ describe('findTaggedElementAt', () => {
     expect(findTaggedElementAt(document, 10, 10)?.id).toBe('heading')
   })
 
-  it('resolves equal-sized overlay vs. container to the container (lower in the stack)', () => {
-    // Pointer over card padding: no small element beneath - the tagged
+  it('resolves an equal-sized overlay vs. container by path depth - the more specific path wins', () => {
+    // Pointer over card padding: no smaller element beneath - the tagged
     // overlay and the tagged card container have the same box. The
-    // container wins, not the cover.
+    // overlay's path is deeper (more specific: it addresses the link field
+    // that this very overlay represents) - it wins over the generic row.
     document.body.innerHTML = `
       <div id="card" ${LIVE_PREVIEW_PATH_ATTRIBUTE}="layout.$a">
         <a id="overlay" href="/x" ${LIVE_PREVIEW_PATH_ATTRIBUTE}="layout.$a.link.label"></a>
@@ -182,7 +183,33 @@ describe('findTaggedElementAt', () => {
 
     stubElementsFromPoint([overlay, card, document.body])
 
-    expect(findTaggedElementAt(document, 10, 10)?.id).toBe('card')
+    expect(findTaggedElementAt(document, 10, 10)?.id).toBe('overlay')
+  })
+
+  it('resolves an equal-sized overlay vs. a sibling leaf sharing the same path (real full-card-link case)', () => {
+    // When a wrapping section has no padding, an overlay link and the
+    // content <p> it covers can end up with literally the same
+    // bounding box. Here both carry the exact same path (the overlay's
+    // aria-label mirrors the paragraph's text) - either resolving is
+    // correct, but a same-sized container sharing a path PREFIX must lose
+    // to both (this reproduces the regression: the container used to win
+    // via stack order, sending clicks to the row instead of the field).
+    document.body.innerHTML = `
+      <section id="container" ${LIVE_PREVIEW_PATH_ATTRIBUTE}="layout.$a">
+        <a id="overlay" href="/x" ${LIVE_PREVIEW_PATH_ATTRIBUTE}="layout.$a.text"></a>
+        <p id="text" ${LIVE_PREVIEW_PATH_ATTRIBUTE}="layout.$a.text">x</p>
+      </section>`
+    const overlay = document.getElementById('overlay')!
+    const text = document.getElementById('text')!
+    const container = document.getElementById('container')!
+    stubSize(overlay, 300, 40)
+    stubSize(text, 300, 40)
+    stubSize(container, 300, 40)
+
+    stubElementsFromPoint([overlay, text, container, document.body])
+
+    const winner = findTaggedElementAt(document, 10, 10)
+    expect(winner?.getAttribute(LIVE_PREVIEW_PATH_ATTRIBUTE)).toBe('layout.$a.text')
   })
 
   it('still returns a tagged overlay when nothing else is tagged', () => {

@@ -156,8 +156,16 @@ export const collectLeafValues = (formState: MinimalFormState): DocumentLeafValu
 /** Payload's tabs-field tab button (see `@payloadcms/ui`'s Tabs field). */
 const TAB_BUTTON_SELECTOR = '.tabs-field__tab-button'
 const TAB_BUTTON_ACTIVE_CLASS = 'tabs-field__tab-button--active'
-/** Max wait for a just-activated tab panel to render its fields. */
-const TAB_RENDER_WAIT_MS = 250
+/**
+ * Max wait for a just-activated tab panel to render its fields, before
+ * assuming the target isn't in that tab and moving to the next one.
+ * Generous by design: Payload mounts a tab's fields fresh on activation
+ * (rich-text editors, nested blocks, ...), which can comfortably take longer
+ * than a couple of frames - too short a budget here means the sweep gives up
+ * on the *correct* tab before its content finishes rendering, then tries the
+ * remaining tabs and finally reverts, looking like nothing happened at all.
+ */
+export const DEFAULT_TAB_SWITCH_WAIT_MS = 1500
 /** Rounds of re-querying tab buttons, so nested tabs revealed by a switch get swept too. */
 const MAX_TAB_SWEEP_ROUNDS = 4
 
@@ -191,7 +199,7 @@ const waitForElement = (check: () => HTMLElement | null, timeoutMs: number): Pro
  */
 export const revealTabForElement = async (
   check: () => HTMLElement | null,
-  tabRenderWaitMs: number = TAB_RENDER_WAIT_MS,
+  tabRenderWaitMs: number = DEFAULT_TAB_SWITCH_WAIT_MS,
 ): Promise<HTMLElement | null> => {
   const found = check()
   if (found) {
