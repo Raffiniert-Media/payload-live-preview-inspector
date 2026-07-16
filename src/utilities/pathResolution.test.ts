@@ -71,6 +71,17 @@ describe('resolveExactFieldElement', () => {
     // The prefix would resolve, but the exact leaf does not exist.
     expect(resolveExactFieldElement('layout.1.heading')).toBeNull()
   })
+
+  it('falls back to a data-field-path attribute (Lexical rich text renders no field id)', () => {
+    document.body.innerHTML = '<div data-field-path="body" id="rich-text-wrapper"></div>'
+    expect(resolveExactFieldElement('body')?.id).toBe('rich-text-wrapper')
+    expect(resolveFieldElement('body.root.children.0.children.0.text')?.id).toBe('rich-text-wrapper')
+  })
+
+  it('prefers the field id over a data-field-path match', () => {
+    document.body.innerHTML = '<input id="field-title" /><div data-field-path="title" id="wrapper"></div>'
+    expect(resolveExactFieldElement('title')?.id).toBe('field-title')
+  })
 })
 
 describe('fieldPathFromFormState', () => {
@@ -194,6 +205,24 @@ describe('resolveRowIDs', () => {
     }
     expect(resolveRowIDs('layout.$row-a.nested.$nested-b.text', formState)).toBe('layout.0.nested.1.text')
   })
+
+  it('truncates at a $rowId segment whose prefix is not an array field (a path into rich-text JSON)', () => {
+    // A stega path pointing inside a rich-text value: Lexical blocks carry
+    // ids of their own, but `body.root.children` is not a form field - the
+    // truncated prefix still resolves to the owning `body` field via the
+    // usual prefix fallback.
+    const formState = { body: { value: { root: {} } } }
+    expect(resolveRowIDs('body.root.children.$lexBlock.fields.note', formState)).toBe('body.root.children')
+  })
+
+  it('still returns null for a deleted row of a real array field', () => {
+    const formState = { layout: { rows: [{ id: 'a' }] } }
+    expect(resolveRowIDs('layout.$deleted.heading', formState)).toBeNull()
+  })
+
+  it('returns null when the path starts with an unresolvable $rowId segment', () => {
+    expect(resolveRowIDs('$orphan.heading', {})).toBeNull()
+  })
 })
 
 describe('collectLeafValues', () => {
@@ -241,6 +270,60 @@ describe('collectLeafValues', () => {
     }
 
     expect(collectLeafValues(formState)).toEqual([{ path: 'group.0.label', value: 'Odd but possible' }])
+  })
+
+  it('collects rich-text text runs, each addressed by the owning field path', () => {
+    const formState = {
+      body: {
+        value: {
+          root: {
+            type: 'root',
+            children: [
+              {
+                type: 'paragraph',
+                children: [
+                  { type: 'text', text: 'First paragraph run' },
+                  { type: 'text', format: 1, text: 'bold run' },
+                ],
+              },
+              { type: 'paragraph', children: [{ type: 'text', text: 'Second paragraph' }] },
+            ],
+          },
+        },
+      },
+    }
+
+    expect(collectLeafValues(formState)).toEqual([
+      { path: 'body', value: 'First paragraph run' },
+      { path: 'body', value: 'bold run' },
+      { path: 'body', value: 'Second paragraph' },
+    ])
+  })
+
+  it('addresses rich-text runs inside array rows via stable row ids', () => {
+    const formState = {
+      layout: { rows: [{ id: 'a' }] },
+      'layout.0.body': {
+        value: { root: { children: [{ children: [{ type: 'text', text: 'Nested rich text' }] }] } },
+      },
+    }
+
+    expect(collectLeafValues(formState)).toEqual([{ path: 'layout.$a.body', value: 'Nested rich text' }])
+  })
+
+  it('ignores structural strings in rich-text values and empty text runs', () => {
+    const formState = {
+      body: {
+        value: {
+          root: {
+            type: 'root',
+            children: [{ children: [{ type: 'text', text: '   ' }], direction: 'ltr', format: 'left' }],
+          },
+        },
+      },
+    }
+
+    expect(collectLeafValues(formState)).toEqual([])
   })
 })
 

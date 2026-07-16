@@ -21,6 +21,7 @@ import {
   revealTabForElement,
   scrollToElement,
   flashElement as sharedFlashElement,
+  waitForElement,
   waitForElementLayout,
 } from '../utilities/pathResolution.js'
 import classes from './LivePreviewInspectorListener.module.css'
@@ -125,6 +126,32 @@ export const LivePreviewInspectorListener: React.FC<LivePreviewInspectorListener
         const checkExact = () =>
           resolveExactFieldElement(resolvedPath) ??
           (targetFieldPath ? resolveExactFieldElement(targetFieldPath) : null)
+
+        if (!checkExact()) {
+          // A closed accordion (Collapsible field, or an Array/Blocks row) is
+          // a cheaper explanation than "wrong tab" - Payload unmounts its
+          // content while collapsed, but the row/field's nearest rendered
+          // ancestor is still resolvable via prefix fallback in whichever tab
+          // is already on screen. Expand it and give it a chance to mount
+          // before ever concluding the target must be behind an inactive tab
+          // button - checking this first is what a closed accordion in the
+          // *correct*, already-active tab was missing, so it got misread as
+          // "must be some other tab" and triggered a visible tab sweep.
+          //
+          // This must only click a given toggle once: `expandCollapsedAncestors`
+          // reads the live `--collapsed` class, and React won't have
+          // committed the state update from a click until a later render, so
+          // calling it again on every poll tick (before that commit lands)
+          // would re-click the same toggle and flip the row straight back to
+          // collapsed.
+          const ancestor = resolveFieldElement(resolvedPath)
+          if (ancestor && expandCollapsedAncestors(ancestor)) {
+            await waitForElement(checkExact, accordionAnimationMs)
+            if (generation !== revealGeneration) {
+              return
+            }
+          }
+        }
 
         // Payload unmounts inactive tab panels - if neither the exact target
         // nor its owning field is in the DOM, sweep the tabs until it is.

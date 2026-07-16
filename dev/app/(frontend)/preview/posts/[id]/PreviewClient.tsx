@@ -1,6 +1,7 @@
 'use client'
 
 import { useLivePreview } from '@payloadcms/live-preview-react'
+import { RichText } from '@payloadcms/richtext-lexical/react'
 // The component comes from /client; the data helpers from the pure /path
 // subpath, so importing them elsewhere never drags component code into a
 // page bundle.
@@ -123,6 +124,16 @@ export const PreviewClient = ({ initialData }: Props) => {
 
         return null
       })}
+      {/* Rendered through the stega proxy: every multi-word text run inside
+          the Lexical tree carries a deep path (body.root.children...) that
+          the listener collapses to the `body` field. The single bolded word
+          is skipped by stega's prose rule and covered by value matching of
+          the rich-text value's text runs instead - so both layers land on
+          the same field. */}
+      <div style={{ margin: '2rem 0' }}>
+        <Layer>auto: rich text — stega on multi-word runs, value matching on the rest</Layer>
+        <div data-testid="rich-text-body">{page.body ? <RichText data={page.body} /> : null}</div>
+      </div>
       {/* The metaNote field lives in the admin form's "Meta" tab - clicking
           this exercises the listener's tab sweep (Payload unmounts inactive
           tab panels, so the field isn't in the DOM until its tab is active). */}

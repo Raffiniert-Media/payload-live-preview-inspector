@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.5.0
+
+Rich-text matching fixes and a tab-switch fix, all reported from real consuming sites.
+
+### Rich text
+
+- **Fixed: clicking rich-text content did nothing.** Payload's Lexical field renders no `field-<path>` id at all - only a `data-field-path` attribute - so even a correctly resolved path (e.g. `body`) found no DOM element: the click warned "could not resolve" and, worse, first triggered a pointless tab sweep because the "is the field rendered?" check failed too. Field resolution now falls back to `[data-field-path="…"]` after the id lookups, so rich-text fields scroll/flash/focus like any other field.
+- **Fixed: stega paths into rich-text values containing id-bearing nodes resolved to nothing.** A stega path pointing inside a Lexical tree whose nodes carry their own `id`s (blocks, uploads) produced `$rowId` segments that aren't rows of any real Array/Blocks field - `resolveRowIDs` returned `null` and the click was dropped entirely. Such paths are now truncated at the first non-row `$rowId` segment, so the owning rich-text field still resolves via the usual prefix fallback. Genuinely deleted rows of real array fields still return `null`.
+- **New: value matching now covers rich text.** The admin's leaf collection previously skipped every non-string field value, so text rendered from a rich-text field could never be value-matched. Object-shaped field values now contribute the string values under their `text` keys (where Lexical and Slate keep their text runs - structural strings like `type: 'paragraph'` are never collected), each addressed by the owning field's path. This also covers what stega's two-word prose rule skips inside rich text (single bolded words, short runs) - those now match back to their editor too.
+- The dev demo page renders a rich-text `body` field through the stega proxy, exercising both layers (deep Lexical stega paths + value-matched single-word runs), with e2e coverage.
+
+### Admin
+
+- **Fixed: the tab sweep ran (visibly switching tabs) even though the correct tab was already active**, whenever the target field sat inside a closed accordion (Collapsible field or Array/Blocks row) that was collapsed from the initial render - Payload never mounts such a row's fields, so the "is the field in the DOM?" check misread the situation as "must be another tab". The listener now expands collapsed ancestors resolved via prefix fallback *first*, waits for the row's fields to mount, and only sweeps tabs if the target is still missing - so a click on a field behind a closed accordion in the active tab never touches the tab bar at all.
+
 ## 1.4.2
 
 - Fixed: 1.4.1's overlay-targeting fix picked the smallest tagged element at a point, but broke ties (equal-sized boxes - e.g. a wrapper that tightly hugs its only child, so parent and child share the same rect) by stack order, which doesn't reliably track specificity for *siblings* (an overlay `<a>` and the content `<p>` it covers are siblings, not ancestor/descendant). In practice this could still resolve a click to a same-sized container instead of the more specific field beneath a card-covering overlay. Ties now go to the element with the **deeper path** instead - a leaf field's path is always at least as long as its containing row's, so the more specific target wins regardless of paint/DOM order.

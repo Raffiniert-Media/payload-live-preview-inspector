@@ -183,9 +183,9 @@ Trade-off to know about: encoded strings contain extra characters. `===` against
 
 ### 3. Value matching — zero-config
 
-On by default in `LivePreviewInspectorClient` — nothing to integrate beyond mounting the component. The client asks the admin panel (via the plugin's listener) for the document's current string field values, then tags any element whose entire text content equals exactly one field's value. When you edit a field, the preview re-renders and the mapping refreshes automatically.
+On by default in `LivePreviewInspectorClient` — nothing to integrate beyond mounting the component. The client asks the admin panel (via the plugin's listener) for the document's current string field values, then tags any element whose entire text content equals exactly one field's value. Rich-text fields contribute their individual text runs (the strings under `text` keys in the Lexical/Slate value), each mapped to the rich-text field itself — so a paragraph rendered from rich text jumps back to its editor. When you edit a field, the preview re-renders and the mapping refreshes automatically.
 
-It is deliberately conservative: values shared by several fields are never matched (ambiguous), values shorter than 3 characters are ignored, and only whole-element matches count — transformed text (formatted dates, truncated teasers, rich text) simply doesn't match. Wrong tags are avoided at the cost of missing tags; the other two layers fill the gaps. Set `valueMatching={false}` to turn it off.
+It is deliberately conservative: values shared by several fields are never matched (ambiguous), values shorter than 3 characters are ignored, and only whole-element matches count — transformed text (formatted dates, truncated teasers) simply doesn't match. Wrong tags are avoided at the cost of missing tags; the other two layers fill the gaps. Set `valueMatching={false}` to turn it off.
 
 ### Container inference
 
@@ -281,7 +281,7 @@ Exported from `@raffiniert-media-ag/payload-live-preview-inspector/listener` (ad
 - Scroll-then-reveal timing relies on the `scrollend` event (supported in all current evergreen browsers). If a browser doesn't fire it, a 1s fallback timeout still reveals the field, just without the exact "waits for the scroll to finish" precision.
 - Stega only reaches values that end up as rendered text (or in `alt`/`title`/`aria-label`/`placeholder`), and only when they contain two or more words. Images, numbers, booleans, selects rendered as icons, single-word display text — anything the two-word rule or the DOM excludes — still needs `pathOf()` or value matching. String operations in your frontend that reshape the value (`slice()`, `split()`, regexes) can destroy the encoded block; the element is then simply untagged, never mistagged.
 - Stega characters live inside string values while previewing: text copied out of the preview iframe carries them, and screen-reader behavior on zero-width characters varies. Both are preview-only concerns; public pages never contain them (with `enabled` wired correctly).
-- Value matching requires exact whole-element text equality with exactly one field's current value. Formatted dates, truncated teasers, values rendered inside larger sentences, and rich text don't match — by design (missing a tag beats guessing wrong).
+- Value matching requires exact whole-element text equality with exactly one field's current value (rich-text fields contribute their individual text runs). Formatted dates, truncated teasers, and values rendered inside larger sentences don't match — by design (missing a tag beats guessing wrong).
 - Container inference is a heuristic: a block that renders no taggable leaf at all gets no container, and heavily interleaved markup makes it back off. `pathOf(block)` is the reliable way to tag those.
 
 ## Local development

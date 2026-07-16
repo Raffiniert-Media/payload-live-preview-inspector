@@ -24,10 +24,12 @@ export const rowIDFromPath = (path: string): null | string => {
 }
 
 /**
- * Resolves the full path only - a leaf field's `field-<path>` id or an
- * Array/Blocks row's `<parent>-row-<index>` wrapper id - with no prefix
- * fallback. Returns `null` when that exact element isn't in the DOM (e.g.
- * because it lives inside an inactive tab, which Payload unmounts).
+ * Resolves the full path only - a leaf field's `field-<path>` id, an
+ * Array/Blocks row's `<parent>-row-<index>` wrapper id, or a
+ * `data-field-path` attribute (Lexical rich-text fields render no
+ * `field-<path>` id at all, only the attribute) - with no prefix fallback.
+ * Returns `null` when that exact element isn't in the DOM (e.g. because it
+ * lives inside an inactive tab, which Payload unmounts).
  */
 export const resolveExactFieldElement = (path: string): HTMLElement | null => {
   const fieldEl = document.getElementById(fieldIDFromPath(path))
@@ -36,7 +38,12 @@ export const resolveExactFieldElement = (path: string): HTMLElement | null => {
   }
 
   const rowID = rowIDFromPath(path)
-  return rowID ? document.getElementById(rowID) : null
+  const rowEl = rowID ? document.getElementById(rowID) : null
+  if (rowEl) {
+    return rowEl
+  }
+
+  return document.querySelector<HTMLElement>(`[data-field-path="${path.replace(/["\\]/g, '\\$&')}"]`)
 }
 
 /**
@@ -88,6 +95,14 @@ export const fieldPathFromFormState = (path: string, formState: MinimalFormState
  * live form state - so the mapping still works after rows are reordered,
  * inserted, or removed above it. Returns `null` if a row id no longer exists
  * (e.g. the row was deleted).
+ *
+ * A `$<rowId>` segment whose prefix isn't an Array/Blocks field at all (no
+ * `rows` in form state) points inside a JSON-shaped field value instead -
+ * e.g. a stega path into a rich-text value, where Lexical blocks/uploads
+ * carry `id`s of their own but only the rich-text field itself is a form
+ * field. The segments from there on can never resolve to form fields, so the
+ * path is truncated to the prefix, which still identifies the owning field
+ * via the usual prefix fallback.
  */
 export const resolveRowIDs = (path: string, formState: MinimalFormState): null | string => {
   const segments = path.split('.')
@@ -97,9 +112,14 @@ export const resolveRowIDs = (path: string, formState: MinimalFormState): null |
     if (isRowIDSegment(segment)) {
       const arrayPath = resolved.join('.')
       const rows = formState[arrayPath]?.rows
-      const index = rows?.findIndex((row) => row.id === rowIDFromSegment(segment))
 
-      if (index === undefined || index === -1) {
+      if (!rows) {
+        return resolved.length > 0 ? arrayPath : null
+      }
+
+      const index = rows.findIndex((row) => row.id === rowIDFromSegment(segment))
+
+      if (index === -1) {
         return null
       }
 
@@ -134,20 +154,66 @@ const toRowIDPath = (path: string, formState: MinimalFormState): string => {
 }
 
 /**
+ * Collects the string values under `text` keys anywhere inside a JSON-shaped
+ * field value. That's where rich-text editor states keep their rendered text
+ * runs (Lexical and Slate both use `text`), and it deliberately skips all the
+ * structural strings around them (`type: 'paragraph'`, `format`, `mode`, ...)
+ * that never render as page content.
+ */
+const collectTextRuns = (value: unknown, out: string[]): void => {
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      collectTextRuns(item, out)
+    }
+    return
+  }
+
+  if (value !== null && typeof value === 'object') {
+    for (const [key, item] of Object.entries(value)) {
+      if (key === 'text' && typeof item === 'string') {
+        out.push(item)
+      } else {
+        collectTextRuns(item, out)
+      }
+    }
+  }
+}
+
+/**
  * Collects every string-valued leaf of the live form state, addressed via
  * stable row ids (`layout.$abc.heading`) rather than current indexes, so a
  * match made in the Live Preview iframe stays valid after rows are
- * reordered. Sent to the iframe for value matching.
+ * reordered. Object-valued fields (rich text) contribute their `text` runs,
+ * each addressed by the owning field's path - so a paragraph rendered from a
+ * rich-text value matches back to the rich-text field. Sent to the iframe
+ * for value matching.
  */
 export const collectLeafValues = (formState: MinimalFormState): DocumentLeafValue[] => {
   const leaves: DocumentLeafValue[] = []
 
   for (const [path, field] of Object.entries(formState)) {
     const value = field?.value
-    if (typeof value !== 'string' || value.trim() === '') {
+
+    if (typeof value === 'string') {
+      if (value.trim() !== '') {
+        leaves.push({ path: toRowIDPath(path, formState), value })
+      }
       continue
     }
-    leaves.push({ path: toRowIDPath(path, formState), value })
+
+    if (value !== null && typeof value === 'object') {
+      const runs: string[] = []
+      collectTextRuns(value, runs)
+      if (runs.length === 0) {
+        continue
+      }
+      const rowIDPath = toRowIDPath(path, formState)
+      for (const run of runs) {
+        if (run.trim() !== '') {
+          leaves.push({ path: rowIDPath, value: run })
+        }
+      }
+    }
   }
 
   return leaves
@@ -170,7 +236,7 @@ export const DEFAULT_TAB_SWITCH_WAIT_MS = 1500
 const MAX_TAB_SWEEP_ROUNDS = 4
 
 /** Resolves with `check`'s first non-null result, polling every frame up to `timeoutMs`. */
-const waitForElement = (check: () => HTMLElement | null, timeoutMs: number): Promise<HTMLElement | null> =>
+export const waitForElement = (check: () => HTMLElement | null, timeoutMs: number): Promise<HTMLElement | null> =>
   new Promise((resolve) => {
     const startedAt = performance.now()
 

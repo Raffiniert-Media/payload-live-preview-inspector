@@ -50,6 +50,14 @@ export default buildConfig({
                   name: 'title',
                   type: 'text',
                 },
+                // Rich text: its value is a Lexical JSON tree, not a string -
+                // exercises stega paths pointing *inside* the value (which
+                // must collapse to the field itself) and value matching of
+                // the tree's text runs.
+                {
+                  name: 'body',
+                  type: 'richText',
+                },
                 {
                   name: 'layout',
                   type: 'blocks',

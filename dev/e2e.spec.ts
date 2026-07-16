@@ -2,6 +2,12 @@ import type { Page } from '@playwright/test'
 
 import { expect, test } from '@playwright/test'
 
+declare global {
+  interface Window {
+    __activatedTabs?: Set<string>
+  }
+}
+
 const login = async (page: Page) => {
   await page.goto('/admin')
   await page.fill('#field-email', 'dev@payloadcms.com')
@@ -111,6 +117,73 @@ test('switches to the admin tab containing the clicked field', async ({ page }) 
   await expect(metaField).toHaveClass(/flash/)
 })
 
+test('reveals a field behind a closed accordion without sweeping tabs', async ({ page }) => {
+  await login(page)
+
+  await openLivePreview(page)
+
+  // A previous test may have left "Meta" as the last-active tab (persisted
+  // as a preference) - make sure "Content" (where `layout` lives) is active
+  // before touching its row, regardless of run order.
+  await page.locator('.tabs-field__tab-button', { hasText: 'Content' }).click()
+  await expect(page.locator('.tabs-field__tab-button--active')).toHaveText('Content')
+
+  // Collapse the contentBlock row (`layout.1`), then reload so it starts
+  // *already* collapsed from the persisted preference - that's the state a
+  // real user hits (a row left collapsed from a previous session), and it's
+  // meaningfully different from toggling it collapsed live in this same
+  // session: Payload only skips ever mounting the row's fields when it's
+  // collapsed from the initial render, not when it's collapsed after having
+  // been open.
+  await page.evaluate(() => {
+    const collapsible = document.querySelector('#layout-row-1 .collapsible')
+    if (!collapsible?.classList.contains('collapsible--collapsed')) {
+      document
+        .querySelector<HTMLButtonElement>('#layout-row-1 .collapsible__toggle-wrap .collapsible__toggle')
+        ?.click()
+    }
+  })
+  await expect(page.locator('#layout-row-1 .collapsible')).toHaveClass(/collapsible--collapsed/)
+
+  const frame = await openLivePreview(page)
+  await expect(page.locator('#layout-row-1 .collapsible')).toHaveClass(/collapsible--collapsed/)
+
+  // Its field lives in the "Content" tab, which is already active by
+  // default. A tab sweep is only needed when the target is genuinely in
+  // another tab; a closed accordion in the *current* tab should never
+  // trigger one.
+  await expect(page.locator('#field-layout__1__text')).toHaveCount(0)
+
+  // Record every tab button that becomes active while the click resolves -
+  // the bug this guards against briefly activates "Meta" while sweeping,
+  // even though "Content" (the only tab that could ever contain the target)
+  // was active the whole time.
+  await page.evaluate(() => {
+    window.__activatedTabs = new Set<string>()
+    new MutationObserver((mutations) => {
+      for (const mutation of mutations) {
+        const button = mutation.target as HTMLElement
+        if (button.classList.contains('tabs-field__tab-button--active')) {
+          window.__activatedTabs?.add(button.textContent ?? '')
+        }
+      }
+    }).observe(document.body, { attributeFilter: ['class'], subtree: true })
+  })
+
+  const text = frame.locator('[data-testid="stega-text"]')
+  await expect(text).toHaveAttribute('data-payload-live-preview-path', /^layout\.\$.+\.text$/)
+  await text.click({ force: true })
+
+  const textField = page.locator('#field-layout__1__text')
+  await expect(textField).toBeInViewport()
+  await expect(textField).toHaveClass(/flash/)
+
+  // No tab button should ever activate - "Content" was already active, so a
+  // correct resolution never touches any tab at all.
+  const activatedTabs = await page.evaluate(() => Array.from(window.__activatedTabs ?? []))
+  expect(activatedTabs).toEqual([])
+})
+
 test('container inference: tags the content block section from its stega leaf', async ({ page }) => {
   await login(page)
 
@@ -121,6 +194,45 @@ test('container inference: tags the content block section from its stega leaf', 
   const section = frame.locator('[data-testid="content-section"]')
   await expect(section).toHaveAttribute('data-payload-live-preview-path', /^layout\.\$[^.]+$/)
   await expect(section).toHaveAttribute('data-payload-live-preview-auto', 'container')
+})
+
+test('rich text: stega paths inside the Lexical tree collapse to the rich-text field', async ({ page }) => {
+  await login(page)
+
+  const frame = await openLivePreview(page)
+
+  // The first paragraph's multi-word text run is rendered through the stega
+  // proxy - its <p> carries a deep path into the Lexical JSON
+  // (body.root.children...), which the listener must collapse to the `body`
+  // form field.
+  const paragraph = frame.locator('[data-testid="rich-text-body"] p').first()
+  await expect(paragraph).toHaveAttribute('data-payload-live-preview-path', /^body\.root\.children\./)
+  await expect(paragraph).toHaveAttribute('data-payload-live-preview-auto', 'stega')
+
+  await paragraph.click()
+
+  const bodyField = page.locator('[data-field-path="body"]')
+  await expect(bodyField).toBeInViewport()
+  await expect(bodyField).toHaveClass(/flash/)
+})
+
+test('rich text: value matching covers text runs stega skips (single words)', async ({ page }) => {
+  await login(page)
+
+  const frame = await openLivePreview(page)
+
+  // The bolded single word is skipped by stega's two-word prose rule - the
+  // admin's leaf collection now includes the rich-text value's text runs, so
+  // value matching tags it with the `body` field's path.
+  const bold = frame.locator('[data-testid="rich-text-body"] strong')
+  await expect(bold).toHaveAttribute('data-payload-live-preview-path', 'body', { timeout: 15_000 })
+  await expect(bold).toHaveAttribute('data-payload-live-preview-auto', 'match')
+
+  await bold.click()
+
+  const bodyField = page.locator('[data-field-path="body"]')
+  await expect(bodyField).toBeInViewport()
+  await expect(bodyField).toHaveClass(/flash/)
 })
 
 test('value matching: tags an element rendered from raw, unproxied data', async ({ page }) => {
