@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.6.0
+
+- **Reworked the reveal into two phases: reach the subtree, then scroll and settle.** Payload mounts tab panels in stages - rich-text editors load lazily, below-viewport fields render deferred - so after a tab switch the block row exists a moment before the field inside it, and 1.5.2 settled on the row: it flashed and focused the *parent* instead of the clicked field. Scrolling toward the deepest resolved element is itself what mounts the deferred fields, so after each scroll settles the reveal now waits for the exact target (or a deeper ancestor) to mount and continues to it - expanding and re-scrolling as needed. Already-exact targets skip the wait entirely, so the common case stays as fast as before.
+- **Fixed: the scroll could stop short of the target when the admin form kept shifting.** Corrections were measured immediately after the scroll settled - exactly when Payload mounts its deferred fields, so the measurement was stale a frame later and the small correction budget (2) ran out chasing a moving target. Corrections now wait for the target's position to hold still across a few frames before measuring, the budget is 6, and a correction that produces no actual movement (the target physically can't reach the offset, e.g. near the document bottom) stops immediately instead of retrying against the scrollend fallback.
+
 ## 1.5.2
 
 - **Fixed: a field behind a collapsed row inside another tab was never found** (`Could not resolve path … to a field`). The tab sweep only accepted the *exact* target element, but a collapsed row's fields stay unmounted even in the correct tab - so the sweep reached the right tab, saw nothing, and reverted. The reveal now runs as a step-by-step loop where each step (a tab switch, an accordion expansion) also counts a **deeper prefix resolving** as progress: the row wrapper appearing in a just-activated tab locks the sweep onto that tab, subsequent steps expand the collapsed rows (nested ones too), and the exact field is resolved once it mounts.

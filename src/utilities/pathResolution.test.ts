@@ -444,6 +444,34 @@ describe('scrollToElement', () => {
     vi.unstubAllGlobals()
   })
 
+  /** Real-timer wait long enough for the stable-position window (a few rAF frames). */
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 150))
+
+  /**
+   * happy-dom never actually scrolls - make `window.scrollY` track the
+   * `scrollBy` calls so the no-movement guard doesn't cut corrections short.
+   * Returns a restore function to run before the test ends.
+   */
+  const trackScrollY = () => {
+    let y = 0
+    const scrollBy = vi.fn((options: { top: number }) => {
+      y += options.top
+    })
+    vi.stubGlobal('scrollBy', scrollBy)
+    const descriptor = Object.getOwnPropertyDescriptor(window, 'scrollY')
+    Object.defineProperty(window, 'scrollY', { configurable: true, get: () => y })
+    return {
+      restore: () => {
+        if (descriptor) {
+          Object.defineProperty(window, 'scrollY', descriptor)
+        } else {
+          Reflect.deleteProperty(window, 'scrollY')
+        }
+      },
+      scrollBy,
+    }
+  }
+
   it('scrolls by the element top minus the offset', () => {
     const el = document.createElement('div')
     document.body.append(el)
@@ -498,11 +526,9 @@ describe('scrollToElement', () => {
   it('resolves once "scrollend" fires when the element is off-screen and lands on target', async () => {
     const el = document.createElement('div')
     document.body.append(el)
-    const rect = vi.spyOn(el, 'getBoundingClientRect')
     // Beyond happy-dom's default 768px innerHeight - genuinely off-screen.
-    rect.mockReturnValueOnce({ top: 2000 } as DOMRect)
-    // Settled exactly at the offset once the scroll finishes - no correction needed.
-    rect.mockReturnValue({ top: 80 } as DOMRect)
+    let top = 2000
+    vi.spyOn(el, 'getBoundingClientRect').mockImplementation(() => ({ top }) as DOMRect)
     vi.stubGlobal('scrollBy', vi.fn())
 
     let resolved = false
@@ -513,9 +539,10 @@ describe('scrollToElement', () => {
     await Promise.resolve()
     expect(resolved).toBe(false)
 
+    // Settled exactly at the offset once the scroll finishes - no correction needed.
+    top = 80
     window.dispatchEvent(new Event('scrollend'))
-    await Promise.resolve()
-    await Promise.resolve()
+    await settle()
 
     expect(resolved).toBe(true)
   })
@@ -523,39 +550,60 @@ describe('scrollToElement', () => {
   it('re-measures after the scroll settles and issues further corrections until it converges', async () => {
     const el = document.createElement('div')
     document.body.append(el)
-    const rect = vi.spyOn(el, 'getBoundingClientRect')
-    rect.mockReturnValueOnce({ top: 2000 } as DOMRect) // before the first (smooth) scroll
-    rect.mockReturnValueOnce({ top: 40 } as DOMRect) // layout shifted mid-scroll - still short of the offset
-    rect.mockReturnValue({ top: 80 } as DOMRect) // converged after the correction
-    const scrollBy = vi.fn()
-    vi.stubGlobal('scrollBy', scrollBy)
+    let top = 2000
+    vi.spyOn(el, 'getBoundingClientRect').mockImplementation(() => ({ top }) as DOMRect)
+    const { restore, scrollBy } = trackScrollY()
 
     let resolved = false
     void scrollToElement(el, 80).then(() => {
       resolved = true
     })
 
+    top = 40 // layout shifted mid-scroll - still short of the offset
     window.dispatchEvent(new Event('scrollend'))
-    await Promise.resolve()
-    await Promise.resolve()
+    await settle()
 
     expect(resolved).toBe(false)
     expect(scrollBy).toHaveBeenNthCalledWith(1, { behavior: 'smooth', top: 1920 })
     expect(scrollBy).toHaveBeenNthCalledWith(2, { behavior: 'smooth', top: -40 })
 
+    top = 80 // converged after the correction
     window.dispatchEvent(new Event('scrollend'))
-    await Promise.resolve()
-    await Promise.resolve()
+    await settle()
 
     expect(resolved).toBe(true)
     expect(scrollBy).toHaveBeenCalledTimes(2)
+    restore()
   })
 
   it('stops retrying once the correction budget is exhausted', async () => {
     const el = document.createElement('div')
     document.body.append(el)
-    // Never converges, e.g. content keeps shifting on every measurement.
+    // Never converges: content keeps shifting on every measurement.
     vi.spyOn(el, 'getBoundingClientRect').mockReturnValue({ top: 2000 } as DOMRect)
+    const { restore, scrollBy } = trackScrollY()
+
+    let resolved = false
+    void scrollToElement(el, 80).then(() => {
+      resolved = true
+    })
+
+    // Initial scroll + 6 corrections, each waiting for its own "scrollend".
+    for (let i = 0; i < 8 && !resolved; i++) {
+      window.dispatchEvent(new Event('scrollend'))
+      await settle()
+    }
+
+    expect(resolved).toBe(true)
+    expect(scrollBy).toHaveBeenCalledTimes(7)
+    restore()
+  })
+
+  it('stops correcting when the page cannot scroll any further (target near the document bottom)', async () => {
+    const el = document.createElement('div')
+    document.body.append(el)
+    vi.spyOn(el, 'getBoundingClientRect').mockReturnValue({ top: 2000 } as DOMRect)
+    // Plain stub: window.scrollY stays put, like a page already scrolled to its end.
     const scrollBy = vi.fn()
     vi.stubGlobal('scrollBy', scrollBy)
 
@@ -564,25 +612,24 @@ describe('scrollToElement', () => {
       resolved = true
     })
 
-    // Initial scroll + 2 corrections, each waiting for its own "scrollend".
-    for (let i = 0; i < 3; i++) {
+    for (let i = 0; i < 8 && !resolved; i++) {
       window.dispatchEvent(new Event('scrollend'))
-      await Promise.resolve()
-      await Promise.resolve()
+      await settle()
     }
 
     expect(resolved).toBe(true)
-    expect(scrollBy).toHaveBeenCalledTimes(3)
+    // Initial scroll + a single correction that produced no movement.
+    expect(scrollBy).toHaveBeenCalledTimes(2)
   })
 
   it('falls back to resolving after a timeout if "scrollend" never fires', async () => {
-    vi.useFakeTimers()
+    vi.useFakeTimers({
+      toFake: ['setTimeout', 'clearTimeout', 'requestAnimationFrame', 'cancelAnimationFrame', 'performance'],
+    })
     const el = document.createElement('div')
     document.body.append(el)
-    const rect = vi.spyOn(el, 'getBoundingClientRect')
-    rect.mockReturnValueOnce({ top: 2000 } as DOMRect)
-    // Converged by the time the fallback fires, so no further correction round is needed.
-    rect.mockReturnValue({ top: 80 } as DOMRect)
+    let top = 2000
+    vi.spyOn(el, 'getBoundingClientRect').mockImplementation(() => ({ top }) as DOMRect)
     vi.stubGlobal('scrollBy', vi.fn())
 
     let resolved = false
@@ -593,7 +640,11 @@ describe('scrollToElement', () => {
     await vi.advanceTimersByTimeAsync(999)
     expect(resolved).toBe(false)
 
+    // Converged by the time the fallback fires - after the stable-position
+    // window passes, no further correction round is needed.
+    top = 80
     await vi.advanceTimersByTimeAsync(1)
+    await vi.advanceTimersByTimeAsync(200)
     expect(resolved).toBe(true)
   })
 })

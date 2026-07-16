@@ -394,8 +394,39 @@ export const waitForElementLayout = (
 /** Safety net in case `scrollend` never fires (e.g. an older browser). */
 const SCROLL_END_FALLBACK_MS = 1000
 /** How many times to re-measure and correct after the scroll settles, in case layout shifted mid-scroll. */
-const MAX_SCROLL_CORRECTIONS = 2
+const MAX_SCROLL_CORRECTIONS = 6
 const SCROLL_CONVERGENCE_THRESHOLD_PX = 1
+/** Frames the target's position must hold still before a measurement is trusted. */
+const STABLE_POSITION_FRAMES = 3
+/** Cap on waiting for the position to hold still (layout that never stops shifting). */
+const STABLE_POSITION_TIMEOUT_MS = 400
+
+/**
+ * Resolves once `el`'s viewport position has held still for a few frames (or
+ * after a cap). Payload mounts deferred fields right after a scroll settles -
+ * measuring in that window reads a position that is about to shift again,
+ * which made corrections chase a moving target and give up short of it.
+ */
+const waitForStablePosition = (el: HTMLElement): Promise<void> =>
+  new Promise((resolve) => {
+    const startedAt = performance.now()
+    let lastTop = el.getBoundingClientRect().top
+    let stableFrames = 0
+
+    const tick = () => {
+      const { top } = el.getBoundingClientRect()
+      stableFrames = Math.abs(top - lastTop) < SCROLL_CONVERGENCE_THRESHOLD_PX ? stableFrames + 1 : 0
+      lastTop = top
+
+      if (stableFrames >= STABLE_POSITION_FRAMES || performance.now() - startedAt >= STABLE_POSITION_TIMEOUT_MS) {
+        resolve()
+        return
+      }
+      requestAnimationFrame(tick)
+    }
+
+    requestAnimationFrame(tick)
+  })
 
 const waitForScrollEnd = (): Promise<void> =>
   new Promise((resolve) => {
@@ -457,15 +488,23 @@ export const scrollToElement = async (el: HTMLElement, offset: number = DEFAULT_
   await waitForScrollEnd()
 
   for (let attempt = 0; attempt < MAX_SCROLL_CORRECTIONS; attempt++) {
-    const correctedBounds = el.getBoundingClientRect()
-    const correctedDelta = correctedBounds.top - offset
+    await waitForStablePosition(el)
+    const correctedDelta = el.getBoundingClientRect().top - offset
 
     if (Math.abs(correctedDelta) < SCROLL_CONVERGENCE_THRESHOLD_PX) {
       return
     }
 
+    const scrollYBefore = window.scrollY
     window.scrollBy({ behavior, top: correctedDelta })
     await waitForScrollEnd()
+
+    // The page didn't move: the target can't reach the offset at all (e.g.
+    // it sits near the bottom of the document). Retrying would just burn
+    // the remaining attempts against the scrollend fallback timeout.
+    if (Math.abs(window.scrollY - scrollYBefore) < SCROLL_CONVERGENCE_THRESHOLD_PX) {
+      return
+    }
   }
 }
 

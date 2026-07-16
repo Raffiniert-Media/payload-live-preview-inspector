@@ -38,12 +38,12 @@ export type LivePreviewInspectorListenerProps = {
   scrollOffset?: number
   /**
    * Maximum wait (ms) for freshly mounting fields to render - per candidate
-   * tab during a tab sweep, and after expanding a collapsed accordion whose
-   * content mounts for the first time. Increase this if a heavier field (a
-   * rich-text editor, deeply nested blocks) needs more time to mount than
-   * the default allows - too short a value here is what makes a reveal look
-   * broken: it gives up on the correct spot before its content appears,
-   * tries the rest, then reverts. Defaults to 1500.
+   * tab during a tab sweep, and after scrolling toward a target whose exact
+   * element hasn't mounted yet (Payload defers below-viewport fields and
+   * lazy-loads rich-text editors). Increase this if a heavier field needs
+   * more time to mount than the default allows - too short a value here
+   * makes a reveal give up on the correct spot before its content appears.
+   * Defaults to 1500.
    */
   tabSwitchWaitMs?: number
 }
@@ -128,31 +128,33 @@ export const LivePreviewInspectorListener: React.FC<LivePreviewInspectorListener
           resolveExactFieldElement(resolvedPath) ??
           (targetFieldPath ? resolveExactFieldElement(targetFieldPath) : null)
 
-        // Work toward the exact element step by step. Expanding a rendered
-        // ancestor's collapsed accordions is always cheaper than touching
-        // tabs (a rendered ancestor also pins the target to the active tab,
-        // so a sweep is then scoped to tabs nested inside it - usually
-        // none). Each step accepts *progress*, not only the exact element:
-        // a deeper prefix resolving is enough - e.g. the row wrapper
-        // appearing inside a just-activated tab whose row is still
-        // collapsed, or a nested row mounting inside a just-expanded one -
-        // and the next step continues from there. Without this, a target
-        // behind a collapsed row in another tab was never found: the sweep
-        // reached the right tab, saw no exact element, and reverted.
+        // "Exact target or a deeper prefix than `depth`" - the success
+        // condition for every reveal step: progress counts, not only the
+        // finished result, because Payload mounts things in stages (a tab
+        // switch mounts the row before its lazy fields, an expansion mounts
+        // nested rows still collapsed, a scroll mounts deferred fields).
+        const progressBeyond = (depth: number) => () =>
+          checkExact() ??
+          (resolvedPathDepth(resolvedPath) > depth ? resolveFieldElement(resolvedPath) : null)
+
         const totalDepth = resolvedPath.split('.').length
+
+        // Phase 1: make the target's subtree reachable - right tab active,
+        // accordions on the way open. Expanding a rendered ancestor's
+        // collapsed accordions is always cheaper than touching tabs (a
+        // rendered ancestor also pins the target to the active tab, so a
+        // sweep is then scoped to tabs nested inside it - usually none).
         for (let step = 0; step <= totalDepth && !checkExact(); step++) {
-          const depthBefore = resolvedPathDepth(resolvedPath)
-          const progressed = () =>
-            checkExact() ??
-            (resolvedPathDepth(resolvedPath) > depthBefore ? resolveFieldElement(resolvedPath) : null)
+          const progressed = progressBeyond(resolvedPathDepth(resolvedPath))
 
           const ancestor = resolveFieldElement(resolvedPath)
           if (ancestor && expandCollapsedAncestors(ancestor)) {
-            // Tab-switch budget, not the accordion one: what mounts here is
-            // a field (a rich-text editor outlives 350ms). Only reached
-            // again after this wait, so a pending toggle click is committed
-            // long before `expandCollapsedAncestors` re-reads its class.
-            await waitForElement(progressed, tabSwitchWaitMs)
+            // Only reached again after this wait, so a pending toggle click
+            // is committed long before `expandCollapsedAncestors` re-reads
+            // its class. Slow mounts (a rich-text editor, below-viewport
+            // deferred fields) that outlive this budget are caught by the
+            // scroll-and-settle phase below.
+            await waitForElement(progressed, accordionAnimationMs)
           } else {
             const found = await revealTabForElement(progressed, tabSwitchWaitMs, ancestor ?? document)
             if (!found) {
@@ -164,7 +166,7 @@ export const LivePreviewInspectorListener: React.FC<LivePreviewInspectorListener
           }
         }
 
-        const el = resolveFieldElement(resolvedPath)
+        let el = resolveFieldElement(resolvedPath)
 
         if (!el) {
           if (process.env.NODE_ENV !== 'production') {
@@ -174,20 +176,39 @@ export const LivePreviewInspectorListener: React.FC<LivePreviewInspectorListener
           return
         }
 
-        const didExpand = expandCollapsedAncestors(el)
+        // Phase 2: scroll and settle. Payload defers rendering fields that
+        // are below the viewport (and lazy-loads heavier ones, like the
+        // rich-text editor), so scrolling to the deepest element we have is
+        // often the very thing that mounts the exact target. After each
+        // scroll settles, give the target a moment to appear; when it (or a
+        // deeper ancestor) does, continue from there instead of flashing a
+        // parent the user didn't click.
+        for (let step = 0; step <= totalDepth; step++) {
+          if (expandCollapsedAncestors(el)) {
+            // Collapsed content is `display: none` until React re-renders
+            // after the toggle click - wait until it is actually measurable.
+            await waitForElementLayout(el, accordionAnimationMs)
+            if (generation !== revealGeneration) {
+              return
+            }
+          }
 
-        if (didExpand) {
-          // Collapsed content is `display: none` until React re-renders after
-          // the toggle click - wait until the field is actually measurable.
-          await waitForElementLayout(el, accordionAnimationMs)
+          await scrollToElement(el, scrollOffset)
           if (generation !== revealGeneration) {
             return
           }
-        }
 
-        await scrollToElement(el, scrollOffset)
-        if (generation !== revealGeneration) {
-          return
+          // Already on the exact target (or as deep as we will ever get and
+          // nothing deeper mounted after the scroll) - stop here.
+          const next =
+            checkExact() ?? (await waitForElement(progressBeyond(resolvedPathDepth(resolvedPath)), tabSwitchWaitMs))
+          if (generation !== revealGeneration) {
+            return
+          }
+          if (!next || next === el) {
+            break
+          }
+          el = next
         }
 
         sharedFlashElement(el, { className: classes.flash, color: flashColor, durationMs: flashDurationMs })
