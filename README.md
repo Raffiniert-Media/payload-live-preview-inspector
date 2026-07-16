@@ -4,6 +4,8 @@ A [Payload CMS](https://payloadcms.com) plugin that brings Storyblok-style click
 
 This plugin does **not** set up Live Preview itself. It adds the click-to-scroll behavior on top of an already-working `admin.livePreview` configuration.
 
+![Hovering and clicking a component in Live Preview scrolls, expands, and flashes the matching field in the admin edit form](./docs/images/example.gif)
+
 ## How it works
 
 - **In the iframe (your frontend):** `LivePreviewInspectorClient` tracks the pointer and highlights the tagged element under it; click posts a message to the parent window with that element's path. Targeting is point-based (`elementsFromPoint`) and picks the *smallest* tagged element at the point, so tagged text stays hoverable/clickable even beneath a full-card overlay link (`<a class="absolute inset-0">`) that swallows every pointer event — including when the overlay itself is tagged via its `aria-label`. It also blocks link navigation by default (see [Link interception](#link-interception) below).
@@ -220,6 +222,10 @@ Nothing here reaches real visitors, but it's worth understanding what runs where
 - `LivePreviewInspectorClient` is a guaranteed no-op outside an iframe — for normal visitors it attaches **no** event listeners, runs **no** scanner, and renders nothing. Its only cost is a few kB in the bundle. The auto-tagging layers (stega decoding, value matching, container inference) only ever execute inside the Live Preview iframe.
 - `inspectable()`'s proxy overhead is negligible (~0.02 ms per render for a 100-block document).
 - The visible effects — `pathOf()` attributes (roughly 40–60 bytes per tagged element), stega characters inside string values, `serializable` marker keys — all exist only while the tree is enabled. They reveal your field structure and are unnecessary on public pages.
+
+**Measured impact:** a production site running this plugin (dedicated preview route setup) scores **100/100 on mobile Performance** in Lighthouse — the plugin adds zero measurable overhead to the public pages real visitors see:
+
+![Lighthouse mobile report: 100 Performance, 100 Accessibility, 100 Best Practices, 100 SEO](./docs/images/lighthouse-mobile.png)
 
 The cleanest setup is a **dedicated preview route** (like this repo's `dev/app/(frontend)/preview/...`): the public route never imports any of this, so the cost for real visitors is exactly zero. Value matching pairs especially well with this — it needs no data changes at all, so the preview route can be a plain copy of the public one plus the mounted client component.
 
