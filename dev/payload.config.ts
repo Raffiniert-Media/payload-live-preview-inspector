@@ -102,6 +102,18 @@ export default buildConfig({
                   name: 'metaNote',
                   type: 'text',
                 },
+                // Array rows in a non-default tab: a field inside a collapsed
+                // row here needs a tab switch *and* an expansion to reveal.
+                {
+                  name: 'metaSections',
+                  type: 'array',
+                  fields: [
+                    {
+                      name: 'title',
+                      type: 'text',
+                    },
+                  ],
+                },
               ],
               label: 'Meta',
             },

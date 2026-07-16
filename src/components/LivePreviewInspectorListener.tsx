@@ -15,6 +15,7 @@ import {
   expandCollapsedAncestors,
   fieldPathFromFormState,
   focusElement,
+  resolvedPathDepth,
   resolveExactFieldElement,
   resolveFieldElement,
   resolveRowIDs,
@@ -127,40 +128,37 @@ export const LivePreviewInspectorListener: React.FC<LivePreviewInspectorListener
           resolveExactFieldElement(resolvedPath) ??
           (targetFieldPath ? resolveExactFieldElement(targetFieldPath) : null)
 
-        if (!checkExact()) {
-          // A closed accordion (Collapsible field, or an Array/Blocks row) is
-          // a cheaper explanation than "wrong tab" - Payload unmounts its
-          // content while collapsed, but the row/field's nearest rendered
-          // ancestor is still resolvable via prefix fallback in whichever tab
-          // is already on screen. Expand it and give it a chance to mount
-          // before ever concluding the target must be behind an inactive tab
-          // button - checking this first is what a closed accordion in the
-          // *correct*, already-active tab was missing, so it got misread as
-          // "must be some other tab" and triggered a visible tab sweep.
-          //
-          // This must only click a given toggle once: `expandCollapsedAncestors`
-          // reads the live `--collapsed` class, and React won't have
-          // committed the state update from a click until a later render, so
-          // calling it again on every poll tick (before that commit lands)
-          // would re-click the same toggle and flip the row straight back to
-          // collapsed.
+        // Work toward the exact element step by step. Expanding a rendered
+        // ancestor's collapsed accordions is always cheaper than touching
+        // tabs (a rendered ancestor also pins the target to the active tab,
+        // so a sweep is then scoped to tabs nested inside it - usually
+        // none). Each step accepts *progress*, not only the exact element:
+        // a deeper prefix resolving is enough - e.g. the row wrapper
+        // appearing inside a just-activated tab whose row is still
+        // collapsed, or a nested row mounting inside a just-expanded one -
+        // and the next step continues from there. Without this, a target
+        // behind a collapsed row in another tab was never found: the sweep
+        // reached the right tab, saw no exact element, and reverted.
+        const totalDepth = resolvedPath.split('.').length
+        for (let step = 0; step <= totalDepth && !checkExact(); step++) {
+          const depthBefore = resolvedPathDepth(resolvedPath)
+          const progressed = () =>
+            checkExact() ??
+            (resolvedPathDepth(resolvedPath) > depthBefore ? resolveFieldElement(resolvedPath) : null)
+
           const ancestor = resolveFieldElement(resolvedPath)
           if (ancestor && expandCollapsedAncestors(ancestor)) {
             // Tab-switch budget, not the accordion one: what mounts here is
-            // the field itself, and a rich-text editor outlives 350ms.
-            await waitForElement(checkExact, tabSwitchWaitMs)
-            if (generation !== revealGeneration) {
-              return
+            // a field (a rich-text editor outlives 350ms). Only reached
+            // again after this wait, so a pending toggle click is committed
+            // long before `expandCollapsedAncestors` re-reads its class.
+            await waitForElement(progressed, tabSwitchWaitMs)
+          } else {
+            const found = await revealTabForElement(progressed, tabSwitchWaitMs, ancestor ?? document)
+            if (!found) {
+              break
             }
           }
-        }
-
-        // Payload unmounts inactive tab panels - if neither the exact target
-        // nor its owning field is in the DOM, sweep the tabs until it is. A
-        // rendered ancestor pins the target to the active tab, so the sweep
-        // is scoped to tabs nested inside it (usually none - no sweep).
-        if (!checkExact()) {
-          await revealTabForElement(checkExact, tabSwitchWaitMs, resolveFieldElement(resolvedPath) ?? document)
           if (generation !== revealGeneration) {
             return
           }

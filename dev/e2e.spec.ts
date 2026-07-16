@@ -238,6 +238,43 @@ test('rich text behind a closed accordion: waits for the editor to mount instead
   expect(activatedTabs).toEqual([])
 })
 
+test('reveals a field behind a collapsed row inside another tab (switch, then expand)', async ({ page }) => {
+  await login(page)
+
+  await openLivePreview(page)
+
+  // Collapse the metaSections row while the Meta tab is active, then leave
+  // Content as the persisted tab and reload - the row now starts collapsed
+  // inside an unmounted tab panel, so its field can never appear from a tab
+  // switch alone. The sweep must lock onto the Meta tab via the row wrapper
+  // (progress, not the exact element) and expand it from there.
+  await page.locator('.tabs-field__tab-button', { hasText: 'Meta' }).click()
+  await expect(page.locator('.tabs-field__tab-button--active')).toHaveText('Meta')
+  await page.evaluate(() => {
+    const collapsible = document.querySelector('#metaSections-row-0 .collapsible')
+    if (!collapsible?.classList.contains('collapsible--collapsed')) {
+      document
+        .querySelector<HTMLButtonElement>('#metaSections-row-0 .collapsible__toggle-wrap .collapsible__toggle')
+        ?.click()
+    }
+  })
+  await expect(page.locator('#metaSections-row-0 .collapsible')).toHaveClass(/collapsible--collapsed/)
+  await page.locator('.tabs-field__tab-button', { hasText: 'Content' }).click()
+  await expect(page.locator('.tabs-field__tab-button--active')).toHaveText('Content')
+
+  const frame = await openLivePreview(page)
+  await expect(page.locator('.tabs-field__tab-button--active')).toHaveText('Content')
+  await expect(page.locator('#metaSections-row-0')).toHaveCount(0)
+
+  const sectionTitle = frame.locator('[data-testid="meta-section-title"]').first()
+  await expect(sectionTitle).toHaveAttribute('data-payload-live-preview-path', /^metaSections\.\$.+\.title$/)
+  await sectionTitle.click()
+
+  const titleField = page.locator('#field-metaSections__0__title')
+  await expect(titleField).toBeInViewport()
+  await expect(titleField).toHaveClass(/flash/)
+})
+
 test('container inference: tags the content block section from its stega leaf', async ({ page }) => {
   await login(page)
 

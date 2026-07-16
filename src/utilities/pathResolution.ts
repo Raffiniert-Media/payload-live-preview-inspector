@@ -68,6 +68,25 @@ export const resolveFieldElement = (path: string): HTMLElement | null => {
 }
 
 /**
+ * Depth (in path segments) of the deepest prefix of `path` that resolves to
+ * a rendered element - 0 when nothing resolves. Reveal steps compare this
+ * before/after (a tab switch, an accordion expansion) to detect progress
+ * toward a target whose exact element isn't mountable yet - e.g. a field
+ * behind a collapsed row inside a not-yet-active tab.
+ */
+export const resolvedPathDepth = (path: string): number => {
+  const segments = path.split('.')
+
+  for (let length = segments.length; length > 0; length--) {
+    if (resolveExactFieldElement(segments.slice(0, length).join('.'))) {
+      return length
+    }
+  }
+
+  return 0
+}
+
+/**
  * Trims a (possibly too deep) path to the longest prefix that is an actual
  * form field, using the live form state as the source of truth - e.g. a
  * stega path pointing inside a rich-text value collapses to the rich-text

@@ -99,6 +99,7 @@ export const seed = async (payload: Payload) => {
           },
         ],
         metaNote: 'A note living in the Meta tab',
+        metaSections: [{ title: 'A section title behind the Meta tab' }],
         title: 'Hello Live Preview',
       },
     })
@@ -107,7 +108,7 @@ export const seed = async (payload: Payload) => {
     const post = posts[0]
     const blockBodyMissing = post.layout?.some((block) => block.blockType === 'contentBlock' && !block.body)
 
-    if (!post.body || blockBodyMissing) {
+    if (!post.body || blockBodyMissing || !post.metaSections?.length) {
       await payload.update({
         id: post.id,
         collection: 'posts',
@@ -116,6 +117,9 @@ export const seed = async (payload: Payload) => {
           layout: post.layout?.map((block) =>
             block.blockType === 'contentBlock' ? { ...block, body: block.body ?? seedBlockBody } : block,
           ),
+          metaSections: post.metaSections?.length
+            ? post.metaSections
+            : [{ title: 'A section title behind the Meta tab' }],
         },
       })
     }

@@ -88,6 +88,35 @@ export const scanStega = (root: Document | Element): void => {
 
 const normalizeText = (text: string): string => stegaClean(text).replace(/\s+/g, ' ').trim()
 
+/** Ambiguous values already reported, so the dev-only notice logs once per value. */
+const warnedAmbiguousValues = new Set<string>()
+
+/** Dev-only: say *why* a value can never be matched (scans rerun constantly, so log once). */
+const warnAmbiguousValues = (leaves: DocumentLeafValue[], pathByValue: Map<string, null | string>): void => {
+  const ambiguous = new Map<string, string[]>()
+
+  for (const { path, value } of leaves) {
+    const normalized = normalizeText(value)
+    if (pathByValue.get(normalized) !== null || warnedAmbiguousValues.has(normalized)) {
+      continue
+    }
+    const paths = ambiguous.get(normalized) ?? []
+    if (!paths.includes(path)) {
+      paths.push(path)
+    }
+    ambiguous.set(normalized, paths)
+  }
+
+  for (const [value, paths] of ambiguous) {
+    warnedAmbiguousValues.add(value)
+    const excerpt = value.length > 80 ? `${value.slice(0, 80)}…` : value
+    // eslint-disable-next-line no-console -- intentional dev-only diagnostic
+    console.info(
+      `[payload-live-preview-inspector] Value matching skipped "${excerpt}": the fields ${paths.join(', ')} share this exact value, so a match would be ambiguous. Tag the element with pathOf() or render it through the stega proxy.`,
+    )
+  }
+}
+
 /**
  * Tags elements whose entire text content equals a document field's value -
  * the zero-config layer that needs no frontend data changes at all. Only
@@ -105,6 +134,10 @@ export const applyValueMatching = (root: Document | Element, leaves: DocumentLea
     }
     const existing = pathByValue.get(normalized)
     pathByValue.set(normalized, existing === undefined || existing === path ? path : null)
+  }
+
+  if (process.env.NODE_ENV !== 'production') {
+    warnAmbiguousValues(leaves, pathByValue)
   }
 
   if (pathByValue.size === 0) {

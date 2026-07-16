@@ -82,6 +82,23 @@ describe('applyValueMatching', () => {
     expect(pathAttr(document.getElementById('el'))).toBeNull()
   })
 
+  it('reports a skipped ambiguous value once, naming the colliding fields', () => {
+    const info = vi.spyOn(console, 'info').mockImplementation(() => {})
+    document.body.innerHTML = '<p id="el">Shared hero headline</p>'
+    const leaves = [
+      { path: 'title', value: 'Shared hero headline' },
+      { path: 'hero.title', value: 'Shared hero headline' },
+    ]
+
+    applyValueMatching(document, leaves)
+    applyValueMatching(document, leaves)
+
+    expect(info).toHaveBeenCalledTimes(1)
+    expect(info.mock.calls[0][0]).toContain('title, hero.title')
+    expect(info.mock.calls[0][0]).toContain('Shared hero headline')
+    info.mockRestore()
+  })
+
   it('skips values shorter than the minimum length', () => {
     document.body.innerHTML = '<p id="el">Hi</p>'
     applyValueMatching(document, [{ path: 'title', value: 'Hi' }])

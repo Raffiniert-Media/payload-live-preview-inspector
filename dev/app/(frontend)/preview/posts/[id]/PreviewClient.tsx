@@ -150,6 +150,13 @@ export const PreviewClient = ({ initialData }: Props) => {
         <p data-testid="meta-note" {...pathOf(page, 'metaNote')}>
           {page.metaNote ?? 'Meta note'}
         </p>
+        {/* Stega-tagged rows of an array living in the Meta tab: revealing
+            one can require a tab switch AND expanding its collapsed row. */}
+        {page.metaSections?.map((section, index) => (
+          <p data-testid="meta-section-title" key={section.id ?? index}>
+            {section.title}
+          </p>
+        ))}
       </div>
       {/* Rendered from the RAW (unproxied) data - no pathOf, no stega. Value
           matching asks the admin panel for the field values and tags this

@@ -178,6 +178,12 @@ export interface Post {
       )[]
     | null;
   metaNote?: string | null;
+  metaSections?:
+    | {
+        title?: string | null;
+        id?: string | null;
+      }[]
+    | null;
   updatedAt: string;
   createdAt: string;
 }
@@ -330,6 +336,12 @@ export interface PostsSelect<T extends boolean = true> {
             };
       };
   metaNote?: T;
+  metaSections?:
+    | T
+    | {
+        title?: T;
+        id?: T;
+      };
   updatedAt?: T;
   createdAt?: T;
 }

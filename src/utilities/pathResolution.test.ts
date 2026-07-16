@@ -9,6 +9,7 @@ import {
   fieldPathFromFormState,
   flashElement,
   focusElement,
+  resolvedPathDepth,
   resolveExactFieldElement,
   resolveFieldElement,
   resolveRowIDs,
@@ -81,6 +82,23 @@ describe('resolveExactFieldElement', () => {
   it('prefers the field id over a data-field-path match', () => {
     document.body.innerHTML = '<input id="field-title" /><div data-field-path="title" id="wrapper"></div>'
     expect(resolveExactFieldElement('title')?.id).toBe('field-title')
+  })
+})
+
+describe('resolvedPathDepth', () => {
+  it('returns the segment count of the deepest resolvable prefix', () => {
+    document.body.innerHTML = '<div id="layout-row-2"></div>'
+    expect(resolvedPathDepth('layout.2.groups.2.title')).toBe(2)
+
+    document.body.innerHTML = '<div id="layout-2-groups-row-2"></div>'
+    expect(resolvedPathDepth('layout.2.groups.2.title')).toBe(4)
+
+    document.body.innerHTML = '<input id="field-layout__2__groups__2__title" />'
+    expect(resolvedPathDepth('layout.2.groups.2.title')).toBe(5)
+  })
+
+  it('returns 0 when nothing resolves', () => {
+    expect(resolvedPathDepth('layout.2.groups.2.title')).toBe(0)
   })
 })
 
