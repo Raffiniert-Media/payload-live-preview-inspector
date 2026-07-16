@@ -156,6 +156,21 @@ export interface Post {
           }
         | {
             text?: string | null;
+            body?: {
+              root: {
+                type: string;
+                children: {
+                  type: any;
+                  version: number;
+                  [k: string]: unknown;
+                }[];
+                direction: ('ltr' | 'rtl') | null;
+                format: 'left' | 'start' | 'center' | 'right' | 'end' | 'justify' | '';
+                indent: number;
+                version: number;
+              };
+              [k: string]: unknown;
+            } | null;
             id?: string | null;
             blockName?: string | null;
             blockType: 'contentBlock';
@@ -309,6 +324,7 @@ export interface PostsSelect<T extends boolean = true> {
           | T
           | {
               text?: T;
+              body?: T;
               id?: T;
               blockName?: T;
             };

@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.5.1
+
+- **Fixed: clicking rich text still swept the tab bar even though the correct tab was already active.** Two remaining causes of 1.5.0's symptom, both hit on real sites:
+  - After expanding a collapsed accordion, the listener waited only `accordionAnimationMs` (350ms) for the target field to appear - a Lexical editor mounting inside a just-expanded block row comfortably outlives that, so the timeout was misread as "must be another tab" and triggered a visible sweep. The post-expand wait now uses the `tabSwitchWaitMs` budget (1500ms default), which exists for exactly this kind of mount.
+  - The sweep ignored that a rendered ancestor of the target (its block row, its array field) already pins the target to the active tab - every DOM ancestor of a field lives in the same tab panel. When prefix fallback resolves such an ancestor, the sweep is now scoped to tab buttons *inside* it (nested tabs only) - which in the common case means no tab is touched at all. This also covers Payload versions whose Lexical field renders no `data-field-path` attribute, where the exact-element check can never succeed and every rich-text click used to sweep the whole bar before settling on the ancestor it already had.
+- The dev demo's contentBlock now nests a rich-text field inside the (collapsible) block row, with e2e coverage asserting a click on it never activates any tab.
+
 ## 1.5.0
 
 Rich-text matching fixes and a tab-switch fix, all reported from real consuming sites.

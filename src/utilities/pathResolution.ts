@@ -262,10 +262,16 @@ export const waitForElement = (check: () => HTMLElement | null, timeoutMs: numbe
  * buttons until `check` resolves, re-querying between rounds so nested tabs
  * revealed by a switch get swept too. When nothing is found anywhere, the
  * originally active tabs are clicked back so the sweep leaves no UI trace.
+ *
+ * `root` limits the sweep to tab buttons inside that subtree. Callers pass
+ * the target's nearest rendered ancestor when one resolves: an ancestor in
+ * the DOM proves the target's tab is already active, so only tabs *nested
+ * inside* the ancestor could still be hiding it.
  */
 export const revealTabForElement = async (
   check: () => HTMLElement | null,
   tabRenderWaitMs: number = DEFAULT_TAB_SWITCH_WAIT_MS,
+  root: Document | HTMLElement = document,
 ): Promise<HTMLElement | null> => {
   const found = check()
   if (found) {
@@ -273,12 +279,12 @@ export const revealTabForElement = async (
   }
 
   const originallyActive = Array.from(
-    document.querySelectorAll<HTMLButtonElement>(`.${TAB_BUTTON_ACTIVE_CLASS}`),
+    root.querySelectorAll<HTMLButtonElement>(`.${TAB_BUTTON_ACTIVE_CLASS}`),
   )
   const clicked = new Set<Element>()
 
   for (let round = 0; round < MAX_TAB_SWEEP_ROUNDS; round++) {
-    const buttons = Array.from(document.querySelectorAll<HTMLButtonElement>(TAB_BUTTON_SELECTOR)).filter(
+    const buttons = Array.from(root.querySelectorAll<HTMLButtonElement>(TAB_BUTTON_SELECTOR)).filter(
       (button) => !clicked.has(button) && !button.classList.contains(TAB_BUTTON_ACTIVE_CLASS),
     )
 

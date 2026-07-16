@@ -184,6 +184,60 @@ test('reveals a field behind a closed accordion without sweeping tabs', async ({
   expect(activatedTabs).toEqual([])
 })
 
+test('rich text behind a closed accordion: waits for the editor to mount instead of sweeping tabs', async ({
+  page,
+}) => {
+  await login(page)
+
+  await openLivePreview(page)
+
+  await page.locator('.tabs-field__tab-button', { hasText: 'Content' }).click()
+  await expect(page.locator('.tabs-field__tab-button--active')).toHaveText('Content')
+
+  // Start with the contentBlock row already collapsed from the initial
+  // render (persisted preference + reload), so its Lexical editor was never
+  // mounted. Unlike the plain textarea above, the editor takes well over the
+  // accordion-animation budget to mount after expansion - the case that used
+  // to get misread as "wrong tab" and trigger a visible sweep.
+  await page.evaluate(() => {
+    const collapsible = document.querySelector('#layout-row-1 .collapsible')
+    if (!collapsible?.classList.contains('collapsible--collapsed')) {
+      document
+        .querySelector<HTMLButtonElement>('#layout-row-1 .collapsible__toggle-wrap .collapsible__toggle')
+        ?.click()
+    }
+  })
+  await expect(page.locator('#layout-row-1 .collapsible')).toHaveClass(/collapsible--collapsed/)
+
+  const frame = await openLivePreview(page)
+  await expect(page.locator('#layout-row-1 .collapsible')).toHaveClass(/collapsible--collapsed/)
+  await expect(page.locator('[data-field-path="layout.1.body"]')).toHaveCount(0)
+
+  await page.evaluate(() => {
+    window.__activatedTabs = new Set<string>()
+    new MutationObserver((mutations) => {
+      for (const mutation of mutations) {
+        const button = mutation.target as HTMLElement
+        if (button.classList.contains('tabs-field__tab-button--active')) {
+          window.__activatedTabs?.add(button.textContent ?? '')
+        }
+      }
+    }).observe(document.body, { attributeFilter: ['class'], subtree: true })
+  })
+
+  const paragraph = frame.locator('[data-testid="block-rich-text"] p').first()
+  await expect(paragraph).toHaveAttribute('data-payload-live-preview-path', /^layout\.\$.+\.body\.root\./)
+  // force: the card's overlay link covers the section (see the stega test).
+  await paragraph.click({ force: true })
+
+  const bodyField = page.locator('[data-field-path="layout.1.body"]')
+  await expect(bodyField).toBeInViewport()
+  await expect(bodyField).toHaveClass(/flash/)
+
+  const activatedTabs = await page.evaluate(() => Array.from(window.__activatedTabs ?? []))
+  expect(activatedTabs).toEqual([])
+})
+
 test('container inference: tags the content block section from its stega leaf', async ({ page }) => {
   await login(page)
 

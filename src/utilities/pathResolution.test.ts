@@ -163,6 +163,48 @@ describe('revealTabForElement', () => {
     expect(DEFAULT_TAB_SWITCH_WAIT_MS).toBeGreaterThanOrEqual(1000)
   })
 
+  it('never touches tabs outside the given root (a rendered ancestor pins the target to the active tab)', async () => {
+    const [content, meta] = buildTabs(['Content', 'Meta'], 0)
+    const contentClicks = vi.fn()
+    const metaClicks = vi.fn()
+    content.addEventListener('click', contentClicks)
+    meta.addEventListener('click', metaClicks)
+
+    const row = document.createElement('div')
+    row.id = 'layout-row-0'
+    document.body.append(row)
+
+    const el = await revealTabForElement(() => null, 20, row)
+
+    expect(el).toBeNull()
+    expect(contentClicks).not.toHaveBeenCalled()
+    expect(metaClicks).not.toHaveBeenCalled()
+  })
+
+  it('still sweeps tabs nested inside the root', async () => {
+    const [, topMeta] = buildTabs(['Content', 'Meta'], 0)
+    const topMetaClicks = vi.fn()
+    topMeta.addEventListener('click', topMetaClicks)
+
+    const row = document.createElement('div')
+    row.id = 'layout-row-0'
+    const innerActive = document.createElement('button')
+    innerActive.className = 'tabs-field__tab-button tabs-field__tab-button--active'
+    const innerHidden = document.createElement('button')
+    innerHidden.className = 'tabs-field__tab-button'
+    innerHidden.addEventListener('click', () => {
+      innerHidden.classList.add('tabs-field__tab-button--active')
+      row.insertAdjacentHTML('beforeend', '<input id="field-layout__0__text" />')
+    })
+    row.append(innerActive, innerHidden)
+    document.body.append(row)
+
+    const el = await revealTabForElement(() => document.getElementById('field-layout__0__text'), 50, row)
+
+    expect(el?.id).toBe('field-layout__0__text')
+    expect(topMetaClicks).not.toHaveBeenCalled()
+  })
+
   it('still finds the field when a tab genuinely takes a while to render it', async () => {
     // Simulates the real regression: the tab's fields don't appear
     // synchronously on click, but slightly later (e.g. a rich-text editor

@@ -36,13 +36,13 @@ export type LivePreviewInspectorListenerProps = {
   /** Distance (px) to keep between the scrolled-to field and the viewport top. Defaults to 100. */
   scrollOffset?: number
   /**
-   * Maximum wait (ms), per candidate tab, for a just-activated tab's fields
-   * to render before assuming the target isn't in that tab. Increase this if
-   * a heavier tab (a rich-text editor, deeply nested blocks) needs more time
-   * to mount than the default allows - too short a value here is what makes
-   * the tab switch look like it "does nothing": it gives up on the correct
-   * tab before its content appears, tries the rest, then reverts. Defaults
-   * to 1500.
+   * Maximum wait (ms) for freshly mounting fields to render - per candidate
+   * tab during a tab sweep, and after expanding a collapsed accordion whose
+   * content mounts for the first time. Increase this if a heavier field (a
+   * rich-text editor, deeply nested blocks) needs more time to mount than
+   * the default allows - too short a value here is what makes a reveal look
+   * broken: it gives up on the correct spot before its content appears,
+   * tries the rest, then reverts. Defaults to 1500.
    */
   tabSwitchWaitMs?: number
 }
@@ -146,7 +146,9 @@ export const LivePreviewInspectorListener: React.FC<LivePreviewInspectorListener
           // collapsed.
           const ancestor = resolveFieldElement(resolvedPath)
           if (ancestor && expandCollapsedAncestors(ancestor)) {
-            await waitForElement(checkExact, accordionAnimationMs)
+            // Tab-switch budget, not the accordion one: what mounts here is
+            // the field itself, and a rich-text editor outlives 350ms.
+            await waitForElement(checkExact, tabSwitchWaitMs)
             if (generation !== revealGeneration) {
               return
             }
@@ -154,9 +156,11 @@ export const LivePreviewInspectorListener: React.FC<LivePreviewInspectorListener
         }
 
         // Payload unmounts inactive tab panels - if neither the exact target
-        // nor its owning field is in the DOM, sweep the tabs until it is.
+        // nor its owning field is in the DOM, sweep the tabs until it is. A
+        // rendered ancestor pins the target to the active tab, so the sweep
+        // is scoped to tabs nested inside it (usually none - no sweep).
         if (!checkExact()) {
-          await revealTabForElement(checkExact, tabSwitchWaitMs)
+          await revealTabForElement(checkExact, tabSwitchWaitMs, resolveFieldElement(resolvedPath) ?? document)
           if (generation !== revealGeneration) {
             return
           }

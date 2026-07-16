@@ -46,6 +46,19 @@ const seedBody = {
   },
 }
 
+/** Rich text living inside the contentBlock row - a Lexical editor that has
+ * to mount when the (possibly collapsed) row is expanded. */
+const seedBlockBody = {
+  root: {
+    type: 'root',
+    children: [paragraph([text('Rich text nested inside a block row of the layout.')])],
+    direction: 'ltr' as const,
+    format: '' as const,
+    indent: 0,
+    version: 1,
+  },
+}
+
 export const seed = async (payload: Payload) => {
   const { totalDocs } = await payload.count({
     collection: 'users',
@@ -81,6 +94,7 @@ export const seed = async (payload: Payload) => {
           },
           {
             blockType: 'contentBlock',
+            body: seedBlockBody,
             text: 'This block can also be clicked to scroll the admin form to it.',
           },
         ],
@@ -88,12 +102,22 @@ export const seed = async (payload: Payload) => {
         title: 'Hello Live Preview',
       },
     })
-  } else if (!posts[0].body) {
-    // Backfill for a dev database created before the rich-text demo existed.
-    await payload.update({
-      id: posts[0].id,
-      collection: 'posts',
-      data: { body: seedBody },
-    })
+  } else {
+    // Backfill for a dev database created before the rich-text demos existed.
+    const post = posts[0]
+    const blockBodyMissing = post.layout?.some((block) => block.blockType === 'contentBlock' && !block.body)
+
+    if (!post.body || blockBodyMissing) {
+      await payload.update({
+        id: post.id,
+        collection: 'posts',
+        data: {
+          body: post.body ?? seedBody,
+          layout: post.layout?.map((block) =>
+            block.blockType === 'contentBlock' ? { ...block, body: block.body ?? seedBlockBody } : block,
+          ),
+        },
+      })
+    }
   }
 }

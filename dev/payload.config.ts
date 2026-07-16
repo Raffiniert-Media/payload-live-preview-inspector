@@ -82,6 +82,13 @@ export default buildConfig({
                           name: 'text',
                           type: 'textarea',
                         },
+                        // Rich text inside a (collapsible) block row: mounts
+                        // slower than plain inputs when the row is expanded,
+                        // exercising the reveal's wait-vs-tab-sweep decision.
+                        {
+                          name: 'body',
+                          type: 'richText',
+                        },
                       ],
                     },
                   ],

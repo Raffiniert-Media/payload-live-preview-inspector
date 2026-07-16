@@ -117,6 +117,14 @@ export const PreviewClient = ({ initialData }: Props) => {
                   style={{ inset: 0, position: 'absolute', zIndex: 1 }}
                 />
                 <p data-testid="stega-text">{block.text}</p>
+                {/* Rich text nested in the block row: its stega paths
+                    (layout.$row.body.root...) collapse to `layout.<i>.body`,
+                    whose Lexical editor only mounts once the row is expanded.
+                    Inside the section, so the block's inferred container
+                    stays the section. */}
+                <div data-testid="block-rich-text">
+                  {block.body ? <RichText data={block.body} /> : null}
+                </div>
               </section>
             </div>
           )
