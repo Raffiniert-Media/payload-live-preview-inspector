@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.6.1
+
+- README: added a link back to [raffiniert.biz](https://raffiniert.biz) and our blog post about the plugin. No code changes.
+
 ## 1.6.0
 
 - **Reworked the reveal into two phases: reach the subtree, then scroll and settle.** Payload mounts tab panels in stages - rich-text editors load lazily, below-viewport fields render deferred - so after a tab switch the block row exists a moment before the field inside it, and 1.5.2 settled on the row: it flashed and focused the *parent* instead of the clicked field. Scrolling toward the deepest resolved element is itself what mounts the deferred fields, so after each scroll settles the reveal now waits for the exact target (or a deeper ancestor) to mount and continues to it - expanding and re-scrolling as needed. Already-exact targets skip the wait entirely, so the common case stays as fast as before.

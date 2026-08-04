@@ -202,3 +202,7 @@ pnpm dev        # http://localhost:3000/admin - dev@payloadcms.com / test
 pnpm test:int   # vitest unit tests
 pnpm test:e2e   # playwright - full hover/click/scroll/flash flow
 ```
+
+## About
+
+Built by [Raffiniert](https://raffiniert.biz) — read more in our blog post [Visuelles Editieren in Payload CMS: unser Live Preview Inspector Plugin](https://raffiniert.biz/stories/visuelles-editieren-in-payload-cms-unser-live-preview-inspector-plugin). Questions, custom Payload work, or want to work with us? [Get in touch](https://raffiniert.biz).
