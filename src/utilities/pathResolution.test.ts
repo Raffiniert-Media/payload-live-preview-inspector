@@ -9,6 +9,7 @@ import {
   fieldPathFromFormState,
   flashElement,
   focusElement,
+  pathFromFieldElement,
   resolvedPathDepth,
   resolveExactFieldElement,
   resolveFieldElement,
@@ -16,6 +17,7 @@ import {
   revealTabForElement,
   rowIDFromPath,
   scrollToElement,
+  toRowIDPath,
   waitForElementLayout,
 } from './pathResolution.js'
 
@@ -62,6 +64,31 @@ describe('resolveFieldElement', () => {
   it('returns null when nothing in the path resolves', () => {
     document.body.innerHTML = '<div id="unrelated"></div>'
     expect(resolveFieldElement('layout.1.heading')).toBeNull()
+  })
+})
+
+describe('pathFromFieldElement', () => {
+  it('reads the path off a simple field control id', () => {
+    document.body.innerHTML = '<div id="field-layout__0__heading"><input id="field-layout__0__heading" /></div>'
+    expect(pathFromFieldElement(document.querySelector('input')!)).toBe('layout.0.heading')
+  })
+
+  it('climbs from a nested element up to the ancestor that carries the id', () => {
+    // RadioGroup renders its id on the <ul>, focus lands on a nested <input>.
+    document.body.innerHTML = '<ul id="field-visibility"><li><input type="radio" /></li></ul>'
+    const nested = document.querySelector('input')!
+    expect(pathFromFieldElement(nested)).toBe('visibility')
+  })
+
+  it('climbs through several levels to a data-field-path ancestor (Lexical: no id on the field wrapper)', () => {
+    document.body.innerHTML =
+      '<div data-field-path="body"><div class="lexical-editor" contenteditable="true"><p>text</p></div></div>'
+    expect(pathFromFieldElement(document.querySelector('p')!)).toBe('body')
+  })
+
+  it('returns null when the element is outside any field', () => {
+    document.body.innerHTML = '<button id="save">Save</button>'
+    expect(pathFromFieldElement(document.getElementById('save')!)).toBeNull()
   })
 })
 
@@ -282,6 +309,35 @@ describe('resolveRowIDs', () => {
 
   it('returns null when the path starts with an unresolvable $rowId segment', () => {
     expect(resolveRowIDs('$orphan.heading', {})).toBeNull()
+  })
+})
+
+describe('toRowIDPath', () => {
+  it('replaces a numeric row index with the row current id', () => {
+    const formState = { layout: { rows: [{ id: 'a' }, { id: 'b' }] } }
+    expect(toRowIDPath('layout.1.heading', formState)).toBe('layout.$b.heading')
+  })
+
+  it('passes through paths with no numeric segments unchanged', () => {
+    expect(toRowIDPath('title', {})).toBe('title')
+  })
+
+  it('resolves multiple nested row indexes', () => {
+    const formState = {
+      layout: { rows: [{ id: 'row-a' }] },
+      'layout.0.nested': { rows: [{ id: 'nested-a' }, { id: 'nested-b' }] },
+    }
+    expect(toRowIDPath('layout.0.nested.1.text', formState)).toBe('layout.$row-a.nested.$nested-b.text')
+  })
+
+  it('keeps a numeric segment as-is when its parent has no rows', () => {
+    expect(toRowIDPath('group.0.label', {})).toBe('group.0.label')
+  })
+
+  it('is the inverse of resolveRowIDs', () => {
+    const formState = { layout: { rows: [{ id: 'a' }, { id: 'b' }] } }
+    const rowIDPath = 'layout.$b.heading'
+    expect(toRowIDPath(resolveRowIDs(rowIDPath, formState)!, formState)).toBe(rowIDPath)
   })
 })
 
@@ -726,6 +782,28 @@ describe('focusElement', () => {
 
     focusElement(wrapper)
 
+    expect(focusSpy).toHaveBeenCalledWith({ preventScroll: true })
+  })
+
+  it('places the caret at the clicked text position and returns its element', () => {
+    document.body.innerHTML =
+      '<div data-field-path="body"><div contenteditable="true"><p>Rich text paragraph</p></div></div>'
+    const field = document.querySelector<HTMLElement>('[data-field-path="body"]')!
+
+    const caretEl = focusElement(field, { offset: 5, text: 'Rich text paragraph' })
+
+    expect(caretEl).toBe(document.querySelector('p'))
+    expect(window.getSelection()!.anchorOffset).toBe(5)
+  })
+
+  it('falls back to plain focusing when the hint no longer matches', () => {
+    document.body.innerHTML = '<div id="field"><input type="text" value="Something else"></div>'
+    const input = document.querySelector('input')!
+    const focusSpy = vi.spyOn(input, 'focus')
+
+    const caretEl = focusElement(document.getElementById('field')!, { offset: 2, text: 'Gone' })
+
+    expect(caretEl).toBeNull()
     expect(focusSpy).toHaveBeenCalledWith({ preventScroll: true })
   })
 })

@@ -1,13 +1,11 @@
 import type { DocumentLeafValue } from './pathResolution.js'
 
+import { NON_CONTENT_TAGS } from './caret.js'
 import { isRowIDSegment, LIVE_PREVIEW_AUTO_ATTRIBUTE, LIVE_PREVIEW_PATH_ATTRIBUTE } from './pathAttribute.js'
 import { findStegaPaths, hasStegaHint, stegaClean } from './stega.js'
 
 /** Text-bearing attributes also scanned for stega-encoded paths. */
 const STEGA_ATTRIBUTES = ['alt', 'aria-label', 'placeholder', 'title']
-
-/** Elements whose text is code/data, never rendered content. */
-const SKIP_TAGS = new Set(['NOSCRIPT', 'SCRIPT', 'STYLE', 'TEMPLATE'])
 
 /** Minimum normalized length for value matching - shorter values are too ambiguous. */
 const MIN_MATCH_LENGTH = 3
@@ -18,7 +16,7 @@ const setAutoTag = (el: Element, path: string, source: 'container' | 'match' | '
 }
 
 const isTaggable = (el: Element | null): el is Element =>
-  el !== null && !SKIP_TAGS.has(el.tagName) && !el.hasAttribute(LIVE_PREVIEW_PATH_ATTRIBUTE)
+  el !== null && !NON_CONTENT_TAGS.has(el.tagName) && !el.hasAttribute(LIVE_PREVIEW_PATH_ATTRIBUTE)
 
 const documentOf = (root: Document | Element): Document =>
   root.ownerDocument ?? (root)
@@ -220,6 +218,49 @@ export const findTaggedElementAt = (doc: Document, x: number, y: number): HTMLEl
   }
 
   return best
+}
+
+const escapeAttributeValue = (value: string): string => value.replace(/["\\]/g, '\\$&')
+
+const elementWithExactPath = (doc: Document, path: string): HTMLElement | null =>
+  doc.querySelector<HTMLElement>(`[${LIVE_PREVIEW_PATH_ATTRIBUTE}="${escapeAttributeValue(path)}"]`)
+
+/**
+ * Finds the tagged element that best matches an admin-side field path:
+ *
+ * - a descendant whose path runs deeper into the field's value, tried first -
+ *   a rich-text field's own value can carry both stega paths deep inside its
+ *   Lexical JSON tree (`body.root.children...`, one per real paragraph) *and*
+ *   an exact match on the field's own path (a single-word run that only
+ *   value matching, not stega, could tag - see `collectLeafValues`); the
+ *   deeper path is the more meaningful place to land.
+ * - an exact match otherwise, or
+ * - the nearest tagged ancestor - a field whose own leaf isn't separately
+ *   tagged (e.g. one of several fields inside a block that only the block
+ *   container carries a path for).
+ */
+export const findTaggedElementByPath = (doc: Document, path: string): HTMLElement | null => {
+  const nested = doc.querySelector<HTMLElement>(`[${LIVE_PREVIEW_PATH_ATTRIBUTE}^="${escapeAttributeValue(`${path}.`)}"]`)
+  if (nested) {
+    return nested
+  }
+
+  const exact = elementWithExactPath(doc, path)
+  if (exact) {
+    return exact
+  }
+
+  let segments = path.split('.').slice(0, -1)
+
+  while (segments.length > 0) {
+    const ancestor = elementWithExactPath(doc, segments.join('.'))
+    if (ancestor) {
+      return ancestor
+    }
+    segments = segments.slice(0, -1)
+  }
+
+  return null
 }
 
 const commonAncestor = (els: Element[]): Element | null => {

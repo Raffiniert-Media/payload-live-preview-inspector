@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest'
 
-import { encodeStegaPath, findStegaPaths, hasStegaHint, shouldSkipStega, stegaClean } from './stega.js'
+import {
+  encodeStegaPath,
+  findStegaPaths,
+  hasStegaHint,
+  shouldSkipStega,
+  stegaBlockLengthAt,
+  stegaClean,
+} from './stega.js'
 
 describe('encodeStegaPath / findStegaPaths', () => {
   it('round-trips a path through an invisible block', () => {
@@ -49,6 +56,24 @@ describe('hasStegaHint', () => {
   it('detects the block delimiter', () => {
     expect(hasStegaHint(`x${encodeStegaPath('title')}`)).toBe(true)
     expect(hasStegaHint('plain text')).toBe(false)
+  })
+})
+
+describe('stegaBlockLengthAt', () => {
+  it('measures the block starting at an index, and reports 0 elsewhere', () => {
+    const encoded = encodeStegaPath('title')
+    const text = `Hello${encoded} world`
+
+    expect(stegaBlockLengthAt(text, 0)).toBe(0)
+    expect(stegaBlockLengthAt(text, 5)).toBe(encoded.length)
+    expect(stegaBlockLengthAt(text, 5 + encoded.length)).toBe(0)
+  })
+
+  it('measures a dangling half-block, matching what stegaClean strips', () => {
+    const truncated = `Hello${encodeStegaPath('title')}`.slice(0, -1)
+
+    expect(5 + stegaBlockLengthAt(truncated, 5)).toBe(truncated.length)
+    expect(stegaClean(truncated)).toBe('Hello')
   })
 })
 

@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { applyValueMatching, findTaggedElementAt, inferBlockContainers, scanStega } from './autoTag.js'
+import { applyValueMatching, findTaggedElementAt, findTaggedElementByPath, inferBlockContainers, scanStega } from './autoTag.js'
 import { LIVE_PREVIEW_AUTO_ATTRIBUTE, LIVE_PREVIEW_PATH_ATTRIBUTE } from './pathAttribute.js'
 import { encodeStegaPath } from './stega.js'
 
@@ -250,6 +250,40 @@ describe('findTaggedElementAt', () => {
   it('returns null when elementsFromPoint is unavailable', () => {
     const doc = { elementsFromPoint: undefined } as unknown as Document
     expect(findTaggedElementAt(doc, 10, 10)).toBeNull()
+  })
+})
+
+describe('findTaggedElementByPath', () => {
+  it('finds the element with an exact matching path', () => {
+    document.body.innerHTML = `<h1 id="el" ${LIVE_PREVIEW_PATH_ATTRIBUTE}="title">Hello</h1>`
+    expect(findTaggedElementByPath(document, 'title')).toBe(document.getElementById('el'))
+  })
+
+  it('falls back to the nearest tagged ancestor when the exact leaf is untagged', () => {
+    document.body.innerHTML = `<section id="row" ${LIVE_PREVIEW_PATH_ATTRIBUTE}="layout.$a"><p>untagged</p></section>`
+    expect(findTaggedElementByPath(document, 'layout.$a.heading')).toBe(document.getElementById('row'))
+  })
+
+  it('descends to a deeper tagged leaf when the field itself has no exact match (rich text)', () => {
+    document.body.innerHTML = `<p id="run" ${LIVE_PREVIEW_PATH_ATTRIBUTE}="body.root.children.0.children.0">Text</p>`
+    expect(findTaggedElementByPath(document, 'body')).toBe(document.getElementById('run'))
+  })
+
+  it('prefers a deeper leaf over an exact match on the same path (a rich-text run value-matched to its field)', () => {
+    document.body.innerHTML = `
+      <p id="run" ${LIVE_PREVIEW_PATH_ATTRIBUTE}="body.root.children.0.children.0">First paragraph</p>
+      <strong id="matched" ${LIVE_PREVIEW_PATH_ATTRIBUTE}="body">Bold</strong>`
+    expect(findTaggedElementByPath(document, 'body')).toBe(document.getElementById('run'))
+  })
+
+  it('never treats a same-prefixed sibling path as a descendant', () => {
+    document.body.innerHTML = `<p id="other" ${LIVE_PREVIEW_PATH_ATTRIBUTE}="bodyOther.text">Text</p>`
+    expect(findTaggedElementByPath(document, 'body')).toBeNull()
+  })
+
+  it('returns null when no prefix of the path is tagged anywhere', () => {
+    document.body.innerHTML = '<p>nothing tagged here</p>'
+    expect(findTaggedElementByPath(document, 'layout.$a.heading')).toBeNull()
   })
 })
 

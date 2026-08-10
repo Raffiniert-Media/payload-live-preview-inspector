@@ -74,6 +74,37 @@ test('clicking a component in the live preview scrolls and highlights the matchi
   await expect(titleField).toHaveClass(/flash/)
 })
 
+test('focusing a field in the admin form scrolls to and flashes the matching element in the preview', async ({
+  page,
+}) => {
+  await login(page)
+
+  const frame = await openLivePreview(page)
+  const title = frame.locator('h1[data-payload-live-preview-path="title"]')
+  // The preview's message listener is only attached once its client script has
+  // mounted - waiting for its own tagging to appear is proof of that, unlike
+  // the iframe merely being visible.
+  await expect(title).toBeVisible()
+
+  await page.locator('#field-title').click()
+
+  await expect(title).toHaveClass(/focused/)
+})
+
+test('focusing a rich-text sub-editor in the admin form flashes its matching paragraph in the preview', async ({
+  page,
+}) => {
+  await login(page)
+
+  const frame = await openLivePreview(page)
+  const paragraph = frame.locator('[data-testid="rich-text-body"] p').first()
+  await expect(paragraph).toBeVisible()
+
+  await page.locator('[data-field-path="body"] [contenteditable="true"]').click()
+
+  await expect(paragraph).toHaveClass(/focused/)
+})
+
 test('stega: auto-tags text rendered without pathOf and scrolls to its field on click', async ({ page }) => {
   await login(page)
 
@@ -305,6 +336,84 @@ test('rich text: stega paths inside the Lexical tree collapse to the rich-text f
   const bodyField = page.locator('[data-field-path="body"]')
   await expect(bodyField).toBeInViewport()
   await expect(bodyField).toHaveClass(/flash/)
+})
+
+test('rich text: the caret lands where the click did, not at the top of the editor', async ({ page }) => {
+  await login(page)
+
+  const frame = await openLivePreview(page)
+
+  // Clicking into the *second* paragraph must put the cursor there. Focusing
+  // the editor alone would always land in the first one, so the paragraph the
+  // caret ends up in is what distinguishes the two behaviors.
+  const paragraph = frame.locator('[data-testid="rich-text-body"] p').nth(1)
+  await expect(paragraph).toHaveAttribute('data-payload-live-preview-path', /^body\.root\.children\./)
+
+  const box = (await paragraph.boundingBox())!
+  await paragraph.click({ position: { x: box.width * 0.7, y: box.height * 0.25 } })
+
+  /** The admin's current caret, described in terms of the paragraph it sits in. */
+  const readCaret = () =>
+    page.evaluate(() => {
+      const selection = window.getSelection()
+      const node = selection?.anchorNode
+      const paragraphEl = node?.parentElement?.closest('p')
+
+      if (!selection?.isCollapsed || !paragraphEl?.closest('[data-field-path="body"]')) {
+        return null
+      }
+
+      const runs = Array.from(paragraphEl.childNodes).flatMap((child) =>
+        child.nodeType === Node.TEXT_NODE ? [child] : Array.from(child.childNodes),
+      )
+
+      return {
+        offset: selection.anchorOffset,
+        paragraph: paragraphEl.textContent ?? '',
+        run: runs.indexOf(node as ChildNode),
+      }
+    })
+
+  await expect
+    .poll(async () => (await readCaret())?.paragraph ?? null, { timeout: 15_000 })
+    .toContain('Even a lone')
+
+  const caret = (await readCaret())!
+  // Not at the paragraph's very start either: a later text run, a nonzero
+  // offset, or both.
+  expect(caret.offset + Math.max(caret.run, 0)).toBeGreaterThan(0)
+})
+
+test('rich text: the caret survives a click through a full-card overlay link', async ({ page }) => {
+  await login(page)
+
+  const frame = await openLivePreview(page)
+
+  // The block's rich text sits under an absolutely positioned overlay link,
+  // so the browser's caret-from-point answers for the overlay - which has no
+  // text. The position has to be measured from the tagged paragraph itself,
+  // the same way targeting already looks through the overlay.
+  const paragraph = frame.locator('[data-testid="block-rich-text"] p').first()
+  const box = (await paragraph.boundingBox())!
+  await paragraph.click({ force: true, position: { x: 100, y: box.height / 2 } })
+
+  await expect
+    .poll(
+      async () =>
+        page.evaluate(() => {
+          const selection = window.getSelection()
+          const node = selection?.anchorNode
+
+          return node?.parentElement?.closest('[data-field-path$=".body"]')
+            ? { offset: selection!.anchorOffset, text: node.textContent }
+            : null
+        }),
+      { timeout: 20_000 },
+    )
+    .toMatchObject({ text: expect.stringContaining('nested inside a block row') })
+
+  const offset = await page.evaluate(() => window.getSelection()!.anchorOffset)
+  expect(offset).toBeGreaterThan(0)
 })
 
 test('rich text: value matching covers text runs stega skips (single words)', async ({ page }) => {

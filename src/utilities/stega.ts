@@ -85,6 +85,25 @@ export const findStegaPaths = (text: string): string[] => {
 }
 
 /**
+ * Length of the encoded block starting at `index`, or 0 if none starts there.
+ * The character-by-character counterpart to `stegaClean`'s regex, for callers
+ * that walk a string themselves and need to keep raw offsets intact (see
+ * `caret.ts`) rather than getting a cleaned copy back.
+ */
+export const stegaBlockLengthAt = (text: string, index: number): number => {
+  if (text[index] !== DELIMITER) {
+    return 0
+  }
+
+  let end = index + 1
+  while (end < text.length && DIGIT_VALUES[text[end]] !== undefined) {
+    end += 1
+  }
+
+  return (text[end] === DELIMITER ? end + 1 : end) - index
+}
+
+/**
  * Strips encoded path blocks from a string, or deeply from every string in a
  * plain object/array tree (other values pass through untouched). Use this
  * wherever you need the raw value of a stega-encoded string - comparisons,

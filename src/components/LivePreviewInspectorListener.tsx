@@ -3,9 +3,11 @@
 import { useForm, useLivePreviewContext } from '@payloadcms/ui'
 import { useEffect, useRef } from 'react'
 
+import { parseCaretHint } from '../utilities/caret.js'
 import {
   CLICK_MESSAGE_TYPE,
   DOCUMENT_VALUES_MESSAGE_TYPE,
+  FOCUS_MESSAGE_TYPE,
   REQUEST_DOCUMENT_VALUES_MESSAGE_TYPE,
 } from '../utilities/messageTypes.js'
 import {
@@ -15,6 +17,7 @@ import {
   expandCollapsedAncestors,
   fieldPathFromFormState,
   focusElement,
+  pathFromFieldElement,
   resolvedPathDepth,
   resolveExactFieldElement,
   resolveFieldElement,
@@ -22,6 +25,7 @@ import {
   revealTabForElement,
   scrollToElement,
   flashElement as sharedFlashElement,
+  toRowIDPath,
   waitForElement,
   waitForElementLayout,
 } from '../utilities/pathResolution.js'
@@ -107,6 +111,7 @@ export const LivePreviewInspectorListener: React.FC<LivePreviewInspectorListener
         return
       }
 
+      const caret = parseCaretHint(data.caret)
       const formState = getFieldsRef.current()
       const resolvedPath = resolveRowIDs(data.path, formState)
 
@@ -212,16 +217,48 @@ export const LivePreviewInspectorListener: React.FC<LivePreviewInspectorListener
         }
 
         sharedFlashElement(el, { className: classes.flash, color: flashColor, durationMs: flashDurationMs })
-        focusElement(el)
+
+        const caretEl = focusElement(el, caret)
+
+        // The scroll above put the *field* at `scrollOffset`; in a long rich
+        // text the clicked position can still be far below the fold, so bring
+        // the caret itself into view - but only when it actually is off
+        // screen, since `scrollToElement` otherwise re-centers a field the
+        // user can already see.
+        if (caretEl) {
+          const { bottom, top } = caretEl.getBoundingClientRect()
+          if (top < 0 || bottom > window.innerHeight) {
+            await scrollToElement(caretEl, scrollOffset)
+          }
+        }
       }
 
       void revealField()
     }
 
+    // Reverse direction: focusing a field in the admin form scrolls to and
+    // flashes the matching element in the preview, the same way a click
+    // there reveals the field here.
+    const handleFocusIn = (event: FocusEvent) => {
+      if (!(event.target instanceof HTMLElement)) {
+        return
+      }
+
+      const path = pathFromFieldElement(event.target)
+      if (!path) {
+        return
+      }
+
+      const rowIDPath = toRowIDPath(path, getFieldsRef.current())
+      iframeRef.current?.contentWindow?.postMessage({ type: FOCUS_MESSAGE_TYPE, path: rowIDPath }, expectedOrigin)
+    }
+
     window.addEventListener('message', handleMessage)
+    document.addEventListener('focusin', handleFocusIn)
 
     return () => {
       window.removeEventListener('message', handleMessage)
+      document.removeEventListener('focusin', handleFocusIn)
       revealGeneration += 1
     }
   }, [iframeRef, activeURL, accordionAnimationMs, flashColor, flashDurationMs, scrollOffset, tabSwitchWaitMs])

@@ -1,6 +1,6 @@
 # payload-live-preview-inspector
 
-A [Payload CMS](https://payloadcms.com) plugin that brings Storyblok-style click-to-scroll to Payload's built-in [Live Preview](https://payloadcms.com/docs/live-preview/overview): hover a component in the Live Preview iframe to highlight it, click it to smooth-scroll the admin edit form to (and briefly flash) the matching field — switching tabs, expanding collapsed accordions, and focusing the field along the way.
+A [Payload CMS](https://payloadcms.com) plugin that brings Storyblok-style click-to-scroll to Payload's built-in [Live Preview](https://payloadcms.com/docs/live-preview/overview): hover a component in the Live Preview iframe to highlight it, click it to smooth-scroll the admin edit form to (and briefly flash) the matching field — switching tabs, expanding collapsed accordions, and focusing the field along the way. It works the other way round too: focusing a field in the admin form scrolls to and flashes the matching element in the preview.
 
 This plugin does **not** set up Live Preview itself. It adds the click-to-scroll behavior on top of an already-working `admin.livePreview` configuration.
 
@@ -9,6 +9,10 @@ This plugin does **not** set up Live Preview itself. It adds the click-to-scroll
 ## How it works
 
 `LivePreviewInspectorClient` (in your frontend) highlights the tagged element under the pointer and, on click, posts its field path to the admin panel. `LivePreviewInspectorListener` (auto-registered by the plugin) resolves that path against the live form state and reveals the field: it switches to the right tab, expands collapsed Array/Blocks rows, scrolls, then flashes and focuses the field. Targeting is point-based and picks the smallest tagged element, so text stays clickable even beneath a full-card overlay link.
+
+Clicking text also carries the **position within it**, so the cursor lands on the word you clicked rather than at the start of the field — which for a long rich-text field would mean hunting for the spot again. Preview and admin never share the same markup, so the position travels as the surrounding text with an offset into it (invisible stega characters stripped, whitespace collapsed), which the listener maps back onto whichever text node holds it in the editor. Rich text (Lexical) gets a real caret; `text`/`textarea` inputs get their selection set. Like targeting, this sees through covering overlays. When the text can't be found — a stale preview, an edited value — focusing falls back to the start of the field as before.
+
+The reverse direction needs no separate tagging: `LivePreviewInspectorListener` listens for focus anywhere in the admin form, reads the field's own path straight off its DOM (the `id` every field renders, or Lexical's `data-field-path`) and posts it to the iframe, where `LivePreviewInspectorClient` looks up the tagged element for that path and scrolls/flashes it - no click, no hover state, and it works for any field reachable via `pathOf()`, stega, or value matching. A rich-text field's own path never tags a single element (only the runs inside it do), so focusing anywhere in its editor scrolls to the first paragraph in its value; focusing a plain field with no content under its path (a title, a date) scrolls to that field's own tagged element instead.
 
 Elements get their path attribute through three layers — explicit tagging always wins, each layer only fills what the previous one didn't cover (details in [Tagging](#tagging-three-layers)):
 
@@ -191,6 +195,8 @@ From `/listener`: `LivePreviewInspectorListener` — admin-side; the plugin regi
 - Stega only reaches values rendered as text (or `alt`/`title`/`aria-label`/`placeholder`) with two or more words; string operations that reshape a value (`slice()`, regexes) destroy the tag — the element is then untagged, never mistagged. Copied preview text carries the invisible characters (preview-only).
 - Value matching needs exact whole-element equality with exactly one field's value — formatted dates, truncated teasers, and duplicated values don't match, by design.
 - Container inference backs off on interleaved markup and blocks that render no taggable leaf; use `pathOf(block)` there.
+- Caret placement anchors on the clicked text (up to 120 characters either side); where that exact text occurs more than once in the same field, the first occurrence wins. Text the editor renders differently from the preview (a formatted date, a truncated teaser) places no caret — the field is focused at the start instead.
+- Focusing a field scrolls the preview only when *something* under its path is tagged - a field never rendered in the preview (an internal flag, an SEO-only value) has nothing to scroll to and silently does nothing.
 
 ## Local development
 

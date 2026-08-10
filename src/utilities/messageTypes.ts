@@ -5,7 +5,11 @@
  * window before acting on a message.
  */
 
-/** iframe → admin: a tagged element was clicked; carries the field `path`. */
+/**
+ * iframe → admin: a tagged element was clicked; carries the field `path` and,
+ * when the click landed on text, a `caret` hint (`{ offset, text }`) locating
+ * the clicked position within that text. Older clients omit `caret`.
+ */
 export const CLICK_MESSAGE_TYPE = 'payload-live-preview-inspector:click'
 
 /**
@@ -17,3 +21,10 @@ export const DOCUMENT_VALUES_MESSAGE_TYPE = 'payload-live-preview-inspector:docu
 /** iframe → admin: request a fresh `DOCUMENT_VALUES_MESSAGE_TYPE` snapshot. */
 export const REQUEST_DOCUMENT_VALUES_MESSAGE_TYPE =
   'payload-live-preview-inspector:request-document-values'
+
+/**
+ * admin → iframe: a form field was focused; carries its row-id based `path`
+ * so the preview can scroll to and flash the matching element - the reverse
+ * of `CLICK_MESSAGE_TYPE`.
+ */
+export const FOCUS_MESSAGE_TYPE = 'payload-live-preview-inspector:focus'

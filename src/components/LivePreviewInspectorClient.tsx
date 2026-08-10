@@ -4,14 +4,23 @@ import { useEffect } from 'react'
 
 import type { DocumentLeafValue } from '../utilities/pathResolution.js'
 
-import { applyValueMatching, findTaggedElementAt, inferBlockContainers, scanStega } from '../utilities/autoTag.js'
+import {
+  applyValueMatching,
+  findTaggedElementAt,
+  findTaggedElementByPath,
+  inferBlockContainers,
+  scanStega,
+} from '../utilities/autoTag.js'
+import { caretHintFromPoint } from '../utilities/caret.js'
 import { LIVE_PREVIEW_HOVER_CLASS_NAME } from '../utilities/hoverClassName.js'
 import {
   CLICK_MESSAGE_TYPE,
   DOCUMENT_VALUES_MESSAGE_TYPE,
+  FOCUS_MESSAGE_TYPE,
   REQUEST_DOCUMENT_VALUES_MESSAGE_TYPE,
 } from '../utilities/messageTypes.js'
 import { LIVE_PREVIEW_PATH_ATTRIBUTE } from '../utilities/pathAttribute.js'
+import { flashElement } from '../utilities/pathResolution.js'
 import classes from './LivePreviewInspectorClient.module.css'
 
 export { LIVE_PREVIEW_HOVER_CLASS_NAME }
@@ -172,7 +181,15 @@ export const LivePreviewInspectorClient: React.FC<LivePreviewInspectorClientProp
         return
       }
 
-      window.parent.postMessage({ type: CLICK_MESSAGE_TYPE, path }, targetOrigin ?? resolveTargetOrigin())
+      // Where inside the text the click landed, so the admin can put the
+      // cursor there instead of at the top of the field's editor. `null`
+      // whenever the point isn't on text belonging to `el`.
+      const caret = caretHintFromPoint(document, event.clientX, event.clientY, el)
+
+      window.parent.postMessage(
+        { type: CLICK_MESSAGE_TYPE, caret, path },
+        targetOrigin ?? resolveTargetOrigin(),
+      )
     }
 
     document.addEventListener('mousemove', onMouseMove)
@@ -189,6 +206,48 @@ export const LivePreviewInspectorClient: React.FC<LivePreviewInspectorClientProp
       setHovered(null)
     }
   }, [disableLinks, hoverColor, targetOrigin])
+
+  // Reverse direction: a field focused in the admin form scrolls to and
+  // flashes the matching element here, the same way a click there scrolls
+  // the admin form.
+  useEffect(() => {
+    if (window.self === window.top) {
+      return
+    }
+
+    const resolvedOrigin = targetOrigin ?? resolveTargetOrigin()
+
+    const onMessage = (event: MessageEvent) => {
+      if (event.source !== window.parent) {
+        return
+      }
+      if (resolvedOrigin !== '*' && event.origin !== resolvedOrigin) {
+        return
+      }
+
+      const { data } = event
+      if (!data || typeof data !== 'object' || data.type !== FOCUS_MESSAGE_TYPE || typeof data.path !== 'string') {
+        return
+      }
+
+      const el = findTaggedElementByPath(document, data.path)
+      if (!el) {
+        return
+      }
+
+      const behavior: ScrollBehavior = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+        ? 'instant'
+        : 'smooth'
+      el.scrollIntoView({ behavior, block: 'nearest', inline: 'nearest' })
+      flashElement(el, { className: classes.focused, color: hoverColor })
+    }
+
+    window.addEventListener('message', onMessage)
+
+    return () => {
+      window.removeEventListener('message', onMessage)
+    }
+  }, [hoverColor, targetOrigin])
 
   // Auto-tagging: decode stega paths and/or match field values whenever the
   // preview (re-)renders, then infer block containers from the tagged leaves.

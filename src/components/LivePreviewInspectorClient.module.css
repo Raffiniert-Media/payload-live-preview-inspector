@@ -3,3 +3,17 @@
   outline: 2px dashed #3fb950;
   outline-offset: 2px;
 }
+
+.focused {
+  animation: payload-live-preview-inspector-focus-flash 1.2s ease-out;
+}
+
+@keyframes payload-live-preview-inspector-focus-flash {
+  0% {
+    outline: 2px solid var(--payload-live-preview-inspector-focus-color, #3fb950);
+    outline-offset: 2px;
+  }
+  100% {
+    outline-color: transparent;
+  }
+}

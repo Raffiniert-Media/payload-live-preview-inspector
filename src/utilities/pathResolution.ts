@@ -1,3 +1,6 @@
+import type { CaretHint } from './caret.js'
+
+import { applyCaretHint } from './caret.js'
 import { isRowIDSegment, rowIDFromSegment, rowIDSegment } from './pathAttribute.js'
 
 /** Structurally compatible with `@payloadcms/ui`'s `FormState`, without depending on it. */
@@ -10,6 +13,39 @@ export const DEFAULT_COLLAPSIBLE_ANIMATION_MS = 350
 export const DEFAULT_SCROLL_OFFSET = 100
 
 export const fieldIDFromPath = (path: string): string => `field-${path.replace(/\./g, '__')}`
+
+/** Prefix used by every non-rich-text field's `id`, set on whichever element is its actual control. */
+const FIELD_ID_PREFIX = 'field-'
+
+/**
+ * The inverse of `fieldIDFromPath`/Payload's own `data-field-path`: given a
+ * DOM element inside the admin form (typically the one that just received
+ * focus), climbs to the nearest ancestor that identifies a field and returns
+ * its path - with current numeric row indices, not `$rowId` markers (see
+ * `toRowIDPath` to convert). `null` when `el` isn't inside a field at all
+ * (e.g. a sidebar button).
+ *
+ * Checked in one upward walk rather than two separate `closest()` calls, so
+ * whichever attribute sits closest to `el` wins - e.g. a field nested inside
+ * a Lexical block's sub-editor resolves to that nested field, not the
+ * enclosing rich-text field's `data-field-path`.
+ */
+export const pathFromFieldElement = (el: HTMLElement): null | string => {
+  let node: HTMLElement | null = el
+
+  while (node) {
+    const dataFieldPath = node.getAttribute('data-field-path')
+    if (dataFieldPath) {
+      return dataFieldPath
+    }
+    if (node.id.startsWith(FIELD_ID_PREFIX)) {
+      return node.id.slice(FIELD_ID_PREFIX.length).replace(/__/g, '.')
+    }
+    node = node.parentElement
+  }
+
+  return null
+}
 
 export const rowIDFromPath = (path: string): null | string => {
   const match = /^(.*)\.(\d+)$/.exec(path)
@@ -152,7 +188,7 @@ export const resolveRowIDs = (path: string, formState: MinimalFormState): null |
 }
 
 /** The inverse of `resolveRowIDs`: `layout.0.heading` → `layout.$abc.heading`. */
-const toRowIDPath = (path: string, formState: MinimalFormState): string => {
+export const toRowIDPath = (path: string, formState: MinimalFormState): string => {
   const segments = path.split('.')
   const resolved: string[] = []
   let indexedPrefix = ''
@@ -508,12 +544,30 @@ export const scrollToElement = async (el: HTMLElement, offset: number = DEFAULT_
   }
 }
 
-export const focusElement = (el: HTMLElement): void => {
-  const focusable = el.matches('input, textarea, select, [contenteditable="true"]')
-    ? el
-    : el.querySelector<HTMLElement>('input, textarea, select, [contenteditable="true"]')
+const FOCUSABLE_SELECTOR = 'input, textarea, select, [contenteditable="true"]'
+
+/**
+ * Focuses the field's editable control. With a `caret` hint from the click,
+ * the cursor is placed at the text position the user actually clicked rather
+ * than at the start of the editor - a long rich-text field would otherwise
+ * always focus at the top, leaving them to find the spot again themselves.
+ * Returns the element that received the caret (for scrolling it into view),
+ * or `null` when the hint couldn't be applied and this fell back to plain
+ * focusing.
+ */
+export const focusElement = (el: HTMLElement, caret?: CaretHint): HTMLElement | null => {
+  if (caret) {
+    const caretEl = applyCaretHint(el, caret)
+    if (caretEl) {
+      return caretEl
+    }
+  }
+
+  const focusable = el.matches(FOCUSABLE_SELECTOR) ? el : el.querySelector<HTMLElement>(FOCUSABLE_SELECTOR)
 
   focusable?.focus({ preventScroll: true })
+
+  return null
 }
 
 export type FlashOptions = {
