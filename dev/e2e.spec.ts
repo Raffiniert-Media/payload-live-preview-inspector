@@ -5,6 +5,8 @@ import { expect, test } from '@playwright/test'
 declare global {
   interface Window {
     __activatedTabs?: Set<string>
+    /** Tag names of preview elements that got the reverse-direction flash class. */
+    __focusFlashes?: string[]
   }
 }
 
@@ -103,6 +105,46 @@ test('focusing a rich-text sub-editor in the admin form flashes its matching par
   await page.locator('[data-field-path="body"] [contenteditable="true"]').click()
 
   await expect(paragraph).toHaveClass(/focused/)
+})
+
+test('clicking in the preview never scrolls the preview back (the reveal\'s own focus is not echoed)', async ({
+  page,
+}) => {
+  await login(page)
+
+  const frame = await openLivePreview(page)
+  const paragraph = frame.locator('[data-testid="rich-text-body"] p').first()
+  await expect(paragraph).toBeVisible()
+
+  // Record every reverse-direction flash instead of sampling for the class
+  // later: it clears itself after its animation, so a plain count could pass
+  // simply by looking too late.
+  await frame.locator('body').evaluate((body) => {
+    const { defaultView: view, documentElement } = body.ownerDocument
+    view!.__focusFlashes = []
+    new MutationObserver((mutations) => {
+      for (const mutation of mutations) {
+        const el = mutation.target as HTMLElement
+        if (/focused/.test(el.className)) {
+          view!.__focusFlashes?.push(el.tagName)
+        }
+      }
+    }).observe(documentElement, { attributeFilter: ['class'], subtree: true })
+  })
+
+  await paragraph.click()
+
+  // The reveal has finished - which means it has focused the editor, the
+  // `focusin` the reverse direction would otherwise bounce straight back here.
+  const bodyField = page.locator('[data-field-path="body"]')
+  await expect(bodyField).toHaveClass(/flash/)
+  await page.waitForTimeout(500)
+
+  // Nothing in the preview may be flashed: a bounced `focusin` only carries
+  // the field's own path, so it would scroll back to that field's first
+  // paragraph - away from whatever the user actually clicked.
+  const flashes = await frame.locator('body').evaluate((body) => body.ownerDocument.defaultView!.__focusFlashes)
+  expect(flashes).toEqual([])
 })
 
 test('stega: auto-tags text rendered without pathOf and scrolls to its field on click', async ({ page }) => {

@@ -87,6 +87,14 @@ export const LivePreviewInspectorListener: React.FC<LivePreviewInspectorListener
     // an earlier click doesn't flash/focus after a newer one took over.
     let revealGeneration = 0
 
+    // Set while a reveal focuses the field it just scrolled to. That focus
+    // fires `focusin` exactly like a real one, and the reverse direction would
+    // send it straight back to the preview - scrolling it away from the very
+    // element the user clicked (in a long rich text, back to its first
+    // paragraph, since the field's own path is all a `focusin` can tell us).
+    let suppressFocusEcho = false
+    let echoTimer: ReturnType<typeof setTimeout> | undefined
+
     const handleMessage = (event: MessageEvent) => {
       if (event.origin !== expectedOrigin || event.source !== iframeRef.current?.contentWindow) {
         return
@@ -218,7 +226,15 @@ export const LivePreviewInspectorListener: React.FC<LivePreviewInspectorListener
 
         sharedFlashElement(el, { className: classes.flash, color: flashColor, durationMs: flashDurationMs })
 
+        // Cleared on a macrotask rather than right after the call: `focusin`
+        // itself is synchronous, but an editor settling the selection we just
+        // set (Lexical does) can move focus again in a microtask. Real user
+        // focus cannot land inside that window, so nothing legitimate is lost.
+        suppressFocusEcho = true
         const caretEl = focusElement(el, caret)
+        echoTimer = setTimeout(() => {
+          suppressFocusEcho = false
+        })
 
         // The scroll above put the *field* at `scrollOffset`; in a long rich
         // text the clicked position can still be far below the fold, so bring
@@ -240,7 +256,7 @@ export const LivePreviewInspectorListener: React.FC<LivePreviewInspectorListener
     // flashes the matching element in the preview, the same way a click
     // there reveals the field here.
     const handleFocusIn = (event: FocusEvent) => {
-      if (!(event.target instanceof HTMLElement)) {
+      if (suppressFocusEcho || !(event.target instanceof HTMLElement)) {
         return
       }
 
@@ -259,6 +275,7 @@ export const LivePreviewInspectorListener: React.FC<LivePreviewInspectorListener
     return () => {
       window.removeEventListener('message', handleMessage)
       document.removeEventListener('focusin', handleFocusIn)
+      clearTimeout(echoTimer)
       revealGeneration += 1
     }
   }, [iframeRef, activeURL, accordionAnimationMs, flashColor, flashDurationMs, scrollOffset, tabSwitchWaitMs])

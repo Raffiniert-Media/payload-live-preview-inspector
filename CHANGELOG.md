@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.7.1
+
+- **Fixed: clicking in the preview made the preview scroll away again.** Revealing a field ends by focusing it, and that focus fires `focusin` in the admin exactly like a real one - which 1.7.0's new reverse direction then sent straight back to the preview. On a long rich-text field the effect was clearly wrong: the admin scrolled to the clicked paragraph, and the preview immediately scrolled back to the field's first one, because a `focusin` only ever carries the field's own path. A reveal's own focus is no longer treated as user focus, so each direction now moves only the *other* side.
+
 ## 1.7.0
 
 - **New: the reveal now works the other way round too.** Focusing a field in the admin form scrolls to and flashes the matching element in the Live Preview - the reverse of clicking a component to reveal its field. No new prop: `LivePreviewInspectorListener` already listens on the admin document, and `LivePreviewInspectorClient` already knows how to find a tagged element by path.
