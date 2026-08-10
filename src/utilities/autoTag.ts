@@ -1,6 +1,6 @@
 import type { DocumentLeafValue } from './pathResolution.js'
 
-import { NON_CONTENT_TAGS } from './caret.js'
+import { collapsedTextOf, NON_CONTENT_TAGS } from './caret.js'
 import { isRowIDSegment, LIVE_PREVIEW_AUTO_ATTRIBUTE, LIVE_PREVIEW_PATH_ATTRIBUTE } from './pathAttribute.js'
 import { findStegaPaths, hasStegaHint, stegaClean } from './stega.js'
 
@@ -226,9 +226,45 @@ const elementWithExactPath = (doc: Document, path: string): HTMLElement | null =
   doc.querySelector<HTMLElement>(`[${LIVE_PREVIEW_PATH_ATTRIBUTE}="${escapeAttributeValue(path)}"]`)
 
 /**
+ * The element under `path` whose own text holds the caret's surroundings.
+ * Candidates are scanned in document order, so a paragraph is preferred over
+ * an inline run tagged inside it. When the caret's context is *wider* than
+ * any single one of them - the admin sends a whole paragraph, the preview
+ * tagged only the words stega could encode - the longest run contained in it
+ * wins instead; anything shorter than `MIN_MATCH_LENGTH` is too weak to be
+ * evidence of anything.
+ */
+const elementRenderingCaret = (doc: Document, path: string, caretText: string): HTMLElement | null => {
+  const candidates = doc.querySelectorAll<HTMLElement>(
+    `[${LIVE_PREVIEW_PATH_ATTRIBUTE}="${escapeAttributeValue(path)}"], [${LIVE_PREVIEW_PATH_ATTRIBUTE}^="${escapeAttributeValue(`${path}.`)}"]`,
+  )
+
+  let widestContained: HTMLElement | null = null
+  let widestLength = 0
+
+  for (const candidate of candidates) {
+    const text = collapsedTextOf(candidate)
+
+    if (text.length > 0 && text.includes(caretText)) {
+      return candidate
+    }
+    if (text.length > widestLength && text.length >= MIN_MATCH_LENGTH && caretText.includes(text)) {
+      widestContained = candidate
+      widestLength = text.length
+    }
+  }
+
+  return widestContained
+}
+
+/**
  * Finds the tagged element that best matches an admin-side field path:
  *
- * - a descendant whose path runs deeper into the field's value, tried first -
+ * - the element rendering the text around `caretText`, when the admin knew
+ *   where in the field its caret was. Every run of a rich-text field carries
+ *   a path under the same field, so without this a focused editor can only
+ *   ever point at the first of them.
+ * - a descendant whose path runs deeper into the field's value, tried next -
  *   a rich-text field's own value can carry both stega paths deep inside its
  *   Lexical JSON tree (`body.root.children...`, one per real paragraph) *and*
  *   an exact match on the field's own path (a single-word run that only
@@ -239,7 +275,14 @@ const elementWithExactPath = (doc: Document, path: string): HTMLElement | null =
  *   tagged (e.g. one of several fields inside a block that only the block
  *   container carries a path for).
  */
-export const findTaggedElementByPath = (doc: Document, path: string): HTMLElement | null => {
+export const findTaggedElementByPath = (doc: Document, path: string, caretText?: string): HTMLElement | null => {
+  if (caretText) {
+    const rendering = elementRenderingCaret(doc, path, caretText)
+    if (rendering) {
+      return rendering
+    }
+  }
+
   const nested = doc.querySelector<HTMLElement>(`[${LIVE_PREVIEW_PATH_ATTRIBUTE}^="${escapeAttributeValue(`${path}.`)}"]`)
   if (nested) {
     return nested

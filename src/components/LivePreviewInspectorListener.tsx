@@ -3,7 +3,7 @@
 import { useForm, useLivePreviewContext } from '@payloadcms/ui'
 import { useEffect, useRef } from 'react'
 
-import { parseCaretHint } from '../utilities/caret.js'
+import { caretHintFromSelection, parseCaretHint } from '../utilities/caret.js'
 import {
   CLICK_MESSAGE_TYPE,
   DOCUMENT_VALUES_MESSAGE_TYPE,
@@ -255,26 +255,88 @@ export const LivePreviewInspectorListener: React.FC<LivePreviewInspectorListener
     // Reverse direction: focusing a field in the admin form scrolls to and
     // flashes the matching element in the preview, the same way a click
     // there reveals the field here.
-    const handleFocusIn = (event: FocusEvent) => {
-      if (suppressFocusEcho || !(event.target instanceof HTMLElement)) {
-        return
-      }
-
-      const path = pathFromFieldElement(event.target)
+    const sendFocus = (el: HTMLElement) => {
+      const path = pathFromFieldElement(el)
       if (!path) {
         return
       }
 
       const rowIDPath = toRowIDPath(path, getFieldsRef.current())
-      iframeRef.current?.contentWindow?.postMessage({ type: FOCUS_MESSAGE_TYPE, path: rowIDPath }, expectedOrigin)
+      iframeRef.current?.contentWindow?.postMessage(
+        { type: FOCUS_MESSAGE_TYPE, caret: caretHintFromSelection(el), path: rowIDPath },
+        expectedOrigin,
+      )
+    }
+
+    // A pointer places the caret only *after* moving focus, so a hint read
+    // during `focusin` would still describe the field being left. The field
+    // is remembered instead and sent from the click that completes the same
+    // interaction, by which point the caret is where the user put it - one
+    // message per interaction either way.
+    let pointerActive = false
+    let pendingPointerFocus: HTMLElement | null = null
+
+    const handlePointerDown = () => {
+      pointerActive = true
+      pendingPointerFocus = null
+    }
+
+    const handlePointerUp = () => {
+      pointerActive = false
+    }
+
+    const handleFocusIn = (event: FocusEvent) => {
+      if (suppressFocusEcho || !(event.target instanceof HTMLElement)) {
+        return
+      }
+      if (pointerActive) {
+        pendingPointerFocus = event.target
+        return
+      }
+
+      sendFocus(event.target)
+    }
+
+    // Also the only signal for a caret moved *within* the focused field:
+    // clicking from one paragraph of a rich text to another fires no further
+    // focus event, so the preview would stay pointed at the first one.
+    const handleClick = (event: MouseEvent) => {
+      const pending = pendingPointerFocus
+      pointerActive = false
+      pendingPointerFocus = null
+
+      if (suppressFocusEcho) {
+        return
+      }
+
+      // The focused element owns the caret; the click target may be a label
+      // or a wrapper that merely handed focus to it. Without focus (a click
+      // on inert markup), there is nothing a `focusin` would have reported
+      // either.
+      const active = document.activeElement
+      const el =
+        pending ??
+        (active instanceof HTMLElement && event.target instanceof Node && active.contains(event.target)
+          ? active
+          : null)
+
+      if (el) {
+        sendFocus(el)
+      }
     }
 
     window.addEventListener('message', handleMessage)
     document.addEventListener('focusin', handleFocusIn)
+    document.addEventListener('pointerdown', handlePointerDown, { capture: true })
+    document.addEventListener('pointerup', handlePointerUp, { capture: true })
+    document.addEventListener('click', handleClick, { capture: true })
 
     return () => {
       window.removeEventListener('message', handleMessage)
       document.removeEventListener('focusin', handleFocusIn)
+      document.removeEventListener('pointerdown', handlePointerDown, { capture: true })
+      document.removeEventListener('pointerup', handlePointerUp, { capture: true })
+      document.removeEventListener('click', handleClick, { capture: true })
       clearTimeout(echoTimer)
       revealGeneration += 1
     }

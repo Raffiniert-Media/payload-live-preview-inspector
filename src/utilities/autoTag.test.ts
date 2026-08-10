@@ -285,6 +285,39 @@ describe('findTaggedElementByPath', () => {
     document.body.innerHTML = '<p>nothing tagged here</p>'
     expect(findTaggedElementByPath(document, 'layout.$a.heading')).toBeNull()
   })
+
+  it('picks the run holding the caret instead of the first one under the path', () => {
+    document.body.innerHTML = `
+      <p id="first" ${LIVE_PREVIEW_PATH_ATTRIBUTE}="body.root.children.0.children.0">First paragraph.</p>
+      <p id="second" ${LIVE_PREVIEW_PATH_ATTRIBUTE}="body.root.children.1.children.0">Second paragraph.</p>`
+    expect(findTaggedElementByPath(document, 'body', 'Second paragraph.')).toBe(document.getElementById('second'))
+  })
+
+  it('matches through the preview own markup and whitespace', () => {
+    document.body.innerHTML = `
+      <p id="first" ${LIVE_PREVIEW_PATH_ATTRIBUTE}="body.root.children.0.children.0">First paragraph.</p>
+      <p id="second" ${LIVE_PREVIEW_PATH_ATTRIBUTE}="body.root.children.1.children.0">Even a lone
+        <strong>bolded</strong>   word.</p>`
+    expect(findTaggedElementByPath(document, 'body', 'a lone bolded word')).toBe(document.getElementById('second'))
+  })
+
+  it('takes the widest run the caret context covers when no single one contains it', () => {
+    // Stega only tags the runs it can encode, so the admin caret's whole
+    // paragraph can be wider than anything the preview tagged.
+    document.body.innerHTML = `
+      <em id="short" ${LIVE_PREVIEW_PATH_ATTRIBUTE}="body.root.children.0.children.0">Even</em>
+      <strong id="long" ${LIVE_PREVIEW_PATH_ATTRIBUTE}="body.root.children.0.children.1">a lone bolded word</strong>`
+    expect(findTaggedElementByPath(document, 'body', 'Even a lone bolded word finds its way back.')).toBe(
+      document.getElementById('long'),
+    )
+  })
+
+  it('falls back to the plain path lookup when the caret text is nowhere to be found', () => {
+    document.body.innerHTML = `<p id="run" ${LIVE_PREVIEW_PATH_ATTRIBUTE}="body.root.children.0.children.0">First paragraph.</p>`
+    expect(findTaggedElementByPath(document, 'body', 'Text from a since-edited value')).toBe(
+      document.getElementById('run'),
+    )
+  })
 })
 
 describe('inferBlockContainers', () => {

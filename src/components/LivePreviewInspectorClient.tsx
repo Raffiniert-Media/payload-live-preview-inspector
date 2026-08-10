@@ -11,7 +11,7 @@ import {
   inferBlockContainers,
   scanStega,
 } from '../utilities/autoTag.js'
-import { caretHintFromPoint } from '../utilities/caret.js'
+import { caretHintFromPoint, parseCaretHint } from '../utilities/caret.js'
 import { LIVE_PREVIEW_HOVER_CLASS_NAME } from '../utilities/hoverClassName.js'
 import {
   CLICK_MESSAGE_TYPE,
@@ -230,7 +230,7 @@ export const LivePreviewInspectorClient: React.FC<LivePreviewInspectorClientProp
         return
       }
 
-      const el = findTaggedElementByPath(document, data.path)
+      const el = findTaggedElementByPath(document, data.path, parseCaretHint(data.caret)?.text)
       if (!el) {
         return
       }

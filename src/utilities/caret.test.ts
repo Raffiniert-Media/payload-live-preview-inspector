@@ -5,6 +5,7 @@ import {
   applyCaretHint,
   buildCollapsedIndex,
   caretHintFromPoint,
+  caretHintFromSelection,
   collapsedOffsetAt,
   parseCaretHint,
 } from './caret.js'
@@ -141,6 +142,76 @@ describe('caretHintFromPoint', () => {
     expect(hint.text).toHaveLength(240)
     expect(hint.offset).toBe(120)
     expect(long.slice(302 - 120, 302 + 120)).toBe(hint.text)
+  })
+})
+
+describe('caretHintFromSelection', () => {
+  /** Puts the caret at `offset` inside `node`, the way a click in the editor would. */
+  const placeCaret = (node: Node, offset: number): void => {
+    const range = document.createRange()
+    range.setStart(node, offset)
+    range.collapse(true)
+    const selection = window.getSelection()!
+    selection.removeAllRanges()
+    selection.addRange(range)
+  }
+
+  it('describes the paragraph the caret is in, not the whole editor', () => {
+    document.body.innerHTML =
+      '<div contenteditable="true"><p>First paragraph.</p><p>Second paragraph.</p></div>'
+    const editable = document.querySelector<HTMLElement>('[contenteditable="true"]')!
+    const second = document.querySelectorAll('p')[1].firstChild!
+
+    placeCaret(second, 9)
+
+    expect(caretHintFromSelection(editable)).toEqual({ offset: 9, text: 'Second paragraph.' })
+  })
+
+  it('climbs out of inline markup to the paragraph around it', () => {
+    document.body.innerHTML =
+      '<div contenteditable="true"><p>Even a lone <strong>bolded</strong> word finds its way back.</p></div>'
+    const editable = document.querySelector<HTMLElement>('[contenteditable="true"]')!
+    const strong = document.querySelector('strong')!
+    strong.style.display = 'inline'
+
+    placeCaret(strong.firstChild!, 3)
+
+    expect(caretHintFromSelection(editable)).toEqual({
+      offset: 15,
+      text: 'Even a lone bolded word finds its way back.',
+    })
+  })
+
+  it('finds the editor from an element inside it', () => {
+    document.body.innerHTML = '<div contenteditable="true"><p id="p">Only paragraph.</p></div>'
+
+    placeCaret(document.getElementById('p')!.firstChild!, 0)
+
+    expect(caretHintFromSelection(document.getElementById('p')!)?.text).toBe('Only paragraph.')
+  })
+
+  it('returns null while the selection still belongs to the field being left', () => {
+    document.body.innerHTML =
+      '<div contenteditable="true" id="a"><p>Field being left.</p></div><div contenteditable="true" id="b"><p>Field being entered.</p></div>'
+
+    placeCaret(document.querySelector('#a p')!.firstChild!, 4)
+
+    expect(caretHintFromSelection(document.getElementById('b')!)).toBeNull()
+  })
+
+  it('returns null for a field that is not a contenteditable editor', () => {
+    document.body.innerHTML = '<div id="field"><input type="text" value="Hello Live Preview"></div>'
+
+    expect(caretHintFromSelection(document.querySelector('input')!)).toBeNull()
+  })
+
+  it('returns null for an empty editor', () => {
+    document.body.innerHTML = '<div contenteditable="true"><p><br></p></div>'
+    const editable = document.querySelector<HTMLElement>('[contenteditable="true"]')!
+
+    placeCaret(document.querySelector('p')!, 0)
+
+    expect(caretHintFromSelection(editable)).toBeNull()
   })
 })
 

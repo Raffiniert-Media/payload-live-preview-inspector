@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.7.2
+
+- **The preview now follows the caret, not just the field.** Every run of a rich-text field is tagged with a path *under* that field, so a focused editor - which only ever knew its own path - always pointed the preview at the first of them: editing paragraph twelve scrolled the preview to paragraph one. The focus message now carries where in the value the cursor sits, and the preview scrolls to the element rendering exactly that text.
+  - It travels as the same *collapsed text* window the click direction already uses (stega characters removed, whitespace runs reduced to one space), built by the same code on both sides - so it survives the preview splitting a paragraph across its own inline markup, and works no matter which tagging layer covered the run. The preview prefers the outermost element containing the window, and where the caret's paragraph is wider than anything tagged in it (stega only encodes the runs it can), the widest tagged run inside the window. With no match - a stale preview, a value edited since - it falls back to the previous behavior.
+  - Clicks are now a trigger of their own, not just focus. A pointer places the caret only *after* moving focus, so a hint read during `focusin` would still describe the field being left; and moving the caret *within* an already-focused editor fires no focus event at all, which is exactly the case of clicking from one paragraph to another. Pointer-driven focus is therefore reported from the click that completes the same interaction - one message per interaction either way, and keyboard focus (tabbing into a field) is unaffected.
+- Single-input fields are deliberately left alone: their whole value is one tagged element in the preview, so the field's path already points at exactly the right one.
+- Matching a caret against a field's tagged runs compares collapsed *text* only, so it no longer builds the per-character DOM index the caret placement needs - that index costs one object per character, and for a book-length rich text they were all thrown away again.
+
 ## 1.7.1
 
 - **Fixed: clicking in the preview made the preview scroll away again.** Revealing a field ends by focusing it, and that focus fires `focusin` in the admin exactly like a real one - which 1.7.0's new reverse direction then sent straight back to the preview. On a long rich-text field the effect was clearly wrong: the admin scrolled to the clicked paragraph, and the preview immediately scrolled back to the field's first one, because a `focusin` only ever carries the field's own path. A reveal's own focus is no longer treated as user focus, so each direction now moves only the *other* side.

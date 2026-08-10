@@ -63,8 +63,8 @@ const createCollapser = () => {
   let pendingSpace = false
 
   return {
-    /** Appends `raw`, calling `emit(rawOffset)` once per emitted character. */
-    feed(raw: string, emit: (rawOffset: number) => void): void {
+    /** Appends `raw`, calling `emit` (when given) once per emitted character. */
+    feed(raw: string, emit?: (rawOffset: number) => void): void {
       for (let i = 0; i < raw.length; ) {
         const stegaLength = stegaBlockLengthAt(raw, i)
         if (stegaLength > 0) {
@@ -84,12 +84,12 @@ const createCollapser = () => {
           pendingSpace = false
           if (text.length > 0) {
             text += ' '
-            emit(i)
+            emit?.(i)
           }
         }
 
         text += raw[i]
-        emit(i)
+        emit?.(i)
         i += 1
       }
     },
@@ -109,16 +109,37 @@ const collapseString = (raw: string): { offsets: number[]; text: string } => {
   return { offsets, text: collapser.text }
 }
 
-/** Collapsed text of `root`'s rendered content, keyed back to its text nodes. */
-export const buildCollapsedIndex = (root: Element): CollapsedIndex => {
-  const doc = root.ownerDocument
-  const walker = doc.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+/** Walks `root`'s rendered text nodes, skipping code/data elements. */
+const textWalker = (root: Element): TreeWalker =>
+  root.ownerDocument.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
     acceptNode: (node) =>
       node.parentElement && NON_CONTENT_TAGS.has(node.parentElement.tagName)
         ? NodeFilter.FILTER_REJECT
         : NodeFilter.FILTER_ACCEPT,
   })
 
+/**
+ * Collapsed text of `root`'s rendered content - the same string
+ * `buildCollapsedIndex` produces, without the per-character DOM index. Worth
+ * its own function where only the text is compared (matching a caret's
+ * context against every tagged run of a field): the index costs one object
+ * per character, which for a book-length rich text is tens of thousands of
+ * allocations per lookup, all of them thrown away.
+ */
+export const collapsedTextOf = (root: Element): string => {
+  const walker = textWalker(root)
+  const collapser = createCollapser()
+
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    collapser.feed((node as Text).data)
+  }
+
+  return collapser.text
+}
+
+/** Collapsed text of `root`'s rendered content, keyed back to its text nodes. */
+export const buildCollapsedIndex = (root: Element): CollapsedIndex => {
+  const walker = textWalker(root)
   const collapser = createCollapser()
   const positions: CaretPosition[] = []
 
@@ -195,13 +216,7 @@ const rectDistance = (rect: DOMRect, x: number, y: number): number => {
 }
 
 const textNodesOf = (root: Element): Text[] => {
-  const walker = root.ownerDocument.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
-    acceptNode: (node) =>
-      node.parentElement && NON_CONTENT_TAGS.has(node.parentElement.tagName)
-        ? NodeFilter.FILTER_REJECT
-        : NodeFilter.FILTER_ACCEPT,
-  })
-
+  const walker = textWalker(root)
   const nodes: Text[] = []
   for (let node = walker.nextNode(); node; node = walker.nextNode()) {
     nodes.push(node as Text)
@@ -284,21 +299,30 @@ const isInline = (el: Element): boolean => {
 }
 
 /**
- * The nearest block-level ancestor of a clicked text node - the unit whose
- * text is sent as context. Deliberately not limited to the tagged element:
- * stega tags whatever element directly contains the encoded text run, which
- * for `<p>Hello <strong>world</strong></p>` can be the inline `<strong>`,
- * and a single word is far too weak an anchor to find again.
+ * The nearest block-level ancestor of a caret's node - the unit whose text is
+ * sent as context. Deliberately not limited to the tagged element: stega tags
+ * whatever element directly contains the encoded text run, which for
+ * `<p>Hello <strong>world</strong></p>` can be the inline `<strong>`, and a
+ * single word is far too weak an anchor to find again. `boundary`, where
+ * given, is as far as the climb may go - an editor's own root, so a caret in
+ * an empty paragraph can't widen the context out to the whole form.
  */
-const nearestBlock = (node: Node, fallback: Element): Element => {
+const nearestBlock = (node: Node, fallback: Element, boundary?: Element): Element => {
   const doc = fallback.ownerDocument
-  let el = node.parentElement
+  let el = node.nodeType === Node.ELEMENT_NODE ? (node as Element) : node.parentElement
 
-  while (el && el !== doc.body && el !== doc.documentElement && isInline(el)) {
+  while (el && el !== boundary && el !== doc.body && el !== doc.documentElement && isInline(el)) {
     el = el.parentElement
   }
 
   return !el || el === doc.body || el === doc.documentElement ? fallback : el
+}
+
+/** The window of collapsed text sent as context around `offset`. */
+const hintAround = (text: string, offset: number): CaretHint => {
+  const start = Math.max(0, offset - CARET_CONTEXT_CHARS)
+
+  return { offset: offset - start, text: text.slice(start, Math.min(text.length, offset + CARET_CONTEXT_CHARS)) }
 }
 
 /**
@@ -326,14 +350,44 @@ export const caretHintFromPoint = (doc: Document, x: number, y: number, within: 
   }
 
   const offset = collapsedOffsetAt(index, caret.node, caret.offset)
-  if (offset === null) {
+
+  return offset === null ? null : hintAround(index.text, offset)
+}
+
+/**
+ * Admin side: describes where the caret currently sits inside `el` - the
+ * mirror image of `caretHintFromPoint`, built from the same collapsed text so
+ * that the preview can find the element rendering that very paragraph. A
+ * focused field otherwise identifies itself by its path alone, which in a
+ * rich text matches every run the preview renders from it, and the first one
+ * wins - paragraphs away from where the editor is actually working.
+ *
+ * Only contenteditable editors are described: a single-input field's whole
+ * value is one tagged element in the preview, so its path already points at
+ * exactly the right one. `null` when there is no caret to describe - nothing
+ * selected, an empty editor, or a selection that still belongs to the field
+ * being left (focus events arrive before the browser moves it).
+ */
+export const caretHintFromSelection = (el: HTMLElement): CaretHint | null => {
+  const editable = el.closest<HTMLElement>(EDITABLE_SELECTOR)
+  if (!editable) {
     return null
   }
 
-  const start = Math.max(0, offset - CARET_CONTEXT_CHARS)
-  const end = Math.min(index.text.length, offset + CARET_CONTEXT_CHARS)
+  const selection = editable.ownerDocument.defaultView?.getSelection()
+  const anchor = selection?.anchorNode
+  if (!selection || !anchor || !editable.contains(anchor)) {
+    return null
+  }
 
-  return { offset: offset - start, text: index.text.slice(start, end) }
+  const index = buildCollapsedIndex(nearestBlock(anchor, editable, editable))
+  if (index.text.length === 0) {
+    return null
+  }
+
+  const offset = collapsedOffsetAt(index, anchor, selection.anchorOffset)
+
+  return offset === null ? null : hintAround(index.text, offset)
 }
 
 const applyCaretToInput = (el: HTMLInputElement | HTMLTextAreaElement, hint: CaretHint): HTMLElement | null => {

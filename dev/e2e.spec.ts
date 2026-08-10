@@ -102,9 +102,43 @@ test('focusing a rich-text sub-editor in the admin form flashes its matching par
   const paragraph = frame.locator('[data-testid="rich-text-body"] p').first()
   await expect(paragraph).toBeVisible()
 
-  await page.locator('[data-field-path="body"] [contenteditable="true"]').click()
+  await page.locator('[data-field-path="body"] [contenteditable="true"] p').first().click()
 
   await expect(paragraph).toHaveClass(/focused/)
+})
+
+test('clicking a later paragraph of a rich text flashes that paragraph, not the first', async ({ page }) => {
+  await login(page)
+
+  const frame = await openLivePreview(page)
+  const paragraphs = frame.locator('[data-testid="rich-text-body"] p')
+  await expect(paragraphs.first()).toBeVisible()
+
+  // Every run of a rich text is tagged with a path under the same field, so
+  // the field path alone would always point at the first of them - only the
+  // caret's own text tells the preview which paragraph is being edited.
+  await page.locator('[data-field-path="body"] [contenteditable="true"] p').nth(1).click()
+
+  await expect(paragraphs.nth(1)).toHaveClass(/focused/)
+  await expect(paragraphs.first()).not.toHaveClass(/focused/)
+})
+
+test('moving the caret within an already-focused rich text follows along in the preview', async ({ page }) => {
+  await login(page)
+
+  const frame = await openLivePreview(page)
+  const paragraphs = frame.locator('[data-testid="rich-text-body"] p')
+  await expect(paragraphs.first()).toBeVisible()
+
+  const editorParagraphs = page.locator('[data-field-path="body"] [contenteditable="true"] p')
+  await editorParagraphs.nth(1).click()
+  await expect(paragraphs.nth(1)).toHaveClass(/focused/)
+
+  // The editor already has focus, so this fires no further focus event - the
+  // click itself has to carry the new position.
+  await editorParagraphs.first().click()
+
+  await expect(paragraphs.first()).toHaveClass(/focused/)
 })
 
 test('clicking in the preview never scrolls the preview back (the reveal\'s own focus is not echoed)', async ({

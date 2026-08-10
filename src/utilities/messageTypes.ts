@@ -23,8 +23,10 @@ export const REQUEST_DOCUMENT_VALUES_MESSAGE_TYPE =
   'payload-live-preview-inspector:request-document-values'
 
 /**
- * admin → iframe: a form field was focused; carries its row-id based `path`
- * so the preview can scroll to and flash the matching element - the reverse
- * of `CLICK_MESSAGE_TYPE`.
+ * admin → iframe: a form field was focused or clicked into; carries its
+ * row-id based `path` and, for a rich-text editor, a `caret` hint
+ * (`{ offset, text }`) describing where in the value the cursor sits, so the
+ * preview scrolls to the element rendering *that* text rather than to the
+ * first one the field tags. The reverse of `CLICK_MESSAGE_TYPE`.
  */
 export const FOCUS_MESSAGE_TYPE = 'payload-live-preview-inspector:focus'
