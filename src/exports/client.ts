@@ -12,6 +12,7 @@ export { LIVE_PREVIEW_HOVER_CLASS_NAME } from '../utilities/hoverClassName.js'
 export {
   inspectable,
   type InspectableOptions,
+  isInspectable,
   pathOf,
   SERIALIZED_PATH_KEY,
   type StegaOptions,

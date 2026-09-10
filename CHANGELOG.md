@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.8.0
+
+- **`isInspectable(node)`, exported from `/path`** — the silent counterpart to `pathOf()`. `pathOf()` warns in development when handed data that never went through `inspectable()`, which is the right answer for a component that expected a wrapped node and got a raw one. It is the wrong answer for a *shared* renderer called with both: a theme's block renderer tags the page's layout, and the same function renders a block list read by a separate query, a global, and a public page that wraps nothing at all. There the warning fires on every block of every render, forever, about nothing — and the only way to avoid it was to reach into the internal path symbol.
+  - A tree wrapped with `{ enabled: false }` reports `true`. The guard exists to separate "nobody wrapped this" from "wrapped and switched off", and only the first is a mistake worth reporting — the second is what a public page looks like by design.
+  - Recognises a node that crossed a serialization boundary with `serializable: true`, on the same fallback `pathOf()` uses.
+
 ## 1.7.2
 
 - **The preview now follows the caret, not just the field.** Every run of a rich-text field is tagged with a path *under* that field, so a focused editor - which only ever knew its own path - always pointed the preview at the first of them: editing paragraph twelve scrolled the preview to paragraph one. The focus message now carries where in the value the cursor sits, and the preview scrolls to the element rendering exactly that text.

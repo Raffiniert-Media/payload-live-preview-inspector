@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { inspectable, pathOf, SERIALIZED_PATH_KEY } from './inspectable.js'
+import { inspectable, isInspectable, pathOf, SERIALIZED_PATH_KEY } from './inspectable.js'
 import { LIVE_PREVIEW_PATH_ATTRIBUTE } from './pathAttribute.js'
 import { findStegaPaths, stegaClean } from './stega.js'
 
@@ -76,6 +76,47 @@ describe('inspectable / pathOf', () => {
   it('passes non-object values through unchanged', () => {
     expect(inspectable(null)).toBeNull()
     expect(inspectable('x')).toBe('x')
+  })
+
+  describe('isInspectable', () => {
+    it('recognises a wrapped node and its children', () => {
+      const page = inspectable({ layout: [{ id: 'a', heading: 'Hi' }], title: 'Hello' })
+
+      expect(isInspectable(page)).toBe(true)
+      expect(isInspectable(page.layout)).toBe(true)
+      expect(isInspectable(page.layout[0])).toBe(true)
+    })
+
+    it('recognises a tree wrapped with enabled: false', () => {
+      // The point of the guard is to tell "not wrapped" from "wrapped and
+      // switched off" - the second one must not be reported as a mistake,
+      // because it is what a public page looks like.
+      const page = inspectable({ layout: [{ id: 'a' }] }, { enabled: false })
+
+      expect(isInspectable(page)).toBe(true)
+      expect(isInspectable(page.layout[0])).toBe(true)
+    })
+
+    it('rejects raw data, primitives and null - without warning', () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+      expect(isInspectable({ id: 'a', heading: 'Hi' })).toBe(false)
+      expect(isInspectable([{ id: 'a' }])).toBe(false)
+      expect(isInspectable('Hello')).toBe(false)
+      expect(isInspectable(null)).toBe(false)
+      expect(isInspectable(undefined)).toBe(false)
+
+      // The whole reason this exists: asking is silent, unlike pathOf().
+      expect(warn).not.toHaveBeenCalled()
+    })
+
+    it('recognises a node that crossed a serialization boundary', () => {
+      const page = inspectable({ meta: { title: 'x' } }, { serializable: true })
+      const crossed = JSON.parse(JSON.stringify(page.meta)) as Record<string, unknown>
+
+      expect(isInspectable(crossed)).toBe(true)
+      expect(pathOf(crossed)).toEqual(attr('meta'))
+    })
   })
 
   describe('enabled: false', () => {

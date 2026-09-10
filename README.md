@@ -178,6 +178,7 @@ From `/path` (pure helpers, safe anywhere; also re-exported from `/client`):
 
 - `inspectable(data, options?)` — path-tracking proxy. Options: `enabled`, `stega: true | { encodeKeys?, skipKeys?, filter? }`, `serializable`.
 - `pathOf(node, subPath?)` — the path attribute for a wrapped node.
+- `isInspectable(node)` — whether `node` came out of `inspectable()`, silently. `pathOf()` warns in development when handed unwrapped data, which is right for a component that expected a wrapped node; it is wrong for a shared renderer legitimately called with both (a block list from a separate query, a global, a public page that wraps nothing). Ask first, then tag: `{...(isInspectable(block) ? pathOf(block) : undefined)}`. A tree wrapped with `enabled: false` counts as inspectable — the guard separates “nobody wrapped this” from “wrapped and turned off”.
 - `stegaClean(value)` — strips stega characters from a string or a whole object tree.
 - `LIVE_PREVIEW_PATH_ATTRIBUTE`, `LIVE_PREVIEW_AUTO_ATTRIBUTE`, `SERIALIZED_PATH_KEY`, `LIVE_PREVIEW_HOVER_CLASS_NAME` — the raw attribute/class names, e.g. to tag or restyle manually.
 

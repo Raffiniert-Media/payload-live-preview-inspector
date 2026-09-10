@@ -270,6 +270,37 @@ export const inspectable = <T>(data: T, options?: InspectableOptions): T => {
 }
 
 /**
+ * Whether `node` came out of `inspectable()` - including a tree wrapped with
+ * `{ enabled: false }`, which is still inspectable, just switched off.
+ *
+ * The silent counterpart to `pathOf()`, for code that tags data it does not
+ * own. `pathOf()` warns in development when handed unwrapped data, which is
+ * the right answer for a component that expected a wrapped node and got a
+ * raw one. It is the wrong answer for a shared renderer that is legitimately
+ * called with both - a block list built from a separate query, a global, a
+ * public page that never wraps anything - where the warning would fire on
+ * every render, forever, about nothing. Ask first, then tag:
+ *
+ * ```tsx
+ * {...(isInspectable(block) ? pathOf(block) : undefined)}
+ * ```
+ *
+ * Note the deliberate `true` for `{ enabled: false }`: the guard separates
+ * "nobody wrapped this" from "wrapped and turned off", and only the first is
+ * a mistake worth reporting.
+ */
+export const isInspectable = (node: unknown): boolean => {
+  if (node === null || typeof node !== 'object') {
+    return false
+  }
+
+  return (
+    (node as Record<symbol, unknown>)[PATH_META] !== undefined ||
+    typeof (node as Record<string, unknown>)[SERIALIZED_PATH_KEY] === 'string'
+  )
+}
+
+/**
  * Returns the `data-payload-live-preview-path` attribute for a node obtained
  * through `inspectable()`. Pass `subPath` to address a field on the node
  * (`pathOf(block, 'heading')`); omit it to address the node itself
