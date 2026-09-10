@@ -44,6 +44,10 @@ export default [
             '*.d.ts',
             // Unit tests are excluded from tsconfig.json (they must not end up in dist/),
             // so the project service needs to pick them up via the default project.
+            // One entry per directory, because `**` is refused here by name
+            // ("allowDefaultProject glob contains a disallowed '**'") — the
+            // default project is slow, so the rule wants the set enumerated.
+            'src/*.test.ts',
             'src/utilities/*.test.ts',
           ],
         },

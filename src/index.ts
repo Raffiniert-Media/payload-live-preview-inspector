@@ -49,6 +49,11 @@ export const payloadLivePreviewInspector =
       return config
     }
 
+    // Own subpath (not /client): the listener imports @payloadcms/ui, which
+    // must never be reachable from the frontend-facing /client barrel.
+    const LISTENER_PATH =
+      '@raffiniert-media-ag/payload-live-preview-inspector/listener#LivePreviewInspectorListener'
+
     const createComponentConfig = () => ({
       clientProps: {
         accordionAnimationMs: pluginOptions.accordionAnimationMs,
@@ -57,10 +62,37 @@ export const payloadLivePreviewInspector =
         scrollOffset: pluginOptions.scrollOffset,
         tabSwitchWaitMs: pluginOptions.tabSwitchWaitMs,
       },
-      // Own subpath (not /client): the listener imports @payloadcms/ui, which
-      // must never be reachable from the frontend-facing /client barrel.
-      path: '@raffiniert-media-ag/payload-live-preview-inspector/listener#LivePreviewInspectorListener' as const,
+      path: LISTENER_PATH,
     })
+
+    /**
+     * Whether this listener is already registered in `controls`.
+     *
+     * A Payload plugin receives the config and edits the collection objects in
+     * it, which is what Payload's own plugins do - but those objects can be
+     * *shared*. A theme exports one collection config and one `plugins` array,
+     * and a repository can build a second config from both: a localized variant
+     * for its test suite, a reference config, a script importing one config
+     * while the app holds the other. Then this function runs twice over the
+     * same object and, without this check, appended a second listener to the
+     * first config's collection.
+     *
+     * Two listeners are two message handlers on one window: a single click
+     * reveals twice, and the hint renders twice in the document controls.
+     *
+     * Matched on *this* path rather than on "something is already here", so a
+     * collection that already has a custom control still gets the listener
+     * beside it. String entries (`'/components/Thing'`) pass through the
+     * `typeof` guard as never matching, which is correct - a path string cannot
+     * be this component, which needs `clientProps`.
+     */
+    const alreadyRegistered = (controls: unknown[]): boolean =>
+      controls.some(
+        (control) =>
+          typeof control === 'object' &&
+          control !== null &&
+          (control as { path?: unknown }).path === LISTENER_PATH,
+      )
 
     if (pluginOptions.collections && config.collections) {
       for (const collectionSlug in pluginOptions.collections) {
@@ -74,6 +106,11 @@ export const payloadLivePreviewInspector =
         collection.admin.components ??= {}
         collection.admin.components.edit ??= {}
         collection.admin.components.edit.beforeDocumentControls ??= []
+
+        if (alreadyRegistered(collection.admin.components.edit.beforeDocumentControls)) {
+          continue
+        }
+
         collection.admin.components.edit.beforeDocumentControls.push(createComponentConfig())
       }
     }
@@ -90,6 +127,11 @@ export const payloadLivePreviewInspector =
         global.admin.components ??= {}
         global.admin.components.elements ??= {}
         global.admin.components.elements.beforeDocumentControls ??= []
+
+        if (alreadyRegistered(global.admin.components.elements.beforeDocumentControls)) {
+          continue
+        }
+
         global.admin.components.elements.beforeDocumentControls.push(createComponentConfig())
       }
     }
