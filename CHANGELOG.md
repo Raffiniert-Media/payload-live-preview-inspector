@@ -1,5 +1,46 @@
 # Changelog
 
+## 1.10.0
+
+### A click in the preview does one thing
+
+A click that resolves to a field now **only** reveals that field: the page's own
+handler no longer runs, so a card does not open its dialog, a popup trigger does
+not open its popup and a carousel arrow does not advance. Reported from a real
+site — reaching for a field put a modal over the page being edited, because the
+click did both.
+
+**Hold ⌥/Alt to operate the page instead.** The click is then an ordinary click
+and reveals nothing, which is how an editor opens a dialog, steps a carousel or
+expands an accordion to look at what is inside it — and the only way to reach
+that content in order to click into *it*. `interactionModifier` picks the key
+(`'alt' | 'ctrl' | 'meta' | 'shift' | 'none'`), `disableInteractions={false}`
+restores the previous behaviour entirely.
+
+Two things this deliberately does not do:
+
+- **A click that resolves to no field is never taken.** A header, a cookie
+  banner, anything outside the edited document keeps working exactly as it does
+  for a visitor. The inspector only claims a click it can answer with a field,
+  and `dev/e2e.spec.ts` asserts that half too — without it, the preview would
+  stop being usable as a page at all.
+- **The modifier does not release a link.** `disableLinks` still wins, because
+  every browser gives alt-, meta- and shift-click on a link its own meaning
+  (download, new tab, new window) — passing one on would not mean "navigate",
+  and leaving the preview is never what the click was for.
+
+The hint in the document controls now names the configured key. It has to be
+asked for rather than assumed: the admin half of this plugin is configured
+through `clientProps` and the iframe half by whoever renders
+`LivePreviewInspectorClient`, so the iframe reports its setting over a new
+`SETTINGS_MESSAGE_TYPE` message. A listener that mounts too late to hear it
+keeps the shorter sentence, which is the right way for this to fail — what is
+left is still true.
+
+Also corrected in the README: it claimed Cmd/Ctrl-clicks bypassed the link
+interception. They never did — `preventDefault` on a click stops the new-tab
+open as surely as it stops navigation.
+
 ## 1.9.0
 
 - **A reveal is about four times faster, and nothing about it changed except what it stops waiting for.** Measured against a twelve-section page in the theme playground, five reveals of increasing depth: 3078/1266/3100/3353/3519 ms before, 1025/134/721/722/724 ms after. Three separate things were being paid for:

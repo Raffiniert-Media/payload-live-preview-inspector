@@ -140,9 +140,15 @@ On by default — the client asks the admin panel for the document's current str
 
 Elements whose paths share an Array/Blocks row prefix vote for their closest common ancestor as that row's container. Skipped when the row is already tagged, and never applied to ancestors containing another row's elements. `pathOf(block)` remains more reliable for blocks that render little text.
 
-## Link interception
+## What a click in the preview does
 
-By default the client prevents every `<a href>` inside the iframe from navigating — including client-side router links (Next.js `<Link>` etc.), which are intercepted in the capture phase before their own handler runs. Pass `disableLinks={false}` to restore navigation. Middle-clicks and Cmd/Ctrl-clicks bypass it.
+A click that resolves to a field **only** reveals that field. The page's own handler never runs, so a card does not open its dialog, a popup trigger does not open its popup and a carousel arrow does not advance — click-to-field means one thing happens, not two. Pass `disableInteractions={false}` to get the old behaviour, where a click did both.
+
+**Hold ⌥/Alt to operate the page instead.** The click is then an ordinary click and no field is revealed, which is how an editor opens a dialog, steps a carousel or expands an accordion to look at what is inside it — and the only way to reach that content in order to click into *it*. `interactionModifier` picks the key (`'alt' | 'ctrl' | 'meta' | 'shift' | 'none'`); `'none'` removes the escape hatch. The hint in the document controls names whichever key is configured, because the iframe reports its setting to the admin — so an editor can find it without reading this file.
+
+A click that resolves to **no** field is never taken. Anything outside the edited document — a header, a cookie banner — keeps working exactly as it does for a visitor. The rule is that the inspector only claims a click it can answer with a field.
+
+Links are the exception on both counts: `disableLinks` (default `true`) stops every `<a href>` from navigating, including client-side router links (Next.js `<Link>` etc.), which are intercepted in the capture phase before their own handler runs — and the modifier does *not* let one through. Every browser gives alt-, meta- and shift-click on a link its own meaning (download, new tab, new window), so passing it on would not mean "navigate" anyway, and leaving the preview is never what the click was for. Middle-clicks arrive as `auxclick` and are not intercepted. Pass `disableLinks={false}` to restore navigation.
 
 ## Server/client component boundaries
 
@@ -184,7 +190,7 @@ From `/path` (pure helpers, safe anywhere; also re-exported from `/client`):
 
 From `/client` (import only where you mount it):
 
-- `LivePreviewInspectorClient({ disableLinks?, hoverColor?, stega?, targetOrigin?, valueMatching? })` — all optional. `targetOrigin` pins the `postMessage` target to your admin origin; when omitted it's auto-detected (falls back to `'*'` — the payload is just a field-path string).
+- `LivePreviewInspectorClient({ disableInteractions?, disableLinks?, hoverColor?, interactionModifier?, stega?, targetOrigin?, valueMatching? })` — all optional. `disableInteractions` (default `true`) keeps a revealing click from also operating the page, and `interactionModifier` (default `'alt'`) is the key that turns it back into an ordinary click — see [What a click in the preview does](#what-a-click-in-the-preview-does). `targetOrigin` pins the `postMessage` target to your admin origin; when omitted it's auto-detected (falls back to `'*'` — the payload is just a field-path string).
 
 From `/listener`: `LivePreviewInspectorListener` — admin-side; the plugin registers it for you.
 

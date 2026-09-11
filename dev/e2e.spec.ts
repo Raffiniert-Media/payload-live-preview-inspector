@@ -543,3 +543,71 @@ test('disables link navigation inside the live preview iframe by default', async
   // before it reached the link's bubble-phase handler.
   await expect(link).not.toHaveAttribute('data-navigated', 'true')
 })
+
+/*
+ * What a click means in the preview, and the escape hatch.
+ *
+ * `disableInteractions` is the answer to a complaint with a real shape: a click
+ * on a card both revealed its field *and* opened its dialog, so an editor
+ * reaching for a field got a modal over the page they were editing. The rule
+ * now is that the inspector takes a click only when it has a field to answer
+ * with — which is also why the third test below matters as much as the first
+ * two: everything outside the edited document (a header, a cookie banner) has
+ * to keep working, or the preview stops being usable at all.
+ */
+test('a plain click reveals the field without running the page’s own handler', async ({ page }) => {
+  await login(page)
+
+  const frame = await openLivePreview(page)
+  const button = frame.locator('[data-testid="tagged-button"]')
+
+  await button.click()
+
+  // The button’s handler never ran: the capture-phase interceptor stopped the
+  // event before the bubble phase, the same way it stops a link.
+  await expect(button).not.toHaveAttribute('data-activated', 'true')
+
+  // And the click still did its job — the field it resolves to is revealed.
+  const titleField = page.locator('#field-title')
+  await expect(titleField).toBeInViewport()
+  await expect(titleField).toHaveClass(/flash/)
+})
+
+test('holding the modifier operates the page and reveals nothing', async ({ page }) => {
+  await login(page)
+
+  const frame = await openLivePreview(page)
+  const button = frame.locator('[data-testid="tagged-button"]')
+
+  await button.click({ modifiers: ['Alt'] })
+
+  await expect(button).toHaveAttribute('data-activated', 'true')
+
+  // No reveal: the click was the page’s, so the form was left where it was.
+  await expect(page.locator('#field-title')).not.toHaveClass(/flash/)
+})
+
+test('a click the inspector cannot answer is left to the page', async ({ page }) => {
+  await login(page)
+
+  const frame = await openLivePreview(page)
+  const button = frame.locator('[data-testid="untagged-button"]')
+
+  await button.click()
+
+  await expect(button).toHaveAttribute('data-activated', 'true')
+})
+
+test('the admin hint names the modifier the preview reported', async ({ page }) => {
+  await login(page)
+
+  await openLivePreview(page)
+
+  /*
+   * The hint is the only place an editor can learn the modifier exists, and it
+   * is rendered in the admin while the setting lives in the iframe — so the
+   * iframe reports it. Without that message the sentence would be describing a
+   * default rather than this preview.
+   */
+  await expect(page.locator('text=hold ⌥ (Alt) to use the page instead')).toBeVisible()
+})

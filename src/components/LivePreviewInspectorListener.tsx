@@ -1,7 +1,7 @@
 'use client'
 
 import { useForm, useLivePreviewContext } from '@payloadcms/ui'
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 import { caretHintFromSelection, parseCaretHint } from '../utilities/caret.js'
 import {
@@ -9,6 +9,7 @@ import {
   DOCUMENT_VALUES_MESSAGE_TYPE,
   FOCUS_MESSAGE_TYPE,
   REQUEST_DOCUMENT_VALUES_MESSAGE_TYPE,
+  SETTINGS_MESSAGE_TYPE,
 } from '../utilities/messageTypes.js'
 import {
   collectLeafValues,
@@ -66,6 +67,22 @@ export type LivePreviewInspectorListenerProps = {
   tabSwitchWaitMs?: number
 }
 
+/**
+ * How to name the modifier key to an editor.
+ *
+ * Both spellings, because the hint is read on the machine it applies to and
+ * neither name alone is recognisable on both: a Mac keyboard says `⌥`, a PC
+ * keyboard says `Alt`. `'none'` is absent on purpose - it maps to no label, and
+ * the hint then leaves the sentence out rather than promising a key that does
+ * nothing.
+ */
+const MODIFIER_LABELS: Record<string, string | undefined> = {
+  alt: '⌥ (Alt)',
+  ctrl: '⌃ (Ctrl)',
+  meta: '⌘ (Cmd)',
+  shift: '⇧ (Shift)',
+}
+
 export const LivePreviewInspectorListener: React.FC<LivePreviewInspectorListenerProps> = ({
   accordionAnimationMs = DEFAULT_COLLAPSIBLE_ANIMATION_MS,
   flashColor,
@@ -75,6 +92,21 @@ export const LivePreviewInspectorListener: React.FC<LivePreviewInspectorListener
   tabSwitchWaitMs = DEFAULT_TAB_SWITCH_WAIT_MS,
 }) => {
   const { iframeRef, isLivePreviewing, loadedURL, url } = useLivePreviewContext()
+
+  /*
+   * What the preview says it does with a click, for the hint below.
+   *
+   * `undefined` until the iframe reports, and the hint then says only the half
+   * that is certainly true. The two sides of this plugin are configured
+   * separately - the admin half through the plugin's `clientProps`, the iframe
+   * half by whoever renders `LivePreviewInspectorClient` - so describing the
+   * modifier without asking would be describing a default, and a site that
+   * turned it off would be showing its editors an instruction that does
+   * nothing.
+   */
+  const [previewSettings, setPreviewSettings] = useState<
+    { interactionModifier: string } | undefined
+  >(undefined)
   const activeURL = loadedURL || url
 
   // `useForm().getFields` is an imperative getter that reads the current form
@@ -117,6 +149,15 @@ export const LivePreviewInspectorListener: React.FC<LivePreviewInspectorListener
 
       const { data } = event
       if (!data || typeof data !== 'object') {
+        return
+      }
+
+      if (data.type === SETTINGS_MESSAGE_TYPE) {
+        setPreviewSettings(
+          data.disableInteractions && typeof data.interactionModifier === 'string'
+            ? { interactionModifier: data.interactionModifier }
+            : undefined,
+        )
         return
       }
 
@@ -381,9 +422,12 @@ export const LivePreviewInspectorListener: React.FC<LivePreviewInspectorListener
     return null
   }
 
+  const modifierLabel = MODIFIER_LABELS[previewSettings?.interactionModifier ?? '']
+
   return (
     <div className={classes.hint}>
       Click an element in the Live Preview to jump to its field
+      {modifierLabel ? ` — hold ${modifierLabel} to use the page instead` : ''}
     </div>
   )
 }

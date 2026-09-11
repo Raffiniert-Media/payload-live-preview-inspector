@@ -18,6 +18,7 @@ import {
   DOCUMENT_VALUES_MESSAGE_TYPE,
   FOCUS_MESSAGE_TYPE,
   REQUEST_DOCUMENT_VALUES_MESSAGE_TYPE,
+  SETTINGS_MESSAGE_TYPE,
 } from '../utilities/messageTypes.js'
 import { LIVE_PREVIEW_PATH_ATTRIBUTE } from '../utilities/pathAttribute.js'
 import { flashElement } from '../utilities/pathResolution.js'
@@ -29,6 +30,22 @@ export { LIVE_PREVIEW_HOVER_CLASS_NAME }
 const REQUEST_THROTTLE_MS = 300
 
 export type LivePreviewInspectorClientProps = {
+  /**
+   * When true, a click inside the Live Preview iframe that resolves to a field
+   * *only* reveals that field: the page's own handler never runs, so a card
+   * does not open its dialog, a popup trigger does not open its popup and a
+   * carousel arrow does not advance. This is what click-to-field means, and
+   * without it every such click does two things at once.
+   *
+   * A click that resolves to **no** field is never suppressed. The header, the
+   * cookie banner and anything else outside the edited document keep working,
+   * which is the line this draws: the inspector only takes a click it can
+   * answer with a field.
+   *
+   * Hold `interactionModifier` to operate the page anyway.
+   * @default true
+   */
+  disableInteractions?: boolean
   /**
    * When true, clicking a link (`<a href>`) inside the Live Preview iframe -
    * including client-side router links like Next.js' `<Link>` - does nothing
@@ -43,6 +60,23 @@ export type LivePreviewInspectorClientProps = {
    * shipped CSS (`LivePreviewInspectorClient.module.css`) if omitted.
    */
   hoverColor?: string
+  /**
+   * Held down, this key turns a click back into an ordinary click: the page
+   * behaves like a page and no field is revealed. It is how an editor opens a
+   * dialog, steps a carousel or expands an accordion to look at the content
+   * inside it — which is also the only way to reach that content in order to
+   * click into *it*.
+   *
+   * `'none'` removes the escape hatch entirely.
+   *
+   * Links are the exception and stay blocked either way when `disableLinks` is
+   * on: every browser gives alt-, meta- and shift-click on a link its own
+   * meaning (download, new tab, new window), so letting one through would not
+   * mean "navigate" anyway — and leaving the preview is never what the click
+   * was for.
+   * @default 'alt'
+   */
+  interactionModifier?: 'alt' | 'ctrl' | 'meta' | 'none' | 'shift'
   /**
    * Decodes paths that `inspectable(data, { stega: true })` encoded into
    * string values as invisible characters, and tags the elements rendering
@@ -72,6 +106,32 @@ export type LivePreviewInspectorClientProps = {
   valueMatching?: boolean
 }
 
+/**
+ * Whether the click asked to be an ordinary click.
+ *
+ * Named keys rather than `event.getModifierState`, because the four names this
+ * accepts are the plugin's API and have to keep meaning the same thing on every
+ * platform: `'alt'` is Option on a Mac and Alt elsewhere, `'meta'` is Command
+ * and the Windows key.
+ */
+const modifierHeld = (
+  event: MouseEvent,
+  modifier: 'alt' | 'ctrl' | 'meta' | 'none' | 'shift',
+): boolean => {
+  switch (modifier) {
+    case 'alt':
+      return event.altKey
+    case 'ctrl':
+      return event.ctrlKey
+    case 'meta':
+      return event.metaKey
+    case 'shift':
+      return event.shiftKey
+    default:
+      return false
+  }
+}
+
 const resolveTargetOrigin = (): string => {
   try {
     const [ancestorOrigin] = window.location.ancestorOrigins ?? []
@@ -94,8 +154,10 @@ const resolveTargetOrigin = (): string => {
 }
 
 export const LivePreviewInspectorClient: React.FC<LivePreviewInspectorClientProps> = ({
+  disableInteractions = true,
   disableLinks = true,
   hoverColor,
+  interactionModifier = 'alt',
   stega = true,
   targetOrigin,
   valueMatching = true,
@@ -158,17 +220,30 @@ export const LivePreviewInspectorClient: React.FC<LivePreviewInspectorClientProp
       setHovered(null)
     }
 
+    // Capture-phase + stopPropagation everywhere below, so this runs before
+    // (and blocks) a client-side router's or React's own click handler - both
+    // of which act regardless of preventDefault. A bubble-phase listener would
+    // be too late.
+    const swallow = (event: MouseEvent) => {
+      event.preventDefault()
+      event.stopPropagation()
+    }
+
     const onClick = (event: MouseEvent) => {
-      if (disableLinks) {
-        const link = (event.target as Element | null)?.closest?.('a[href]')
-        if (link) {
-          // Capture-phase + stopPropagation so this runs before (and blocks)
-          // a client-side router's own click handler (e.g. Next.js' <Link>),
-          // which navigates via history.pushState regardless of
-          // preventDefault - a bubble-phase listener would be too late.
-          event.preventDefault()
-          event.stopPropagation()
+      const link = (event.target as Element | null)?.closest?.('a[href]')
+
+      // The escape hatch: with the modifier held, the page is just a page.
+      // Links stay blocked regardless - see `interactionModifier` for why
+      // letting one through would not mean "navigate".
+      if (modifierHeld(event, interactionModifier)) {
+        if (disableLinks && link) {
+          swallow(event)
         }
+        return
+      }
+
+      if (disableLinks && link) {
+        swallow(event)
       }
 
       const el = findTarget(event)
@@ -181,6 +256,13 @@ export const LivePreviewInspectorClient: React.FC<LivePreviewInspectorClientProp
         return
       }
 
+      // Only now, with a field to answer with: the click belongs to the
+      // inspector rather than to the page. Links were already handled above,
+      // and swallowing one twice would be harmless but misleading to read.
+      if (disableInteractions && !link) {
+        swallow(event)
+      }
+
       // Where inside the text the click landed, so the admin can put the
       // cursor there instead of at the top of the field's editor. `null`
       // whenever the point isn't on text belonging to `el`.
@@ -191,6 +273,20 @@ export const LivePreviewInspectorClient: React.FC<LivePreviewInspectorClientProp
         targetOrigin ?? resolveTargetOrigin(),
       )
     }
+
+    /*
+     * Tell the admin what this preview does with a click, so its hint can say
+     * so. Sent from here rather than from its own effect because it describes
+     * exactly the handler installed on the next line - one place to change if
+     * either ever stops matching.
+     *
+     * A listener that mounts later misses it and keeps the shorter hint, which
+     * is the right way for this to fail: the sentence that is left is true.
+     */
+    window.parent.postMessage(
+      { type: SETTINGS_MESSAGE_TYPE, disableInteractions, interactionModifier },
+      targetOrigin ?? resolveTargetOrigin(),
+    )
 
     document.addEventListener('mousemove', onMouseMove)
     document.documentElement.addEventListener('mouseleave', onMouseLeave)
@@ -205,7 +301,7 @@ export const LivePreviewInspectorClient: React.FC<LivePreviewInspectorClientProp
       }
       setHovered(null)
     }
-  }, [disableLinks, hoverColor, targetOrigin])
+  }, [disableInteractions, disableLinks, hoverColor, interactionModifier, targetOrigin])
 
   // Reverse direction: a field focused in the admin form scrolls to and
   // flashes the matching element here, the same way a click there scrolls

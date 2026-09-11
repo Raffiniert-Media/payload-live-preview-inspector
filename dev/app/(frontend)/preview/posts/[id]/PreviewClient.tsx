@@ -66,6 +66,41 @@ export const PreviewClient = ({ initialData }: Props) => {
       <h1 {...pathOf(page, 'title')} style={{ marginTop: 0 }}>
         {page.title}
       </h1>
+      {/* A control *inside* a tagged element, which is what a card that opens a
+          dialog, a popup trigger and a carousel arrow all are. The wrapper
+          carries the tag and the button sits in it — a sibling of a tagged
+          element resolves to no field at all, which is the case the untagged
+          button below covers. A plain click here must reveal the field and
+          leave the button alone; holding the modifier must do the opposite.
+          See `disableInteractions`. */}
+      <div {...pathOf(page, 'title')} data-testid="tagged-region">
+        <button
+          data-testid="tagged-button"
+          onClick={(event) => {
+            event.currentTarget.dataset.activated = 'true'
+          }}
+          style={{ display: 'block', marginBottom: '1rem' }}
+          type="button"
+        >
+          A button inside a tagged area
+        </button>
+      </div>
+      {/* The same control outside anything the document tags — the header, the
+          cookie banner, everything that is not the edited document. The
+          inspector has no field to answer this click with, so it must not take
+          it. */}
+      <div data-testid="untagged-region">
+        <button
+          data-testid="untagged-button"
+          onClick={(event) => {
+            event.currentTarget.dataset.activated = 'true'
+          }}
+          style={{ display: 'block', marginBottom: '2rem' }}
+          type="button"
+        >
+          A button outside the tagged document
+        </button>
+      </div>
       {/* Exercises `disableLinks` against a client-side-routed link (like
           Next.js' <Link>, which navigates via history.pushState in its own
           onClick regardless of preventDefault) without depending on Next's

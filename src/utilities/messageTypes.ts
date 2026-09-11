@@ -30,3 +30,15 @@ export const REQUEST_DOCUMENT_VALUES_MESSAGE_TYPE =
  * first one the field tags. The reverse of `CLICK_MESSAGE_TYPE`.
  */
 export const FOCUS_MESSAGE_TYPE = 'payload-live-preview-inspector:focus'
+
+/**
+ * iframe → admin: how this preview is treating clicks, so the hint in the
+ * document controls can say so.
+ *
+ * The two halves of the plugin are configured independently — the admin gets
+ * its options through the plugin's `clientProps`, the iframe gets its own from
+ * whoever renders `LivePreviewInspectorClient`. Without this message the hint
+ * could only describe the defaults, and a site that turned the modifier off
+ * would be showing its editors an instruction that does nothing.
+ */
+export const SETTINGS_MESSAGE_TYPE = 'payload-live-preview-inspector:settings'
