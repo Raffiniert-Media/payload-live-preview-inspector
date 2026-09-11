@@ -157,6 +157,14 @@ Links are the exception, and they split in two. `disableLinks` (default `true`) 
 
 Middle-clicks arrive as `auxclick` and are not intercepted. Pass `disableLinks={false}` to restore navigation.
 
+## Sticky headers
+
+Both directions scroll something into view, and "in view" is not the same claim as "at the right height". After the preview scrolls to an element, the plugin asks the page what is actually painted just above and just inside that element's top edge; if it is a `sticky` or `fixed` element, the element is scrolled clear of it.
+
+Measured against a theme whose site header is sticky: focusing a field in the admin put its element at **y=-154** with the header occupying 0-99 — a hundred and fifty pixels of what the editor asked to see were above the fold, and the rest behind the header. With the correction the same element lands at y=110, clear.
+
+It is asked of the page rather than configured, because a number cannot be right: the height of a site's header is not something this plugin can know, at a width it cannot predict. The correction loops, because a header that hides on scroll *reappears* when the page scrolls up and takes back most of the first correction — one round left the element flush against the bar at a one-pixel overlap, the second finishes it.
+
 ## Server/client component boundaries
 
 The proxy's path metadata doesn't survive serialization — passing a wrapped node from a Server Component into a Client Component makes `pathOf()` come up empty on the other side. In order of preference:

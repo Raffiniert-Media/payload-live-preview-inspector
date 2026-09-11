@@ -545,7 +545,7 @@ const waitForStablePosition = (el: HTMLElement): Promise<void> =>
     requestAnimationFrame(tick)
   })
 
-const waitForScrollEnd = (): Promise<void> =>
+export const waitForScrollEnd = (): Promise<void> =>
   new Promise((resolve) => {
     let settled = false
 
@@ -562,6 +562,120 @@ const waitForScrollEnd = (): Promise<void> =>
     const fallback = setTimeout(settle, SCROLL_END_FALLBACK_MS)
     window.addEventListener('scrollend', settle, { once: true })
   })
+
+/**
+ * How much of `el`'s top edge is hidden behind something painted over it, in
+ * pixels. `0` when nothing is.
+ *
+ * ## Why this exists rather than a bigger offset
+ *
+ * The offset is a number - 100 by default - and a number cannot be right.
+ * Measured in the Payload admin: the document controls are a *sticky* bar, and
+ * after a reveal the field landed at y=1 with `doc-controls__content` painted
+ * over it. Raising the constant would fix that admin, at that window size,
+ * until a banner appears above the bar or a site changes its chrome.
+ *
+ * So the question is asked of the page instead: what is actually painted where
+ * the field's top is? If it is the field, or something inside or around it,
+ * nothing covers it. If it is a `sticky` or `fixed` element, that element's
+ * bottom edge is where the free space starts, and the difference is what has to
+ * be scrolled away.
+ *
+ * An overlay reaching the bottom of the viewport is ignored on purpose: a modal
+ * backdrop covers the field wherever it is put, and scrolling cannot uncover it
+ * - only burn the correction budget trying.
+ */
+export const hiddenBehindOverlay = (el: HTMLElement): number => {
+  const rect = el.getBoundingClientRect()
+
+  if (rect.width === 0) {
+    return 0
+  }
+
+  const x = Math.round(rect.left + Math.min(rect.width, 200) / 2)
+
+  /*
+   * Two points, and the one above the element is the one that matters.
+   *
+   * Probing only *inside* the element is systematically optimistic: measured,
+   * a correction left the element's top at 98 with a header ending at 99, and
+   * the probe at 100 found nothing to complain about. The element was flush
+   * against the bar, which is not what "visible" means to a person. The point
+   * just above it asks the real question — is there still something there?
+   */
+  const samples = [Math.round(rect.top) - 1, Math.round(rect.top) + 2]
+  let lowestEdge = 0
+
+  for (const y of samples) {
+    if (y < 0 || y > window.innerHeight) {
+      continue
+    }
+
+    const painted = document.elementFromPoint(x, y)
+
+    if (!painted || painted === el || el.contains(painted) || painted.contains(el)) {
+      continue
+    }
+
+    let node: Element | null = painted
+
+    while (node && node !== document.body) {
+      const { position } = window.getComputedStyle(node)
+
+      if (position === 'fixed' || position === 'sticky') {
+        const overlay = node.getBoundingClientRect()
+
+        // An overlay that reaches the bottom of the viewport is a backdrop: it
+        // covers the element wherever it is put, and scrolling cannot help.
+        if (overlay.bottom < window.innerHeight) {
+          lowestEdge = Math.max(lowestEdge, overlay.bottom)
+        }
+
+        break
+      }
+
+      node = node.parentElement
+    }
+  }
+
+  return Math.max(0, lowestEdge - rect.top)
+}
+
+/** A little air between an overlay's edge and the element, so it reads as clear. */
+export const UNCOVER_MARGIN_PX = 12
+
+/**
+ * Scrolls `el` out from under whatever covers it, if anything does.
+ *
+ * A loop rather than one correction, and that is measured: a header that hides
+ * on scroll *reappears* when the page is scrolled up, so the first correction
+ * gives back most of what it just won. One round moved the element from y=-1
+ * to y=98 with the header occupying 0-99 — still one pixel short. The second
+ * round is what finishes it.
+ *
+ * Instant, because this is not a journey: the element is already on screen and
+ * this only repairs the part of "visible" that an offset cannot know.
+ */
+export const uncover = async (el: HTMLElement): Promise<void> => {
+  for (let attempt = 0; attempt < MAX_SCROLL_CORRECTIONS; attempt++) {
+    const hidden = hiddenBehindOverlay(el)
+
+    if (hidden <= 0) {
+      return
+    }
+
+    const scrollYBefore = window.scrollY
+
+    window.scrollBy({ behavior: 'instant', top: -(hidden + UNCOVER_MARGIN_PX) })
+    await waitForScrollEnd()
+
+    // Already as far up as the page goes: retrying would only wait out the
+    // scrollend fallback again.
+    if (Math.abs(window.scrollY - scrollYBefore) < SCROLL_CONVERGENCE_THRESHOLD_PX) {
+      return
+    }
+  }
+}
 
 /**
  * Scrolls to `el` and resolves once the scroll actually finishes (via

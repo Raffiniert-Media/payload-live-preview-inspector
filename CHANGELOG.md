@@ -1,5 +1,44 @@
 # Changelog
 
+## 1.11.1
+
+### The preview no longer parks a field behind the site's sticky header
+
+Reported from a real site. `scrollIntoView({ block: 'nearest' })` moves the
+minimum amount, so an element approached from below aligns to the *top* of the
+iframe — and on a site with a sticky header, the top of the iframe is the
+header. Measured in the theme playground: focusing a field in the admin put its
+element at **y=-154** with the header occupying 0-99. With the correction it
+lands at y=110, clear.
+
+The plugin now asks the page what is painted just above and just inside the
+element's top edge after the scroll settles, and scrolls it out from under
+anything `sticky` or `fixed`. A number would have been the wrong shape: the
+height of a site's header is not something this plugin can know, at a width it
+cannot predict.
+
+Two details, both measured rather than reasoned:
+
+- **It loops.** A header that hides on scroll reappears when the page scrolls
+  up, taking back most of the first correction — one round left the element
+  flush against the bar at a one-pixel overlap.
+- **It probes just *above* the element too.** Probing only inside it is
+  systematically optimistic: at a one-pixel overlap the point two pixels into
+  the element is already clear of the bar, and the check reported nothing wrong.
+
+A backdrop that reaches the bottom of the viewport is ignored: it covers the
+element wherever it is put, and scrolling can only burn the correction budget.
+
+### Not shipped, and worth saying
+
+The same correction was first written for the *admin* side, on the theory that
+the document controls bar hides revealed fields there too. It could not be
+demonstrated: with the correction removed, fields still landed clear, because a
+reveal deep in a long form ends up well below that bar anyway. The first
+version of the guard for it stayed green with both halves of the fix removed —
+so the guard went, and the admin-side correction with it. `hiddenBehindOverlay`
+is exported for the day that case turns up with a measurement behind it.
+
 ## 1.11.0
 
 ### The suppression now actually wins

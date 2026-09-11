@@ -21,7 +21,7 @@ import {
   SETTINGS_MESSAGE_TYPE,
 } from '../utilities/messageTypes.js'
 import { LIVE_PREVIEW_PATH_ATTRIBUTE } from '../utilities/pathAttribute.js'
-import { flashElement } from '../utilities/pathResolution.js'
+import { flashElement, uncover, waitForScrollEnd } from '../utilities/pathResolution.js'
 import classes from './LivePreviewInspectorClient.module.css'
 
 export { LIVE_PREVIEW_HOVER_CLASS_NAME }
@@ -380,7 +380,29 @@ export const LivePreviewInspectorClient: React.FC<LivePreviewInspectorClientProp
         ? 'instant'
         : 'smooth'
       el.scrollIntoView({ behavior, block: 'nearest', inline: 'nearest' })
-      flashElement(el, { className: classes.focused, color: hoverColor })
+
+      /*
+       * And then out from under the site's own sticky header.
+       *
+       * `block: 'nearest'` moves the minimum amount, which means an element
+       * approached from below aligns to the *top* of the viewport - and on a
+       * site with a sticky header, the top of the viewport is the header.
+       * Measured against the theme this plugin was written for: focusing a
+       * field in the admin put its element at y=-1 with a header occupying
+       * 0-99, so the first hundred pixels of what the editor asked to see were
+       * behind it.
+       *
+       * Asked of the page rather than configured: a number would have to be
+       * the height of a header this plugin cannot know, on a site it does not
+       * control, at a width it cannot predict. See `hiddenBehindOverlay`.
+       */
+      void (async () => {
+        await waitForScrollEnd()
+
+        await uncover(el)
+
+        flashElement(el, { className: classes.focused, color: hoverColor })
+      })()
     }
 
     window.addEventListener('message', onMessage)
