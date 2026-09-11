@@ -4,6 +4,8 @@ import { expect, test } from '@playwright/test'
 
 declare global {
   interface Window {
+    /** Set by the dev app's host-style capture listener when it sees the click. */
+    __hostSawClick?: boolean
     __activatedTabs?: Set<string>
     /** Tag names of preview elements that got the reverse-direction flash class. */
     __focusFlashes?: string[]
@@ -610,4 +612,51 @@ test('the admin hint names the modifier the preview reported', async ({ page }) 
    * default rather than this preview.
    */
   await expect(page.locator('text=hold ⌥ (Alt) to use the page instead')).toBeVisible()
+})
+
+/*
+ * The order between this plugin and a host page that wants the same click.
+ *
+ * Both listen in the capture phase, and for the same node the DOM runs them in
+ * registration order — so on `document` the winner is whichever component
+ * mounted first, which neither controls. Measured against the theme this plugin
+ * was written for: a popup link inside a tagged section still opened its popup.
+ * The interception is on `window` for that reason, and the capture phase
+ * descends Window → Document, so it is first regardless.
+ */
+test('a host page’s own capture listener does not get a suppressed click', async ({ page }) => {
+  await login(page)
+
+  const frame = await openLivePreview(page)
+  const link = frame.locator('[data-testid="tagged-fragment-link"]')
+
+  await link.click()
+
+  /*
+   * Evaluated through an element, because `openLivePreview` hands back a
+   * `FrameLocator` — which has no `evaluate` of its own. Inside the callback
+   * `window` is the iframe's.
+   */
+  const sawIt = await frame
+    .locator('body')
+    .evaluate(() => window.__hostSawClick === true)
+
+  expect(sawIt, 'the host listener ran despite the click being suppressed').toBe(false)
+})
+
+test('the modifier hands an in-page link to the host, without navigating', async ({ page }) => {
+  await login(page)
+
+  const frame = await openLivePreview(page)
+  const link = frame.locator('[data-testid="tagged-fragment-link"]')
+
+  await link.click({ modifiers: ['Alt'] })
+
+  expect(await frame.locator('body').evaluate(() => window.__hostSawClick === true)).toBe(true)
+
+  /*
+   * And the browser did nothing of its own: no jump to the fragment, which is
+   * also what stops an alt-click being read as "download this".
+   */
+  expect(await frame.locator('body').evaluate(() => window.location.hash)).toBe('')
 })

@@ -148,7 +148,14 @@ A click that resolves to a field **only** reveals that field. The page's own han
 
 A click that resolves to **no** field is never taken. Anything outside the edited document — a header, a cookie banner — keeps working exactly as it does for a visitor. The rule is that the inspector only claims a click it can answer with a field.
 
-Links are the exception on both counts: `disableLinks` (default `true`) stops every `<a href>` from navigating, including client-side router links (Next.js `<Link>` etc.), which are intercepted in the capture phase before their own handler runs — and the modifier does *not* let one through. Every browser gives alt-, meta- and shift-click on a link its own meaning (download, new tab, new window), so passing it on would not mean "navigate" anyway, and leaving the preview is never what the click was for. Middle-clicks arrive as `auxclick` and are not intercepted. Pass `disableLinks={false}` to restore navigation.
+The interception listens on `window` rather than on `document`, which matters whenever the host page has a capture-phase click handler of its own. Two capture listeners on the same node run in registration order, so on `document` the winner would be whichever component mounted first — measured against a theme that opens a popup for any `#popup-…` link: a popup trigger inside a tagged section still opened its popup on a plain click. The capture phase descends Window → Document, so listening a level up is first regardless of mount order.
+
+Links are the exception, and they split in two. `disableLinks` (default `true`) stops every `<a href>` from navigating, including client-side router links (Next.js `<Link>` etc.), which are intercepted in the capture phase before their own handler runs.
+
+- **A link that leaves the page** stays blocked even under the modifier. Every browser gives alt-, meta- and shift-click on a link its own meaning (download, new tab, new window), so passing it on would not mean "navigate" anyway, and leaving the preview is never what the click was for.
+- **A link into the same page** — a `#fragment`, which is what an in-page control like a popup trigger is built from — is handed to the page under the modifier, with the browser's own behaviour prevented. So ⌥-clicking a popup trigger opens the popup and does not jump, download or navigate.
+
+Middle-clicks arrive as `auxclick` and are not intercepted. Pass `disableLinks={false}` to restore navigation.
 
 ## Server/client component boundaries
 

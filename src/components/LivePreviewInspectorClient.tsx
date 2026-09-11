@@ -132,6 +132,24 @@ const modifierHeld = (
   }
 }
 
+/**
+ * Whether this link points into the page it is on rather than away from it.
+ *
+ * The distinction matters only under the modifier: a fragment link is a control
+ * (a popup trigger, a disclosure), and letting the page act on it is the point.
+ * A link that leaves stays blocked either way, because leaving the preview is
+ * never what the click was for.
+ *
+ * Read off the anchor's resolved properties rather than its attribute, so
+ * `#popup-x`, `/current-path#popup-x` and an absolute URL to the same page are
+ * all the same answer.
+ */
+const isSamePageFragment = (link: HTMLAnchorElement): boolean =>
+  Boolean(link.hash) &&
+  link.pathname === window.location.pathname &&
+  link.search === window.location.search &&
+  link.host === window.location.host
+
 const resolveTargetOrigin = (): string => {
   try {
     const [ancestorOrigin] = window.location.ancestorOrigins ?? []
@@ -230,14 +248,22 @@ export const LivePreviewInspectorClient: React.FC<LivePreviewInspectorClientProp
     }
 
     const onClick = (event: MouseEvent) => {
-      const link = (event.target as Element | null)?.closest?.('a[href]')
+      const link = (event.target as Element | null)?.closest?.('a[href]') as HTMLAnchorElement | null
 
       // The escape hatch: with the modifier held, the page is just a page.
       // Links stay blocked regardless - see `interactionModifier` for why
       // letting one through would not mean "navigate".
       if (modifierHeld(event, interactionModifier)) {
         if (disableLinks && link) {
-          swallow(event)
+          if (isSamePageFragment(link)) {
+            // Stops the browser's own idea of an alt-click (a download) and of
+            // a fragment (a jump), and lets the click carry on to the page -
+            // which is how an in-page control built as a link, like a popup
+            // trigger, can still be operated deliberately.
+            event.preventDefault()
+          } else {
+            swallow(event)
+          }
         }
         return
       }
@@ -290,12 +316,31 @@ export const LivePreviewInspectorClient: React.FC<LivePreviewInspectorClientProp
 
     document.addEventListener('mousemove', onMouseMove)
     document.documentElement.addEventListener('mouseleave', onMouseLeave)
-    document.addEventListener('click', onClick, { capture: true })
+
+    /*
+     * On `window`, not on `document`, and that is the whole fix for a real
+     * defect rather than a preference.
+     *
+     * A host page may have its own capture-phase listener on `document` - the
+     * theme this plugin was written for has exactly that, opening a popup for
+     * any link whose href ends in `#popup-...`. Two capture listeners on the
+     * same node run in *registration* order, so which one wins depends on
+     * which component mounted first, which neither of them controls. Measured
+     * against that theme: a popup link inside a tagged section still opened its
+     * popup on a plain click, because the host's listener was registered first.
+     *
+     * The capture phase descends Window -> Document -> ... , so a capture
+     * listener here runs before any capture listener on `document` no matter
+     * when either was added. Measured rather than assumed: registering
+     * document-capture first and window-capture second still runs
+     * window-capture first.
+     */
+    window.addEventListener('click', onClick, { capture: true })
 
     return () => {
       document.removeEventListener('mousemove', onMouseMove)
       document.documentElement.removeEventListener('mouseleave', onMouseLeave)
-      document.removeEventListener('click', onClick, { capture: true })
+      window.removeEventListener('click', onClick, { capture: true })
       if (hoverFrame) {
         cancelAnimationFrame(hoverFrame)
       }

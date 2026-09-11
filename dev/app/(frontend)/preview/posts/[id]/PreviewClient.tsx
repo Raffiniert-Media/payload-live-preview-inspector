@@ -2,6 +2,33 @@
 
 import { useLivePreview } from '@payloadcms/live-preview-react'
 import { RichText } from '@payloadcms/richtext-lexical/react'
+
+/**
+ * A host page that wants the same clicks, registered the way a real one is.
+ *
+ * The theme this plugin was written for opens a popup for any link whose href
+ * ends in `#popup-...`, with `document.addEventListener('click', …, true)`. Two
+ * capture listeners on the same node run in registration order, so a host that
+ * mounts first wins — and a plain click opened the popup *and* revealed the
+ * field, which is the defect `window`-capture fixes.
+ *
+ * At module scope on purpose: effects run child-first, so anything registered
+ * in this component's own effect would land *after* the inspector's and prove
+ * nothing. An import runs before every effect there is.
+ */
+if (typeof document !== 'undefined' && !(window as unknown as Record<string, unknown>).__hostListener) {
+  ;(window as unknown as Record<string, unknown>).__hostListener = true
+  document.addEventListener(
+    'click',
+    (event) => {
+      if ((event.target as Element | null)?.closest?.('a[href*="#zz-fragment"]')) {
+        ;(window as unknown as Record<string, unknown>).__hostSawClick = true
+      }
+    },
+    true,
+  )
+}
+
 // The component comes from /client; the data helpers from the pure /path
 // subpath, so importing them elsewhere never drags component code into a
 // page bundle.
@@ -84,6 +111,12 @@ export const PreviewClient = ({ initialData }: Props) => {
         >
           A button inside a tagged area
         </button>
+        {/* An in-page control built as a link — what a popup trigger is. The
+            host listener above is what opens it, so this exercises the order
+            between that listener and the inspector's. */}
+        <a data-testid="tagged-fragment-link" href="#zz-fragment">
+          An in-page link inside a tagged area
+        </a>
       </div>
       {/* The same control outside anything the document tags — the header, the
           cookie banner, everything that is not the edited document. The

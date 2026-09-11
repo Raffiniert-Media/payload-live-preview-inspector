@@ -1,5 +1,38 @@
 # Changelog
 
+## 1.11.0
+
+### The suppression now actually wins
+
+Reported from a real site: popups still opened on a plain click in the preview.
+They did, and the reason is ordering. The interception was a capture-phase
+listener on `document`, and the theme that reported it opens a popup from its
+own capture-phase listener on `document` — for the same node the DOM runs those
+in **registration** order, so the winner was whichever component mounted first,
+which neither of them controls. Measured against that theme: a popup link inside
+a tagged section opened its popup *and* revealed the field.
+
+The listener moved to `window`. The capture phase descends Window → Document, so
+it now runs before any capture listener on `document` no matter when either was
+added — measured rather than assumed: registering document-capture first and
+window-capture second still runs window-capture first.
+
+### And the modifier can now reach an in-page control
+
+Links stayed blocked under the modifier, which was right for a link that leaves
+the page and wrong for one that does not. A popup trigger is an `<a href="#…">`,
+so with the rule as it was there was no way to open a popup in the preview at
+all.
+
+Now a **same-page fragment** link is handed to the page under the modifier, with
+`preventDefault` so the browser does nothing of its own — no jump, and no
+alt-click download. A link that leaves the page is unchanged: blocked either
+way.
+
+Both are asserted in `dev/e2e.spec.ts` against a host-style capture listener
+registered at module scope — before every effect, so it is genuinely first, the
+way the real one was.
+
 ## 1.10.0
 
 ### A click in the preview does one thing
