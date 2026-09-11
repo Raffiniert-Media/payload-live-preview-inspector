@@ -18,6 +18,7 @@ import {
   rowIDFromPath,
   scrollToElement,
   toRowIDPath,
+  waitForElement,
   waitForElementLayout,
 } from './pathResolution.js'
 
@@ -603,6 +604,28 @@ describe('scrollToElement', () => {
     expect(resolved).toBe(true)
   })
 
+  it('jumps instead of animating when the caller asks for it', async () => {
+    const el = document.createElement('div')
+    document.body.append(el)
+    let top = 2000
+    vi.spyOn(el, 'getBoundingClientRect').mockImplementation(() => ({ top }) as DOMRect)
+    const { restore, scrollBy } = trackScrollY()
+
+    let resolved = false
+    void scrollToElement(el, 80, 'instant').then(() => {
+      resolved = true
+    })
+
+    expect(scrollBy).toHaveBeenNthCalledWith(1, { behavior: 'instant', top: 1920 })
+
+    top = 80
+    window.dispatchEvent(new Event('scrollend'))
+    await settle()
+
+    expect(resolved).toBe(true)
+    restore()
+  })
+
   it('re-measures after the scroll settles and issues further corrections until it converges', async () => {
     const el = document.createElement('div')
     document.body.append(el)
@@ -621,7 +644,11 @@ describe('scrollToElement', () => {
 
     expect(resolved).toBe(false)
     expect(scrollBy).toHaveBeenNthCalledWith(1, { behavior: 'smooth', top: 1920 })
-    expect(scrollBy).toHaveBeenNthCalledWith(2, { behavior: 'smooth', top: -40 })
+    // The journey animates, the correction does not: it compensates for
+    // layout that shifted during the scroll, so the element is on screen and
+    // the delta is small - while another animation would cost the reveal
+    // another few hundred ms of waiting on `scrollend`.
+    expect(scrollBy).toHaveBeenNthCalledWith(2, { behavior: 'instant', top: -40 })
 
     top = 80 // converged after the correction
     window.dispatchEvent(new Event('scrollend'))
@@ -701,6 +728,90 @@ describe('scrollToElement', () => {
     top = 80
     await vi.advanceTimersByTimeAsync(1)
     await vi.advanceTimersByTimeAsync(200)
+    expect(resolved).toBe(true)
+  })
+})
+
+describe('waitForElement', () => {
+  const fakeTimers = () =>
+    vi.useFakeTimers({
+      toFake: ['setTimeout', 'clearTimeout', 'requestAnimationFrame', 'cancelAnimationFrame', 'performance'],
+    })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('resolves as soon as the check finds the element', async () => {
+    fakeTimers()
+    const el = document.createElement('input')
+    let found: HTMLElement | null = null
+    void waitForElement(() => found, 1500).then((result) => {
+      el.dataset.resolved = String(result === el)
+    })
+
+    await vi.advanceTimersByTimeAsync(32)
+    expect(el.dataset.resolved).toBeUndefined()
+
+    found = el
+    await vi.advanceTimersByTimeAsync(32)
+    expect(el.dataset.resolved).toBe('true')
+  })
+
+  it('waits out its whole budget on a silent DOM by default', async () => {
+    /*
+     * The default has to be this patient, and the reason is a regression that
+     * already happened: Payload mounts a tab's fields a few hundred *silent*
+     * milliseconds after the tab button is clicked, so a caller waiting on a
+     * reaction it triggered cannot read silence as "nothing is coming".
+     * `revealTabForElement` above covers the symptom; this covers the rule.
+     */
+    fakeTimers()
+    let resolved = false
+    void waitForElement(() => null, 1500).then(() => {
+      resolved = true
+    })
+
+    await vi.advanceTimersByTimeAsync(1400)
+    expect(resolved).toBe(false)
+
+    await vi.advanceTimersByTimeAsync(120)
+    expect(resolved).toBe(true)
+  })
+
+  it('gives up early on a silent DOM when the caller opted in', async () => {
+    fakeTimers()
+    let resolved = false
+    void waitForElement(() => null, 1500, { idleMs: 250 }).then(() => {
+      resolved = true
+    })
+
+    await vi.advanceTimersByTimeAsync(200)
+    expect(resolved).toBe(false)
+
+    await vi.advanceTimersByTimeAsync(100)
+    expect(resolved).toBe(true)
+  })
+
+  it('keeps waiting past the idle window while the DOM is still changing', async () => {
+    fakeTimers()
+    let found: HTMLElement | null = null
+    let resolved = false
+    void waitForElement(() => found, 1500, { idleMs: 250 }).then(() => {
+      resolved = true
+    })
+
+    await vi.advanceTimersByTimeAsync(200)
+    document.body.append(document.createElement('div'))
+    await vi.advanceTimersByTimeAsync(200)
+
+    // 400ms in, and 400 > 250: without the mutation resetting the window this
+    // would already have given up.
+    expect(resolved).toBe(false)
+
+    const el = document.createElement('input')
+    found = el
+    await vi.advanceTimersByTimeAsync(32)
     expect(resolved).toBe(true)
   })
 })

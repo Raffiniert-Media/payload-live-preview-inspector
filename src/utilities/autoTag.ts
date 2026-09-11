@@ -21,8 +21,27 @@ const isTaggable = (el: Element | null): el is Element =>
 const documentOf = (root: Document | Element): Document =>
   root.ownerDocument ?? (root)
 
+/**
+ * Every text node under `root` that is rendered content - the contents of
+ * script, style, template and noscript elements are skipped.
+ *
+ * `isTaggable` already refuses to tag an element inside one of those, so this
+ * changes no outcome; what it removes is the work of getting there. A Next.js
+ * page carries its RSC flight payload in inline `<script>` tags, and those
+ * are single text nodes tens or hundreds of kilobytes long - measured at
+ * 452KB on one twelve-section page, i.e. more than 99% of all text in the
+ * document. Value matching normalizes every text node it is handed (a regex
+ * pass plus two string allocations), and the scan runs on every render batch
+ * of a live preview, so that payload was being rewritten several times a
+ * second to be thrown away.
+ */
 const walkTextNodes = (root: Document | Element, visit: (node: Text) => void): void => {
-  const walker = documentOf(root).createTreeWalker(root, NodeFilter.SHOW_TEXT)
+  const walker = documentOf(root).createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+    acceptNode: (node) =>
+      node.parentElement && NON_CONTENT_TAGS.has(node.parentElement.tagName)
+        ? NodeFilter.FILTER_REJECT
+        : NodeFilter.FILTER_ACCEPT,
+  })
 
   let node = walker.nextNode()
   while (node) {

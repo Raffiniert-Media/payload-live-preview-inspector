@@ -26,6 +26,19 @@ export type PayloadLivePreviewInspectorConfig = {
    */
   globals?: Partial<Record<GlobalSlug, true>>
   /**
+   * Whether the admin form animates its way to the revealed field
+   * (`'smooth'`) or jumps straight there (`'instant'`).
+   *
+   * The animation shows an editor where the form went, which is why it is the
+   * default - but it is also the slowest part of a reveal: the flash and the
+   * cursor only land once the page has stopped moving. Measured on a
+   * twelve-section page, the animation alone was 0.9-1.3s of a ~1.8s reveal.
+   * Choose `'instant'` where responsiveness matters more than the motion. A
+   * reduced-motion preference is honoured either way.
+   * @default 'smooth'
+   */
+  scrollBehavior?: 'instant' | 'smooth'
+  /**
    * Distance (px) to keep between the scrolled-to field and the viewport top.
    * @default 100
    */
@@ -59,6 +72,7 @@ export const payloadLivePreviewInspector =
         accordionAnimationMs: pluginOptions.accordionAnimationMs,
         flashColor: pluginOptions.flashColor,
         flashDurationMs: pluginOptions.flashDurationMs,
+        scrollBehavior: pluginOptions.scrollBehavior,
         scrollOffset: pluginOptions.scrollOffset,
         tabSwitchWaitMs: pluginOptions.tabSwitchWaitMs,
       },

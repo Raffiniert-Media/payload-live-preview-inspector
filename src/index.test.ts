@@ -31,6 +31,28 @@ describe('payloadLivePreviewInspector', () => {
     expect(globalControlsOf(settings as never)).toHaveLength(1)
   })
 
+  it('hands its tuning options to the listener as client props', () => {
+    /*
+     * The listener runs in the browser and reads these off `clientProps`, so
+     * an option that is declared but never forwarded is a setting that
+     * silently does nothing - and `scrollBehavior` is the one a site reaches
+     * for to trade the scroll animation for responsiveness.
+     */
+    const pages = { slug: 'pages' }
+
+    payloadLivePreviewInspector({
+      collections: { pages: true },
+      scrollBehavior: 'instant',
+      scrollOffset: 40,
+    })(configWith([pages]))
+
+    const [control] = controlsOf(pages as never)
+    expect((control as { clientProps: Record<string, unknown> }).clientProps).toMatchObject({
+      scrollBehavior: 'instant',
+      scrollOffset: 40,
+    })
+  })
+
   it('leaves collections it was not asked about alone', () => {
     const pages = { slug: 'pages' }
     const media = { slug: 'media' }

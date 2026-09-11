@@ -64,7 +64,7 @@ export default buildConfig({
 })
 ```
 
-Optional overrides (defaults shown): `flashColor: '#3fb950'`, `flashDurationMs: 1200`, `scrollOffset: 100`, `accordionAnimationMs: 350`, `tabSwitchWaitMs: 1500` (max wait for freshly mounting fields — per candidate tab during a tab search, and after scrolling toward a field that hasn't rendered yet; raise it if very heavy tabs get skipped).
+Optional overrides (defaults shown): `flashColor: '#3fb950'`, `flashDurationMs: 1200`, `scrollOffset: 100`, `scrollBehavior: 'smooth'`, `accordionAnimationMs: 350`, `tabSwitchWaitMs: 1500` (max wait for freshly mounting fields — per candidate tab during a tab search, and after scrolling toward a field that hasn't rendered yet; raise it if very heavy tabs get skipped).
 
 ### 2. Frontend
 
@@ -172,7 +172,7 @@ const page = inspectable(data, { enabled: isEnabled, stega: true })
 
 From `.` (Payload config):
 
-- `payloadLivePreviewInspector({ collections?, globals?, disabled?, flashColor?, flashDurationMs?, scrollOffset?, accordionAnimationMs?, tabSwitchWaitMs? })` — see [Setup](#1-admin-payload-config).
+- `payloadLivePreviewInspector({ collections?, globals?, disabled?, flashColor?, flashDurationMs?, scrollOffset?, scrollBehavior?, accordionAnimationMs?, tabSwitchWaitMs? })` — see [Setup](#1-admin-payload-config).
 
 From `/path` (pure helpers, safe anywhere; also re-exported from `/client`):
 
@@ -191,6 +191,7 @@ From `/listener`: `LivePreviewInspectorListener` — admin-side; the plugin regi
 ## Known limitations
 
 - Fields that only render inside a relationship's edit drawer aren't reachable — the click silently no-ops. Same for a row deleted after the preview was rendered.
+- `scrollBehavior: 'instant'` trades the scroll animation for responsiveness. The animation is the single largest cost of a reveal, because the flash and the caret only land once the form has stopped moving: measured on a twelve-section page, five reveals took 1025/134/721/722/724 ms with `'instant'` against 1841/1025/1603/1723/1864 ms with the default `'smooth'`. The flash is what tells an editor where the form went either way. A `prefers-reduced-motion` preference is honoured regardless of this setting.
 - Finding a field in another tab clicks through the form's tabs (originals restored when nothing is found). Fields that mount slower than `tabSwitchWaitMs` after a tab switch or scroll can make the reveal settle on the nearest parent — raise the option for very heavy forms.
 - Multi-locale setups or drawer-duplicated fields can get suffixed DOM ids; the `field-<path>` lookup may occasionally miss there.
 - Stega only reaches values rendered as text (or `alt`/`title`/`aria-label`/`placeholder`) with two or more words; string operations that reshape a value (`slice()`, regexes) destroy the tag — the element is then untagged, never mistagged. Copied preview text carries the invisible characters (preview-only).

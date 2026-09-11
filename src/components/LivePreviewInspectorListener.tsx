@@ -17,6 +17,7 @@ import {
   expandCollapsedAncestors,
   fieldPathFromFormState,
   focusElement,
+  IDLE_GIVE_UP_MS,
   pathFromFieldElement,
   resolvedPathDepth,
   resolveExactFieldElement,
@@ -38,6 +39,19 @@ export type LivePreviewInspectorListenerProps = {
   flashColor?: string
   /** Flash animation duration in ms. Defaults to the shipped CSS (1200ms). */
   flashDurationMs?: number
+  /**
+   * Whether the admin form animates its way to the revealed field
+   * (`'smooth'`) or jumps straight there (`'instant'`).
+   *
+   * The animation is what shows an editor where the form went, so it is the
+   * default - but it is also the slowest part of a reveal, because the flash
+   * and the cursor wait for the page to stop moving before they land.
+   * Measured in a twelve-section page: 0.9-1.3s of a ~1.8s reveal was the
+   * scroll animation alone. Set `'instant'` where responsiveness matters
+   * more than the motion. A reduced-motion preference is honoured either way.
+   * @default 'smooth'
+   */
+  scrollBehavior?: 'instant' | 'smooth'
   /** Distance (px) to keep between the scrolled-to field and the viewport top. Defaults to 100. */
   scrollOffset?: number
   /**
@@ -56,6 +70,7 @@ export const LivePreviewInspectorListener: React.FC<LivePreviewInspectorListener
   accordionAnimationMs = DEFAULT_COLLAPSIBLE_ANIMATION_MS,
   flashColor,
   flashDurationMs,
+  scrollBehavior = 'smooth',
   scrollOffset,
   tabSwitchWaitMs = DEFAULT_TAB_SWITCH_WAIT_MS,
 }) => {
@@ -206,15 +221,26 @@ export const LivePreviewInspectorListener: React.FC<LivePreviewInspectorListener
             }
           }
 
-          await scrollToElement(el, scrollOffset)
+          await scrollToElement(el, scrollOffset, scrollBehavior)
           if (generation !== revealGeneration) {
             return
           }
 
           // Already on the exact target (or as deep as we will ever get and
           // nothing deeper mounted after the scroll) - stop here.
+          //
+          // The one wait in a reveal that may give up on silence: unlike the
+          // tab and accordion waits above, this one triggered nothing. The
+          // scroll it follows has settled, so anything it set off (Payload
+          // mounts deferred fields as they enter the viewport) has either
+          // shown itself or is still loading - and both of those count as
+          // activity. Without this, every reveal ended in ~1.4s of waiting
+          // for a DOM that was already final.
           const next =
-            checkExact() ?? (await waitForElement(progressBeyond(resolvedPathDepth(resolvedPath)), tabSwitchWaitMs))
+            checkExact() ??
+            (await waitForElement(progressBeyond(resolvedPathDepth(resolvedPath)), tabSwitchWaitMs, {
+              idleMs: IDLE_GIVE_UP_MS,
+            }))
           if (generation !== revealGeneration) {
             return
           }
@@ -244,7 +270,7 @@ export const LivePreviewInspectorListener: React.FC<LivePreviewInspectorListener
         if (caretEl) {
           const { bottom, top } = caretEl.getBoundingClientRect()
           if (top < 0 || bottom > window.innerHeight) {
-            await scrollToElement(caretEl, scrollOffset)
+            await scrollToElement(caretEl, scrollOffset, scrollBehavior)
           }
         }
       }
@@ -340,7 +366,16 @@ export const LivePreviewInspectorListener: React.FC<LivePreviewInspectorListener
       clearTimeout(echoTimer)
       revealGeneration += 1
     }
-  }, [iframeRef, activeURL, accordionAnimationMs, flashColor, flashDurationMs, scrollOffset, tabSwitchWaitMs])
+  }, [
+    iframeRef,
+    activeURL,
+    accordionAnimationMs,
+    flashColor,
+    flashDurationMs,
+    scrollBehavior,
+    scrollOffset,
+    tabSwitchWaitMs,
+  ])
 
   if (!isLivePreviewing) {
     return null

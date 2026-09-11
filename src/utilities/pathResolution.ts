@@ -290,21 +290,102 @@ export const DEFAULT_TAB_SWITCH_WAIT_MS = 1500
 /** Rounds of re-querying tab buttons, so nested tabs revealed by a switch get swept too. */
 const MAX_TAB_SWEEP_ROUNDS = 4
 
-/** Resolves with `check`'s first non-null result, polling every frame up to `timeoutMs`. */
-export const waitForElement = (check: () => HTMLElement | null, timeoutMs: number): Promise<HTMLElement | null> =>
+/**
+ * How long the admin must stay completely still before a `waitForElement`
+ * that opted in stops waiting for its timeout and gives up early.
+ *
+ * Only meaningful where nothing was triggered - see `WaitForElementOptions`.
+ */
+export const IDLE_GIVE_UP_MS = 250
+
+export type WaitForElementOptions = {
+  /**
+   * Give up this many ms after the last sign of activity, even with budget
+   * left.
+   *
+   * Off by default, and it has to stay that way: a caller that just *clicked*
+   * something (a tab button, an accordion toggle) is waiting for a reaction,
+   * and silence there means "hasn't landed yet", not "nothing is coming".
+   * Payload really does mount a tab's fields a few hundred silent
+   * milliseconds after the click - there is a regression test for exactly
+   * that, from the last time this was a flat 250ms.
+   *
+   * Pass it only where the caller triggered nothing and is purely observing,
+   * so that `check` - a pure function of the DOM - provably cannot start
+   * answering differently on its own. There, spending the rest of the budget
+   * re-evaluating it once per frame buys nothing: measured against the theme
+   * playground, the last thing before the flash in five reveals out of five
+   * was such a wait burning 1200-1440ms of its 1500ms budget in complete
+   * silence, i.e. 45% of a ~3.1s reveal.
+   */
+  idleMs?: number
+}
+
+/**
+ * Resolves with `check`'s first non-null result, polling every frame up to
+ * `timeoutMs` - or until `options.idleMs` of inactivity, when the caller
+ * opted into that.
+ *
+ * "Inactivity" is deliberately wider than "no DOM mutation": a field whose
+ * chunk is still downloading has rendered its placeholder already (one
+ * mutation) and then goes quiet for as long as the network takes. A finished
+ * resource load therefore counts as activity too, which hands the mount that
+ * follows it a fresh idle window instead of being cut off mid-flight.
+ */
+export const waitForElement = (
+  check: () => HTMLElement | null,
+  timeoutMs: number,
+  { idleMs }: WaitForElementOptions = {},
+): Promise<HTMLElement | null> =>
   new Promise((resolve) => {
     const startedAt = performance.now()
+    let lastActivityAt = startedAt
+
+    const noteActivity = () => {
+      lastActivityAt = performance.now()
+    }
+
+    let mutations: MutationObserver | undefined
+    let resources: PerformanceObserver | undefined
+
+    if (idleMs !== undefined) {
+      mutations = new MutationObserver(noteActivity)
+      mutations.observe(document.documentElement, {
+        attributes: true,
+        characterData: true,
+        childList: true,
+        subtree: true,
+      })
+
+      try {
+        resources = new PerformanceObserver(noteActivity)
+        resources.observe({ entryTypes: ['resource'] })
+      } catch {
+        // Resource timing is unavailable - the mutation half still applies.
+      }
+    }
+
+    const finish = (el: HTMLElement | null) => {
+      mutations?.disconnect()
+      resources?.disconnect()
+      resolve(el)
+    }
 
     const tick = () => {
       const el = check()
       if (el) {
-        resolve(el)
+        finish(el)
         return
       }
-      if (performance.now() - startedAt >= timeoutMs) {
-        resolve(null)
+
+      const now = performance.now()
+      const idledOut = idleMs !== undefined && now - lastActivityAt >= idleMs
+
+      if (now - startedAt >= timeoutMs || idledOut) {
+        finish(null)
         return
       }
+
       requestAnimationFrame(tick)
     }
 
@@ -483,29 +564,38 @@ const waitForScrollEnd = (): Promise<void> =>
   })
 
 /**
- * Smooth-scrolls to `el` and resolves once the scroll actually finishes (via
+ * Scrolls to `el` and resolves once the scroll actually finishes (via
  * the `scrollend` event, with a timeout fallback for browsers that don't
  * fire it), or immediately if the field is already visible in the viewport.
  * Callers use this to delay revealing the field (flash/focus) until the page
  * has stopped moving. A field that's already on screen is rarely
  * pixel-perfect at `offset`, so still nudging it there is worthwhile, but
  * not worth delaying the reveal over - that nudge just happens in the
- * background. Scrolling is instant instead of animated when the user
- * prefers reduced motion.
+ * background.
+ *
+ * `preferred` chooses between animating the journey and jumping. Animating
+ * is the default because the motion is what tells the editor where the form
+ * went, but it is also the single most expensive part of a reveal - measured
+ * in the theme playground at 0.9-1.3s of a ~1.8s reveal, since the flash
+ * waits for the page to stop moving. A reduced-motion preference always
+ * wins over `preferred`.
  *
  * The initial delta is measured before the scroll runs, so anything that
  * shifts layout while a long scroll animation is in flight (an accordion
  * still rendering, images/fonts loading in) can leave the element short of
  * `offset` once it stops. Rather than requiring the user to click again,
- * this re-measures once the scroll settles and issues further corrections
- * (using the same `behavior` as the initial scroll, so a correction never
- * looks like an abrupt jump after a smooth animation) until the position
- * converges or the retry budget runs out.
+ * this re-measures once the scroll settles and issues further corrections -
+ * instant ones, see below - until the position converges or the retry budget
+ * runs out.
  */
-export const scrollToElement = async (el: HTMLElement, offset: number = DEFAULT_SCROLL_OFFSET): Promise<void> => {
+export const scrollToElement = async (
+  el: HTMLElement,
+  offset: number = DEFAULT_SCROLL_OFFSET,
+  preferred: ScrollBehavior = 'smooth',
+): Promise<void> => {
   const behavior: ScrollBehavior = window.matchMedia('(prefers-reduced-motion: reduce)').matches
     ? 'instant'
-    : 'smooth'
+    : preferred
 
   const bounds = el.getBoundingClientRect()
   const delta = bounds.top - offset
@@ -532,7 +622,17 @@ export const scrollToElement = async (el: HTMLElement, offset: number = DEFAULT_
     }
 
     const scrollYBefore = window.scrollY
-    window.scrollBy({ behavior, top: correctedDelta })
+    // Corrections are instant even when the journey above was animated.
+    // Animating them used to be the rule, so that a correction could not look
+    // like an abrupt jump at the end of a smooth scroll - but a correction is
+    // not a journey. It compensates for layout that shifted *during* the
+    // scroll (an accordion still rendering, an image arriving), so the
+    // element is already on screen and the remaining delta is small; and the
+    // animation is the expensive part. Measured in the theme playground: the
+    // scroll phase of a reveal took 0.9-1.6s, because each correction chained
+    // another ~300-500ms of smooth animation onto the previous one, with the
+    // reveal waiting on `scrollend` for every single one.
+    window.scrollBy({ behavior: 'instant', top: correctedDelta })
     await waitForScrollEnd()
 
     // The page didn't move: the target can't reach the offset at all (e.g.

@@ -65,6 +65,23 @@ describe('applyValueMatching', () => {
     expect(autoAttr(el)).toBe('match')
   })
 
+  it('never matches a value inside a script or style element', () => {
+    /*
+     * The same rule as for stega, and the reason the text walk skips those
+     * subtrees outright rather than tagging and then rejecting: a Next.js page
+     * carries its whole RSC payload in an inline `<script>`, which repeats
+     * every field value verbatim - so every value in the document appears
+     * there too, and normalizing it was most of the scan's cost.
+     */
+    document.body.innerHTML =
+      '<script id="s" type="application/json">Hello Live Preview</script>' +
+      '<style id="c">Hello Live Preview</style>'
+    applyValueMatching(document, [{ path: 'title', value: 'Hello Live Preview' }])
+
+    expect(pathAttr(document.getElementById('s'))).toBeNull()
+    expect(pathAttr(document.getElementById('c'))).toBeNull()
+  })
+
   it('normalizes whitespace and stega characters before comparing', () => {
     document.body.innerHTML = `<p id="el">  Hello${encodeStegaPath('x')}   world </p>`
     applyValueMatching(document, [{ path: 'greeting', value: 'Hello world' }])
