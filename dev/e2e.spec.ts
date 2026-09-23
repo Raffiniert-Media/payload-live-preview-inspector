@@ -18,10 +18,13 @@ const login = async (page: Page) => {
   await page.fill('#field-password', 'test')
   await page.click('.form-submit button')
   await expect(page).toHaveTitle(/Dashboard/)
+  // Every test starts with Payload's defaults: no remembered tab, no rows
+  // left expanded or collapsed by an earlier test.
+  await resetPreferences(page)
 }
 
-const openLivePreview = async (page: Page) => {
-  await page.goto('/admin/collections/posts')
+const openLivePreview = async (page: Page, collection: 'pages' | 'posts' = 'posts') => {
+  await page.goto(`/admin/collections/${collection}`)
 
   // The row link exists in the DOM before React hydration finishes, so an
   // early click can be swallowed - retry until the edit view actually loads.
@@ -29,7 +32,7 @@ const openLivePreview = async (page: Page) => {
   // plain forward navigation, not something that flips back off.
   await expect(async () => {
     await page.click('.table tbody tr:first-child a')
-    await expect(page).toHaveURL(/\/admin\/collections\/posts\/(?!create)[^/]+$/, { timeout: 3_000 })
+    await expect(page).toHaveURL(new RegExp(`/admin/collections/${collection}/(?!create)[^/]+$`), { timeout: 3_000 })
   }).toPass({ timeout: 30_000 })
 
   const toggler = page.locator('#live-preview-toggler')
@@ -52,7 +55,12 @@ const openLivePreview = async (page: Page) => {
     await expect(iframe).toBeVisible({ timeout: 3_000 })
   }).toPass({ timeout: 60_000 })
 
-  return page.frameLocator('#live-preview-iframe')
+  // Server-rendered markup is visible - and clickable - before React has
+  // attached a single handler; wait for the preview to say it's hydrated.
+  const frame = page.frameLocator('#live-preview-iframe')
+  await expect(frame.locator('main[data-hydrated]')).toBeAttached({ timeout: 30_000 })
+
+  return frame
 }
 
 test('should render admin panel logo', async ({ page }) => {
@@ -102,7 +110,7 @@ test('focusing a rich-text sub-editor in the admin form flashes its matching par
 
   const frame = await openLivePreview(page)
   const paragraph = frame.locator('[data-testid="rich-text-body"] p').first()
-  await expect(paragraph).toBeVisible()
+  await expect(paragraph).toHaveAttribute('data-payload-live-preview-path', /^body\./)
 
   await page.locator('[data-field-path="body"] [contenteditable="true"] p').first().click()
 
@@ -114,7 +122,9 @@ test('clicking a later paragraph of a rich text flashes that paragraph, not the 
 
   const frame = await openLivePreview(page)
   const paragraphs = frame.locator('[data-testid="rich-text-body"] p')
-  await expect(paragraphs.first()).toBeVisible()
+  // Tagged, not merely visible: the paragraphs are server-rendered, so they
+  // show before the preview's client script is listening for focus.
+  await expect(paragraphs.first()).toHaveAttribute('data-payload-live-preview-path', /^body\./)
 
   // Every run of a rich text is tagged with a path under the same field, so
   // the field path alone would always point at the first of them - only the
@@ -130,7 +140,9 @@ test('moving the caret within an already-focused rich text follows along in the 
 
   const frame = await openLivePreview(page)
   const paragraphs = frame.locator('[data-testid="rich-text-body"] p')
-  await expect(paragraphs.first()).toBeVisible()
+  // Tagged, not merely visible: the paragraphs are server-rendered, so they
+  // show before the preview's client script is listening for focus.
+  await expect(paragraphs.first()).toHaveAttribute('data-payload-live-preview-path', /^body\./)
 
   const editorParagraphs = page.locator('[data-field-path="body"] [contenteditable="true"] p')
   await editorParagraphs.nth(1).click()
@@ -150,7 +162,7 @@ test('clicking in the preview never scrolls the preview back (the reveal\'s own 
 
   const frame = await openLivePreview(page)
   const paragraph = frame.locator('[data-testid="rich-text-body"] p').first()
-  await expect(paragraph).toBeVisible()
+  await expect(paragraph).toHaveAttribute('data-payload-live-preview-path', /^body\./)
 
   // Record every reverse-direction flash instead of sampling for the class
   // later: it clears itself after its animation, so a plain count could pass
@@ -532,6 +544,25 @@ test('value matching: tags an element rendered from raw, unproxied data', async 
   await expect(titleField).toHaveClass(/flash/)
 })
 
+test('value matching follows an edit: the element keeps its tag after its text changes', async ({ page }) => {
+  await login(page)
+
+  const frame = await openLivePreview(page)
+  const footer = frame.locator('[data-testid="match-title"]')
+  await expect(footer).toHaveAttribute('data-payload-live-preview-path', 'title', { timeout: 15_000 })
+
+  // Not saved: only the form state changes, which is what live preview renders.
+  await page.locator('#field-title').click()
+  await page.keyboard.press('End')
+  await page.keyboard.type(' edited')
+
+  // The preview re-renders the footer with the new text; the admin pushes
+  // the new values; the stale tag is re-judged against them.
+  await expect(footer).toContainText('edited')
+  await expect(footer).toHaveAttribute('data-payload-live-preview-path', 'title')
+  await expect(footer).toHaveAttribute('data-payload-live-preview-auto', 'match')
+})
+
 test('disables link navigation inside the live preview iframe by default', async ({ page }) => {
   await login(page)
 
@@ -659,4 +690,230 @@ test('the modifier hands an in-page link to the host, without navigating', async
    * also what stops an alt-click being read as "download this".
    */
   expect(await frame.locator('body').evaluate(() => window.location.hash)).toBe('')
+})
+
+/*
+ * The complex page (`dev/collections/Pages.ts`): forty collapsed sections,
+ * tabs inside block rows, arrays in collapsed rows in collapsed rows, a named
+ * tab and a collapsible in the last tab. Every reveal here has to land on the
+ * exact field with ONE click - a second click being what an editor does when
+ * the first one seemed to do nothing - and inside a time budget, read off the
+ * `performance.measure` entry each reveal leaves behind.
+ */
+
+type RevealMeasure = { duration: number; outcome: string; path: string; phases: Record<string, number> }
+
+const REVEAL_MEASURE = 'payload-live-preview-inspector:reveal'
+
+/** Generous for CI; locally reveals on this page take a fraction of it. */
+const REVEAL_BUDGET_MS = process.env.CI ? 4_000 : 2_500
+
+const revealCount = (page: Page) =>
+  page.evaluate((name) => performance.getEntriesByName(name).length, REVEAL_MEASURE)
+
+const nextReveal = async (page: Page, before: number): Promise<RevealMeasure> => {
+  await expect.poll(() => revealCount(page), { timeout: 15_000 }).toBeGreaterThan(before)
+  return page.evaluate((name) => {
+    const entry = performance.getEntriesByName(name).at(-1) as PerformanceMeasure
+    return { duration: entry.duration, ...(entry.detail as Omit<RevealMeasure, 'duration'>) }
+  }, REVEAL_MEASURE)
+}
+
+/**
+ * Payload remembers expanded rows, open collapsibles and active tabs in the
+ * user's preferences - so without this, whatever an earlier run opened
+ * would already be open, and the reveal under test would have nothing left
+ * to do.
+ */
+const resetPreferences = async (page: Page) => {
+  const response = await page.request.delete('/api/payload-preferences?where[id][exists]=true')
+  expect(response.ok()).toBe(true)
+}
+
+const COMPLEX_TARGETS = [
+  { field: '#field-seo__metaDescription', text: 'The meta description of the complex page', why: 'named tab' },
+  { field: '#field-sections__30__heading', text: 'Feature section 31', why: 'collapsed row 31 of 40, other tab' },
+  {
+    field: '#field-sections__34__extra__caption',
+    text: 'Caption behind the named tab of section 35',
+    why: 'named tab nested in a collapsed block row',
+  },
+  {
+    field: '#field-sections__38__cards__1__points__1__label',
+    text: 'Point 2 of card 2 in section 39',
+    why: 'array in a collapsed row in a collapsed row in a collapsed row',
+  },
+  { field: '#field-faq__4__answer', text: 'The answer to frequently asked question number 5.', why: 'collapsible + collapsed row, last tab' },
+  { field: '#field-intro', text: 'An introduction to the complex page', why: 'back to the first tab' },
+]
+
+test('complex page: every field is reached with one click, exactly, within budget', async ({ page }) => {
+  test.setTimeout(process.env.CI ? 240_000 : 90_000)
+  await login(page)
+  const frame = await openLivePreview(page, 'pages')
+  await expect(frame.locator('h1[data-payload-live-preview-path="title"]')).toBeVisible()
+
+  const report: string[] = []
+  if (process.env.DEBUG_REVEALS) {
+    // eslint-disable-next-line no-console -- opt-in debugging aid
+    page.on('console', (message) => message.text().includes('live-preview-inspector') && console.log(message.text()))
+  }
+
+  for (const target of COMPLEX_TARGETS) {
+    const before = await revealCount(page)
+    const startedAt = Date.now()
+    await frame.getByText(target.text, { exact: false }).first().click()
+
+    // Click to flash, as the editor sees it - measurable against any version
+    // of the listener, which is what `BASELINE=1` is for: it records instead
+    // of asserting, so the numbers of an older build can be compared.
+    if (process.env.BASELINE) {
+      const flashed = await expect(page.locator(target.field))
+        .toHaveClass(/flash/, { timeout: 10_000 })
+        .then(() => true)
+        .catch(() => false)
+      report.push(`${flashed ? `${Date.now() - startedAt}ms` : 'NOT REACHED with one click'} - ${target.why}`)
+      continue
+    }
+
+    await expect(page.locator(target.field), target.why).toHaveClass(/flash/, { timeout: 10_000 })
+    const wall = Date.now() - startedAt
+
+    const reveal = await nextReveal(page, before)
+    const phases = Object.entries(reveal.phases)
+      .map(([name, ms]) => `${name} ${ms}`)
+      .join(' / ')
+    report.push(`${wall}ms (reveal ${Math.round(reveal.duration)}ms ${reveal.outcome}) - ${target.why} (${phases})`)
+
+    expect(reveal.outcome, target.why).toBe('exact')
+    await expect(page.locator(target.field), target.why).toBeInViewport()
+    expect(reveal.duration, target.why).toBeLessThan(REVEAL_BUDGET_MS)
+  }
+
+  test.info().annotations.push({ type: 'reveals', description: report.join('\n') })
+  // eslint-disable-next-line no-console -- the numbers are the point of this test
+  console.log(`complex page reveals:\n  ${report.join('\n  ')}`)
+})
+
+test('complex page: a second click during a reveal wins, and the first one leaves no trace', async ({ page }) => {
+  test.setTimeout(process.env.CI ? 240_000 : 90_000)
+  await login(page)
+  const frame = await openLivePreview(page, 'pages')
+  await expect(frame.locator('h1[data-payload-live-preview-path="title"]')).toBeVisible()
+
+  // First click heads for the last tab; the second, right behind it, for the
+  // sections. An un-cancelled first reveal would keep clicking tabs (and
+  // finally restore the original one) underneath the second.
+  await frame.getByText('The answer to frequently asked question number 2.').click()
+  await frame.getByText('Tabbed section 20').click()
+
+  const sectionsTab = page.locator('.tabs-field__tab-button', { hasText: 'Sections' })
+  await expect(sectionsTab).toHaveClass(/tabs-field__tab-button--active/)
+  await expect(page.locator('#field-sections__19__heading')).toBeInViewport()
+
+  // And it stays that way - nothing from the first reveal lands late.
+  await page.waitForTimeout(2_000)
+  await expect(sectionsTab).toHaveClass(/tabs-field__tab-button--active/)
+  await expect(page.locator('#field-sections__19__heading')).toBeInViewport()
+})
+
+test('complex page: a click with no field to go to says so, in the preview and in the admin', async ({ page }) => {
+  test.setTimeout(process.env.CI ? 240_000 : 90_000)
+  await login(page)
+  const frame = await openLivePreview(page, 'pages')
+  const stale = frame.locator('[data-testid="stale-row"]')
+  await expect(stale).toBeVisible()
+
+  await stale.click()
+
+  const mark = frame.locator('[data-payload-live-preview-inspector-overlay] [data-state]')
+  await expect(mark).toHaveAttribute('data-state', 'not-found')
+  await expect(mark).toContainText('Not in this form')
+  await expect(page.getByText('isn’t in this form')).toBeVisible()
+  // And then it goes - nothing is left looking busy.
+  await expect(mark).toHaveCount(0)
+})
+
+test('complex page: a click is marked at once, names its field by its admin label, and the mark goes', async ({
+  page,
+}) => {
+  test.setTimeout(process.env.CI ? 240_000 : 90_000)
+  await login(page)
+  const frame = await openLivePreview(page, 'pages')
+  // Not an exact text match: stega puts invisible characters into the text.
+  const heading = frame.locator('h2', { hasText: 'Feature section 13' })
+
+  await heading.click()
+
+  // In the preview: framed right away, with the label the admin gives the
+  // field (`label: 'Überschrift'` in the fixture, not its name).
+  const mark = frame.locator('[data-payload-live-preview-inspector-overlay] [data-state]')
+  await expect(mark).toBeVisible()
+  await expect(mark).toContainText('Überschrift')
+  // In the admin: the hint says where it's going.
+  await expect(page.getByText('→ Überschrift')).toBeVisible()
+
+  await expect(page.locator('#field-sections__12__heading')).toHaveClass(/flash/)
+  await expect(mark).toHaveCount(0)
+})
+
+test('complex page: the preview takes on the admin accent colour', async ({ page }) => {
+  await login(page)
+  await openLivePreview(page, 'pages')
+  const admin = await page.evaluate(() =>
+    getComputedStyle(document.documentElement).getPropertyValue('--theme-success-500').trim(),
+  )
+  const preview = page.frame({ url: /\/preview\/pages\// })!
+
+  await expect
+    .poll(() =>
+      preview.evaluate(() =>
+        document.documentElement.style.getPropertyValue('--payload-live-preview-inspector-accent').trim(),
+      ),
+    )
+    .toBe(admin)
+})
+
+test('complex page: focusing a field glides the preview to its element, clear of the sticky header, in one motion', async ({
+  page,
+}) => {
+  test.setTimeout(process.env.CI ? 240_000 : 90_000)
+  await login(page)
+  const frame = await openLivePreview(page, 'pages')
+  const intro = frame.locator('p[data-payload-live-preview-path="intro"]')
+  await expect(intro).toBeVisible()
+  const preview = page.frame({ url: /\/preview\/pages\// })!
+
+  // Start from the bottom of the preview, and record its scroll position on
+  // every frame from here on.
+  await preview.evaluate(() => {
+    window.scrollTo(0, document.body.scrollHeight)
+    const w = window as unknown as { __scrolls: number[] }
+    w.__scrolls = []
+    const tick = () => {
+      w.__scrolls.push(window.scrollY)
+      requestAnimationFrame(tick)
+    }
+    requestAnimationFrame(tick)
+  })
+
+  await page.locator('.tabs-field__tab-button', { hasText: 'Content' }).click()
+  await page.locator('#field-intro').click()
+  await expect(intro).toHaveClass(/focused/)
+
+  const { headerBottom, scrolls, top } = await preview.evaluate(() => ({
+    headerBottom: document.querySelector('header')!.getBoundingClientRect().bottom,
+    scrolls: (window as unknown as { __scrolls: number[] }).__scrolls,
+    top: document.querySelector('p[data-payload-live-preview-path="intro"]')!.getBoundingClientRect().top,
+  }))
+
+  // Landed below the header, not behind it...
+  expect(top).toBeGreaterThanOrEqual(headerBottom)
+  expect(top).toBeLessThan(headerBottom + 40)
+  // ...on the way there, not with a correction after: the page only ever
+  // moved up, and never by more than the glide itself does in a frame.
+  const steps = scrolls.slice(1).map((y, i) => y - scrolls[i]).filter((step) => step !== 0)
+  expect(steps.every((step) => step < 0)).toBe(true)
+  const lastSteps = steps.slice(-3).map(Math.abs)
+  expect(Math.max(...lastSteps)).toBeLessThan(50)
 })

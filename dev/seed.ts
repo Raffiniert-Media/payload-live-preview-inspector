@@ -1,5 +1,6 @@
 import type { Payload } from 'payload'
 
+import { seedPage } from './collections/Pages.js'
 import { devUser } from './helpers/credentials.js'
 
 const text = (value: string, format = 0) => ({
@@ -123,5 +124,15 @@ export const seed = async (payload: Payload) => {
         },
       })
     }
+  }
+
+  const { docs: pages } = await payload.find({ collection: 'pages', limit: 1 })
+  const expected = seedPage()
+
+  if (pages.length === 0) {
+    await payload.create({ collection: 'pages', data: expected })
+  } else if (pages[0].sections?.length !== expected.sections.length) {
+    // A dev database from before the fixture grew - bring it up to date.
+    await payload.update({ id: pages[0].id, collection: 'pages', data: expected })
   }
 }

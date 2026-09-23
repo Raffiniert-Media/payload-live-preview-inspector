@@ -4,7 +4,10 @@ import { applyCaretHint } from './caret.js'
 import { isRowIDSegment, rowIDFromSegment, rowIDSegment } from './pathAttribute.js'
 
 /** Structurally compatible with `@payloadcms/ui`'s `FormState`, without depending on it. */
-export type MinimalFormState = Record<string, { rows?: Array<{ id: string }>; value?: unknown } | undefined>
+export type MinimalFormState = Record<
+  string,
+  { rows?: Array<{ blockType?: string; collapsed?: boolean; id: string }>; value?: unknown } | undefined
+>
 
 /** A string-valued form field, addressed by a `$rowId`-based path. */
 export type DocumentLeafValue = { path: string; value: string }
@@ -243,10 +246,21 @@ const collectTextRuns = (value: unknown, out: string[]): void => {
  * rich-text value matches back to the rich-text field. Sent to the iframe
  * for value matching.
  */
+/**
+ * Row bookkeeping every Array/Blocks row carries in form state. Never content:
+ * a `blockType` is shared by every block of its kind, so it could only ever be
+ * an ambiguous match, and was sent - and logged as skipped - for every row.
+ */
+const STRUCTURAL_KEYS = new Set(['blockType', 'id'])
+
 export const collectLeafValues = (formState: MinimalFormState): DocumentLeafValue[] => {
   const leaves: DocumentLeafValue[] = []
 
   for (const [path, field] of Object.entries(formState)) {
+    if (STRUCTURAL_KEYS.has(path.slice(path.lastIndexOf('.') + 1))) {
+      continue
+    }
+
     const value = field?.value
 
     if (typeof value === 'string') {
@@ -319,6 +333,8 @@ export type WaitForElementOptions = {
    * silence, i.e. 45% of a ~3.1s reveal.
    */
   idleMs?: number
+  /** Resolves `null` as soon as this aborts - a newer reveal took over. */
+  signal?: AbortSignal
 }
 
 /**
@@ -335,9 +351,14 @@ export type WaitForElementOptions = {
 export const waitForElement = (
   check: () => HTMLElement | null,
   timeoutMs: number,
-  { idleMs }: WaitForElementOptions = {},
+  { idleMs, signal }: WaitForElementOptions = {},
 ): Promise<HTMLElement | null> =>
   new Promise((resolve) => {
+    if (signal?.aborted) {
+      resolve(null)
+      return
+    }
+
     const startedAt = performance.now()
     let lastActivityAt = startedAt
 
@@ -365,11 +386,18 @@ export const waitForElement = (
       }
     }
 
+    let frame = 0
+
     const finish = (el: HTMLElement | null) => {
       mutations?.disconnect()
       resources?.disconnect()
+      cancelAnimationFrame(frame)
+      signal?.removeEventListener('abort', onAbort)
       resolve(el)
     }
+
+    const onAbort = () => finish(null)
+    signal?.addEventListener('abort', onAbort, { once: true })
 
     const tick = () => {
       const el = check()
@@ -386,7 +414,7 @@ export const waitForElement = (
         return
       }
 
-      requestAnimationFrame(tick)
+      frame = requestAnimationFrame(tick)
     }
 
     tick()
@@ -408,6 +436,7 @@ export const revealTabForElement = async (
   check: () => HTMLElement | null,
   tabRenderWaitMs: number = DEFAULT_TAB_SWITCH_WAIT_MS,
   root: Document | HTMLElement = document,
+  signal?: AbortSignal,
 ): Promise<HTMLElement | null> => {
   const found = check()
   if (found) {
@@ -429,14 +458,24 @@ export const revealTabForElement = async (
     }
 
     for (const button of buttons) {
+      if (signal?.aborted) {
+        // A newer reveal owns the tabs now - restoring the original ones
+        // here would undo whatever tab *it* just switched to.
+        return null
+      }
+
       clicked.add(button)
       button.click()
 
-      const el = await waitForElement(check, tabRenderWaitMs)
+      const el = await waitForElement(check, tabRenderWaitMs, { signal })
       if (el) {
         return el
       }
     }
+  }
+
+  if (signal?.aborted) {
+    return null
   }
 
   for (const button of originallyActive) {
@@ -493,12 +532,17 @@ export const expandCollapsedAncestors = (el: HTMLElement): boolean => {
 export const waitForElementLayout = (
   el: HTMLElement,
   timeoutMs: number = DEFAULT_COLLAPSIBLE_ANIMATION_MS,
+  signal?: AbortSignal,
 ): Promise<void> =>
   new Promise((resolve) => {
     const startedAt = performance.now()
 
     const check = () => {
-      if (el.getBoundingClientRect().height > 0 || performance.now() - startedAt >= timeoutMs) {
+      if (
+        signal?.aborted ||
+        el.getBoundingClientRect().height > 0 ||
+        performance.now() - startedAt >= timeoutMs
+      ) {
         resolve()
         return
       }
@@ -545,7 +589,7 @@ const waitForStablePosition = (el: HTMLElement): Promise<void> =>
     requestAnimationFrame(tick)
   })
 
-export const waitForScrollEnd = (): Promise<void> =>
+export const waitForScrollEnd = (signal?: AbortSignal): Promise<void> =>
   new Promise((resolve) => {
     let settled = false
 
@@ -555,12 +599,19 @@ export const waitForScrollEnd = (): Promise<void> =>
       }
       settled = true
       window.removeEventListener('scrollend', settle)
+      signal?.removeEventListener('abort', settle)
       clearTimeout(fallback)
       resolve()
     }
 
+    if (signal?.aborted) {
+      settle()
+      return
+    }
+
     const fallback = setTimeout(settle, SCROLL_END_FALLBACK_MS)
     window.addEventListener('scrollend', settle, { once: true })
+    signal?.addEventListener('abort', settle, { once: true })
   })
 
 /**
@@ -677,85 +728,278 @@ export const uncover = async (el: HTMLElement): Promise<void> => {
   }
 }
 
+/** What a scroll heads for: an element, or a getter asked afresh every frame. */
+export type ScrollTarget = (() => HTMLElement | null) | HTMLElement
+
 /**
- * Scrolls to `el` and resolves once the scroll actually finishes (via
- * the `scrollend` event, with a timeout fallback for browsers that don't
- * fire it), or immediately if the field is already visible in the viewport.
- * Callers use this to delay revealing the field (flash/focus) until the page
- * has stopped moving. A field that's already on screen is rarely
- * pixel-perfect at `offset`, so still nudging it there is worthwhile, but
- * not worth delaying the reveal over - that nudge just happens in the
- * background.
+ * Where the target should end up, in pixels below the viewport top - a
+ * number, or a getter asked afresh every frame (the preview's sticky header
+ * can grow, shrink or hide while the page moves).
+ */
+export type ScrollOffset = (() => number) | number
+
+const resolveScrollTarget = (target: ScrollTarget): HTMLElement | null =>
+  typeof target === 'function' ? target() : target
+
+const resolveOffset = (offset: ScrollOffset): number => (typeof offset === 'function' ? offset() : offset)
+
+/** Shortest and longest a reveal's scroll animation takes, whatever the distance. */
+const SCROLL_MIN_DURATION_MS = 250
+const SCROLL_MAX_DURATION_MS = 550
+/** Extra milliseconds per pixel travelled, between those two bounds. */
+const SCROLL_MS_PER_PX = 0.08
+/** Duration of the short glide that absorbs a shift after the main scroll. */
+const CORRECTION_DURATION_MS = 180
+/**
+ * Most animation time one frame may account for. A frame the page spent
+ * rendering (Payload mounting a row's fields mid-scroll) would otherwise be
+ * caught up in one leap; capped, the motion slows for a moment instead.
+ */
+const MAX_FRAME_MS = 34
+
+export const scrollDuration = (distance: number): number =>
+  Math.min(SCROLL_MAX_DURATION_MS, SCROLL_MIN_DURATION_MS + Math.abs(distance) * SCROLL_MS_PER_PX)
+
+const easeInOutCubic = (t: number): number => (t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2)
+
+/** Input that means the editor is scrolling for themselves. */
+const USER_SCROLL_EVENTS = ['keydown', 'touchstart', 'wheel'] as const
+
+/**
+ * Animates the page so `target` ends up `offset` below the viewport top.
  *
- * `preferred` chooses between animating the journey and jumping. Animating
- * is the default because the motion is what tells the editor where the form
- * went, but it is also the single most expensive part of a reveal - measured
- * in the theme playground at 0.9-1.3s of a ~1.8s reveal, since the flash
- * waits for the page to stop moving. A reduced-motion preference always
- * wins over `preferred`.
+ * The browser's own smooth scroll can't do what a reveal needs, measured on
+ * the complex dev page: it takes its time over long distances (0.7-0.9s for
+ * forty sections), it aims at a position fixed when it starts, and Payload
+ * shifts that position while it runs - rows expanding, deferred fields
+ * mounting as they come near. The result was a second, corrective scroll
+ * after every long one.
  *
- * The initial delta is measured before the scroll runs, so anything that
- * shifts layout while a long scroll animation is in flight (an accordion
- * still rendering, images/fonts loading in) can leave the element short of
- * `offset` once it stops. Rather than requiring the user to click again,
- * this re-measures once the scroll settles and issues further corrections -
- * instant ones, see below - until the position converges or the retry budget
- * runs out.
+ * Three things keep this one calm while the page changes under it:
+ *
+ * - Every frame moves a share of the distance that is *left*, re-measured
+ *   then. A target that shifts (or a getter that swaps in a deeper element)
+ *   bends the motion instead of making it leap - a curve over absolute
+ *   positions jumped by however far the target had moved.
+ * - Time is counted per frame and capped (`MAX_FRAME_MS`): after a frame the
+ *   main thread spent rendering, the motion resumes where it was, instead of
+ *   covering the lost time in one jump. Traced on the dev page, that jump was
+ *   up to 184px in a single frame.
+ * - The duration is short and capped, whatever the distance.
+ */
+const animateScroll = (
+  target: ScrollTarget,
+  offset: ScrollOffset,
+  signal: AbortSignal | undefined,
+  durationMs?: number,
+): Promise<void> =>
+  new Promise((resolve) => {
+    const first = resolveScrollTarget(target)
+    if (!first || signal?.aborted) {
+      resolve()
+      return
+    }
+
+    const duration = durationMs ?? scrollDuration(first.getBoundingClientRect().top - resolveOffset(offset))
+    let elapsed = 0
+    let lastFrameAt: number | undefined
+    let eased = 0
+    let frame = 0
+
+    const stop = () => {
+      cancelAnimationFrame(frame)
+      signal?.removeEventListener('abort', stop)
+      resolve()
+    }
+
+    signal?.addEventListener('abort', stop, { once: true })
+
+    const tick = (now: number) => {
+      elapsed += lastFrameAt === undefined ? 0 : Math.min(MAX_FRAME_MS, now - lastFrameAt)
+      lastFrameAt = now
+
+      const el = resolveScrollTarget(target)
+      if (!el) {
+        stop()
+        return
+      }
+
+      const progress = Math.min(1, elapsed / duration)
+      const nextEased = easeInOutCubic(progress)
+      // The share of what is left that this frame covers: the eased step
+      // relative to the eased distance still ahead. Exactly 1 on the last frame.
+      const share = progress >= 1 ? 1 : (nextEased - eased) / (1 - eased)
+      eased = nextEased
+
+      const remaining = el.getBoundingClientRect().top - resolveOffset(offset)
+      if (share > 0) {
+        window.scrollBy({ behavior: 'instant', top: remaining * share })
+      }
+
+      if (progress >= 1) {
+        stop()
+        return
+      }
+      frame = requestAnimationFrame(tick)
+    }
+
+    frame = requestAnimationFrame(tick)
+  })
+
+/** The scroll `scrollToElement` currently runs - a newer one cancels it. */
+let activeScroll: AbortController | undefined
+
+/**
+ * Scrolls to `target` and resolves once the page has stopped moving - or
+ * right away if the target is already on screen, since nudging a visible
+ * field to the exact offset isn't worth delaying its flash for; that nudge
+ * finishes in the background. Callers delay revealing the field (flash,
+ * focus) until this resolves.
+ *
+ * `preferred` chooses between animating the journey (see `animateScroll`)
+ * and jumping. A reduced-motion preference always wins over it.
+ *
+ * Once the journey ends, the target's position is watched until it holds
+ * still for a few frames and, when something mounting right after the scroll
+ * moved it again, brought back - with a short glide when animating, since a
+ * jump at the end of a smooth scroll is exactly the jolt it exists to avoid.
+ * A correction that doesn't move the page (the target sits too close to the
+ * document's end to reach `offset`) ends the loop.
+ *
+ * `untilSettled` waits for the end even when the target starts on screen -
+ * for a caller whose next step would itself move the page.
  */
 export const scrollToElement = async (
-  el: HTMLElement,
-  offset: number = DEFAULT_SCROLL_OFFSET,
+  target: ScrollTarget,
+  offset: ScrollOffset = DEFAULT_SCROLL_OFFSET,
   preferred: ScrollBehavior = 'smooth',
+  callerSignal?: AbortSignal,
+  untilSettled = false,
 ): Promise<void> => {
+  const el = resolveScrollTarget(target)
+  if (!el) {
+    return
+  }
+
+  // One scroll at a time: a scroll still finishing in the background (see
+  // below) would otherwise steer the page against this one, frame by frame.
+  activeScroll?.abort()
+  const own = new AbortController()
+  activeScroll = own
+  callerSignal?.addEventListener('abort', () => own.abort(), { once: true })
+  const { signal } = own
+
   const behavior: ScrollBehavior = window.matchMedia('(prefers-reduced-motion: reduce)').matches
     ? 'instant'
     : preferred
 
-  const bounds = el.getBoundingClientRect()
-  const delta = bounds.top - offset
-
-  if (Math.abs(delta) < SCROLL_CONVERGENCE_THRESHOLD_PX) {
+  const { top } = el.getBoundingClientRect()
+  const initialDelta = top - resolveOffset(offset)
+  if (Math.abs(initialDelta) < SCROLL_CONVERGENCE_THRESHOLD_PX) {
     return
   }
 
-  window.scrollBy({ behavior, top: delta })
-
-  const alreadyInViewport = bounds.top >= 0 && bounds.top <= window.innerHeight
-  if (alreadyInViewport) {
-    return
+  // The editor's own wheel, touch or key input ends the scroll on the spot,
+  // corrections included - steering the page against them is never right.
+  const letGo = () => own.abort()
+  for (const type of USER_SCROLL_EVENTS) {
+    window.addEventListener(type, letGo, { passive: true })
   }
 
-  await waitForScrollEnd()
+  const alreadyInViewport = top >= 0 && top <= window.innerHeight
 
-  for (let attempt = 0; attempt < MAX_SCROLL_CORRECTIONS; attempt++) {
-    await waitForStablePosition(el)
-    const correctedDelta = el.getBoundingClientRect().top - offset
-
-    if (Math.abs(correctedDelta) < SCROLL_CONVERGENCE_THRESHOLD_PX) {
-      return
+  const settled = (async () => {
+    if (behavior === 'smooth') {
+      await animateScroll(target, offset, signal)
+    } else {
+      window.scrollBy({ behavior: 'instant', top: initialDelta })
     }
 
-    const scrollYBefore = window.scrollY
-    // Corrections are instant even when the journey above was animated.
-    // Animating them used to be the rule, so that a correction could not look
-    // like an abrupt jump at the end of a smooth scroll - but a correction is
-    // not a journey. It compensates for layout that shifted *during* the
-    // scroll (an accordion still rendering, an image arriving), so the
-    // element is already on screen and the remaining delta is small; and the
-    // animation is the expensive part. Measured in the theme playground: the
-    // scroll phase of a reveal took 0.9-1.6s, because each correction chained
-    // another ~300-500ms of smooth animation onto the previous one, with the
-    // reveal waiting on `scrollend` for every single one.
-    window.scrollBy({ behavior: 'instant', top: correctedDelta })
-    await waitForScrollEnd()
+    for (let attempt = 0; attempt < MAX_SCROLL_CORRECTIONS; attempt++) {
+      if (signal.aborted) {
+        return
+      }
 
-    // The page didn't move: the target can't reach the offset at all (e.g.
-    // it sits near the bottom of the document). Retrying would just burn
-    // the remaining attempts against the scrollend fallback timeout.
-    if (Math.abs(window.scrollY - scrollYBefore) < SCROLL_CONVERGENCE_THRESHOLD_PX) {
-      return
+      const current = resolveScrollTarget(target)
+      if (!current) {
+        return
+      }
+
+      await waitForStablePosition(current)
+      const correctedDelta = current.getBoundingClientRect().top - resolveOffset(offset)
+
+      if (Math.abs(correctedDelta) < SCROLL_CONVERGENCE_THRESHOLD_PX || signal.aborted) {
+        return
+      }
+
+      const scrollYBefore = window.scrollY
+      if (behavior === 'smooth') {
+        await animateScroll(target, offset, signal, CORRECTION_DURATION_MS)
+      } else {
+        window.scrollBy({ behavior: 'instant', top: correctedDelta })
+      }
+
+      if (Math.abs(window.scrollY - scrollYBefore) < SCROLL_CONVERGENCE_THRESHOLD_PX) {
+        return
+      }
     }
+  })()
+
+  void settled.finally(() => {
+    for (const type of USER_SCROLL_EVENTS) {
+      window.removeEventListener(type, letGo)
+    }
+  })
+
+  if (untilSettled || !alreadyInViewport) {
+    await settled
   }
+}
+
+/**
+ * How far down from the viewport top the page is covered by bars that stay
+ * put while it scrolls - a sticky site header, a fixed cookie bar above it -
+ * over `el`'s column. `0` when nothing is.
+ *
+ * Asked of the page rather than configured, for the same reason as
+ * `hiddenBehindOverlay`: the height of a site's header is not something this
+ * plugin can know. Bars stacked on top of each other are followed down, one
+ * probe below the last.
+ */
+export const topInset = (el: HTMLElement): number => {
+  const rect = el.getBoundingClientRect()
+  const x = Math.min(window.innerWidth - 1, Math.max(0, Math.round(rect.left + Math.min(rect.width, 200) / 2)))
+  let inset = 0
+
+  for (let bar = 0; bar < 3; bar++) {
+    const painted = document.elementFromPoint(x, inset + 1)
+    if (!painted || painted === el || el.contains(painted)) {
+      break
+    }
+
+    let node: Element | null = painted
+    let bottom = 0
+    while (node && node !== document.body && node !== document.documentElement) {
+      const { position } = window.getComputedStyle(node)
+      if ((position === 'fixed' || position === 'sticky') && !node.contains(el)) {
+        const box = node.getBoundingClientRect()
+        // A backdrop reaching the viewport's bottom covers everything -
+        // scrolling cannot get out from under it.
+        if (box.bottom < window.innerHeight) {
+          bottom = box.bottom
+        }
+        break
+      }
+      node = node.parentElement
+    }
+
+    if (bottom <= inset) {
+      break
+    }
+    inset = bottom
+  }
+
+  return inset
 }
 
 const FOCUSABLE_SELECTOR = 'input, textarea, select, [contenteditable="true"]'

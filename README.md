@@ -8,7 +8,7 @@ This plugin does **not** set up Live Preview itself. It adds the click-to-scroll
 
 ## How it works
 
-`LivePreviewInspectorClient` (in your frontend) highlights the tagged element under the pointer and, on click, posts its field path to the admin panel. `LivePreviewInspectorListener` (auto-registered by the plugin) resolves that path against the live form state and reveals the field: it switches to the right tab, expands collapsed Array/Blocks rows, scrolls, then flashes and focuses the field. Targeting is point-based and picks the smallest tagged element, so text stays clickable even beneath a full-card overlay link.
+`LivePreviewInspectorClient` (in your frontend) highlights the tagged element under the pointer and, on click, posts its field path to the admin panel. `LivePreviewInspectorListener` (auto-registered by the plugin) resolves that path against the live form state and reveals the field. It reads the route there off the collection's field config rather than finding it by trial: which tabs to switch to (nested and named ones too), which collapsible fields to open, and which Array/Blocks rows to expand, all rows in one step through the form state. It then scrolls, flashes and focuses the field. A newer click cancels a reveal still in flight. Targeting is point-based and picks the smallest tagged element, so text stays clickable even beneath a full-card overlay link.
 
 Clicking text also carries the **position within it**, so the cursor lands on the word you clicked rather than at the start of the field — which for a long rich-text field would mean hunting for the spot again. Preview and admin never share the same markup, so the position travels as the surrounding text with an offset into it (invisible stega characters stripped, whitespace collapsed), which the listener maps back onto whichever text node holds it in the editor. Rich text (Lexical) gets a real caret; `text`/`textarea` inputs get their selection set. Like targeting, this sees through covering overlays. When the text can't be found — a stale preview, an edited value — focusing falls back to the start of the field as before.
 
@@ -64,7 +64,7 @@ export default buildConfig({
 })
 ```
 
-Optional overrides (defaults shown): `flashColor: '#3fb950'`, `flashDurationMs: 1200`, `scrollOffset: 100`, `scrollBehavior: 'smooth'`, `accordionAnimationMs: 350`, `tabSwitchWaitMs: 1500` (max wait for freshly mounting fields — per candidate tab during a tab search, and after scrolling toward a field that hasn't rendered yet; raise it if very heavy tabs get skipped).
+Optional overrides (defaults shown): `flashColor` (Payload's accent, `--theme-success-500`), `flashDurationMs: 1200`, `scrollOffset: 100`, `scrollBehavior: 'smooth'`, `accordionAnimationMs: 350`, `tabSwitchWaitMs: 1500` (max wait for freshly mounting fields after a tab switch, an expansion or a scroll; raise it if very heavy tabs get skipped).
 
 ### 2. Frontend
 
@@ -134,7 +134,7 @@ Trade-off: encoded strings contain extra characters — `===` against literals f
 
 ### 3. Value matching — zero-config
 
-On by default — the client asks the admin panel for the document's current string values and tags any element whose entire text equals exactly one field's value. Rich-text fields contribute their individual text runs, mapped back to their editor. Deliberately conservative: values shared by several fields (e.g. a hero title duplicated into the SEO title) are never matched, values under 3 characters are ignored, and only whole-element matches count. In development, the preview console logs each skipped ambiguous value with the colliding field paths. Set `valueMatching={false}` to turn it off.
+On by default — the client asks the admin panel for the document's current string values (the admin then pushes them again whenever they change) and tags any element whose entire text equals exactly one field's value; when an element's text changes, its tag is judged again. Rich-text fields contribute their individual text runs, mapped back to their editor. Deliberately conservative: values shared by several fields (e.g. a hero title duplicated into the SEO title) are never matched, values under 3 characters are ignored, and only whole-element matches count. In development, the preview console logs each skipped ambiguous value with the colliding field paths. Set `valueMatching={false}` to turn it off.
 
 ### Container inference
 
@@ -145,6 +145,8 @@ Elements whose paths share an Array/Blocks row prefix vote for their closest com
 A click that resolves to a field **only** reveals that field. The page's own handler never runs, so a card does not open its dialog, a popup trigger does not open its popup and a carousel arrow does not advance — click-to-field means one thing happens, not two. Pass `disableInteractions={false}` to get the old behaviour, where a click did both.
 
 **Hold ⌥/Alt to operate the page instead.** The click is then an ordinary click and no field is revealed, which is how an editor opens a dialog, steps a carousel or expands an accordion to look at what is inside it — and the only way to reach that content in order to click into *it*. `interactionModifier` picks the key (`'alt' | 'ctrl' | 'meta' | 'shift' | 'none'`); `'none'` removes the escape hatch. The hint in the document controls names whichever key is configured, because the iframe reports its setting to the admin — so an editor can find it without reading this file.
+
+A click is answered in the frame it happens in: the element is framed and tinted, a ripple spreads from the pointer, and a chip names the field by the label the admin shows for it (`→ Überschrift`). The admin's hint says the same while it gets there, briefly highlighting each tab it switches to and each row it expands, and the field arrives with a glow. If the admin has no field to go to (a row deleted after the preview rendered), the mark turns red and says so. All of it takes the admin's accent colour (Payload's `--theme-success-500`, light or dark theme).
 
 A click that resolves to **no** field is never taken. Anything outside the edited document — a header, a cookie banner — keeps working exactly as it does for a visitor. The rule is that the inspector only claims a click it can answer with a field.
 
@@ -212,8 +214,8 @@ From `/listener`: `LivePreviewInspectorListener` — admin-side; the plugin regi
 ## Known limitations
 
 - Fields that only render inside a relationship's edit drawer aren't reachable — the click silently no-ops. Same for a row deleted after the preview was rendered.
-- `scrollBehavior: 'instant'` trades the scroll animation for responsiveness. The animation is the single largest cost of a reveal, because the flash and the caret only land once the form has stopped moving: measured on a twelve-section page, five reveals took 1025/134/721/722/724 ms with `'instant'` against 1841/1025/1603/1723/1864 ms with the default `'smooth'`. The flash is what tells an editor where the form went either way. A `prefers-reduced-motion` preference is honoured regardless of this setting.
-- Finding a field in another tab clicks through the form's tabs (originals restored when nothing is found). Fields that mount slower than `tabSwitchWaitMs` after a tab switch or scroll can make the reveal settle on the nearest parent — raise the option for very heavy forms.
+- `scrollBehavior: 'instant'` trades the scroll animation (250-550ms, capped) for responsiveness; the flash and the caret land once the form has stopped moving. A `prefers-reduced-motion` preference is honoured regardless of this setting.
+- The route to a field comes from the field config. Where the config can't tell it (a field rendered by a custom component, a tab with nothing identifiable in it), the reveal falls back to clicking through the form's tabs, restoring the originals when nothing is found. Fields that mount slower than `tabSwitchWaitMs` can make the reveal settle on the nearest parent — raise the option for very heavy forms.
 - Multi-locale setups or drawer-duplicated fields can get suffixed DOM ids; the `field-<path>` lookup may occasionally miss there.
 - Stega only reaches values rendered as text (or `alt`/`title`/`aria-label`/`placeholder`) with two or more words; string operations that reshape a value (`slice()`, regexes) destroy the tag — the element is then untagged, never mistagged. Copied preview text carries the invisible characters (preview-only).
 - Value matching needs exact whole-element equality with exactly one field's value — formatted dates, truncated teasers, and duplicated values don't match, by design.
@@ -232,6 +234,8 @@ pnpm dev        # http://localhost:3000/admin - dev@payloadcms.com / test
 pnpm test:int   # vitest unit tests
 pnpm test:e2e   # playwright - full hover/click/scroll/flash flow
 ```
+
+`/admin/collections/pages` holds the complex page fixture (`dev/collections/Pages.ts`): forty collapsed sections, tabs inside block rows, arrays in collapsed rows and a collapsible in the last tab. The e2e suite holds every reveal on it to one click and a time budget. Every reveal leaves a `performance.measure` entry (`payload-live-preview-inspector:reveal`, with per-phase timings in `detail`) and logs its breakdown to the console in development. `BASELINE=1 pnpm test:e2e -g "complex page"` records click-to-flash times without asserting them, for comparing another build.
 
 ## About
 

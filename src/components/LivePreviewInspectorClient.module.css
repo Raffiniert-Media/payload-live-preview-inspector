@@ -1,6 +1,12 @@
+/*
+ * Every colour here is the admin's accent, which the admin sends on load
+ * (Payload's `--theme-success-500`), or `hoverColor` when configured. The
+ * fallback is Payload's default accent, so the first paint already matches.
+ */
+
 .hovered {
   cursor: pointer;
-  outline: 2px dashed #3fb950;
+  outline: 2px dashed var(--payload-live-preview-inspector-accent, #1587ba);
   outline-offset: 2px;
 }
 
@@ -10,10 +16,158 @@
 
 @keyframes payload-live-preview-inspector-focus-flash {
   0% {
-    outline: 2px solid var(--payload-live-preview-inspector-focus-color, #3fb950);
+    box-shadow: 0 0 0 6px color-mix(in srgb, var(--payload-live-preview-inspector-accent, #1587ba) 25%, transparent);
+    outline: 2px solid var(--payload-live-preview-inspector-accent, #1587ba);
     outline-offset: 2px;
   }
   100% {
+    box-shadow: 0 0 0 12px transparent;
     outline-color: transparent;
+  }
+}
+
+/* The click overlay: a layer over the page, never styles on the page's own markup. */
+.layer {
+  inset: 0;
+  pointer-events: none;
+  position: fixed;
+  z-index: 2147483647;
+}
+
+.box {
+  background: color-mix(in srgb, var(--payload-live-preview-inspector-accent, #1587ba) 10%, transparent);
+  border-radius: 3px;
+  left: 0;
+  outline: 2px solid var(--payload-live-preview-inspector-accent, #1587ba);
+  outline-offset: 2px;
+  overflow: visible;
+  position: absolute;
+  top: 0;
+  animation: payload-live-preview-inspector-press 180ms ease-out;
+}
+
+/* Clips the ripple to the box, while the chip may sit outside it. */
+.clip {
+  border-radius: inherit;
+  inset: 0;
+  overflow: hidden;
+  position: absolute;
+}
+
+.box[data-state='pending'] {
+  animation:
+    payload-live-preview-inspector-press 180ms ease-out,
+    payload-live-preview-inspector-pending 1s ease-in-out 180ms infinite;
+}
+
+.box[data-state='done'] {
+  /* Stays long enough to read where the click went, then fades. */
+  animation: payload-live-preview-inspector-done 400ms ease-out 700ms forwards;
+}
+
+.box[data-state='not-found'] {
+  --payload-live-preview-inspector-accent: #d73a49;
+  animation: payload-live-preview-inspector-not-found 0.6s ease-out, payload-live-preview-inspector-done 400ms ease-out 1s forwards;
+  outline-style: dashed;
+}
+
+.ripple {
+  animation: payload-live-preview-inspector-ripple 500ms ease-out forwards;
+  background: radial-gradient(
+    circle,
+    color-mix(in srgb, var(--payload-live-preview-inspector-accent, #1587ba) 30%, transparent) 0%,
+    transparent 70%
+  );
+  border-radius: 50%;
+  position: absolute;
+  transform: scale(0);
+}
+
+.chip {
+  background: var(--payload-live-preview-inspector-accent, #1587ba);
+  border-radius: 4px;
+  bottom: calc(100% + 6px);
+  box-shadow: 0 2px 8px rgb(0 0 0 / 18%);
+  color: #fff;
+  font: 500 12px/1.4 system-ui, -apple-system, 'Segoe UI', sans-serif;
+  left: -2px;
+  max-width: min(320px, 90vw);
+  opacity: 0;
+  overflow: hidden;
+  padding: 3px 8px;
+  position: absolute;
+  text-overflow: ellipsis;
+  transform: translateY(4px);
+  transition:
+    opacity 140ms ease-out,
+    transform 140ms ease-out;
+  white-space: nowrap;
+}
+
+.chip::before {
+  content: '→ ';
+}
+
+.chip[data-visible='true'] {
+  opacity: 1;
+  transform: none;
+}
+
+.box[data-chip-inside='true'] .chip {
+  bottom: auto;
+  top: 6px;
+  left: 6px;
+}
+
+.box[data-state='not-found'] .chip::before {
+  content: '';
+}
+
+@keyframes payload-live-preview-inspector-press {
+  0% {
+    outline-offset: 6px;
+    outline-color: transparent;
+  }
+  100% {
+    outline-offset: 2px;
+  }
+}
+
+@keyframes payload-live-preview-inspector-pending {
+  50% {
+    background: color-mix(in srgb, var(--payload-live-preview-inspector-accent, #1587ba) 18%, transparent);
+  }
+}
+
+@keyframes payload-live-preview-inspector-done {
+  100% {
+    background: transparent;
+    opacity: 0;
+    outline-color: transparent;
+  }
+}
+
+@keyframes payload-live-preview-inspector-ripple {
+  60% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1);
+  }
+}
+
+@keyframes payload-live-preview-inspector-not-found {
+  0%,
+  100% {
+    translate: 0;
+  }
+  20%,
+  60% {
+    translate: -3px;
+  }
+  40%,
+  80% {
+    translate: 3px;
   }
 }

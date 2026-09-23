@@ -13,7 +13,7 @@ export type PayloadLivePreviewInspectorConfig = {
   disabled?: boolean
   /**
    * Flash outline/background color shown when scrolling to a field.
-   * @default '#3fb950'
+   * Defaults to the admin's accent colour (Payload's `--theme-success-500`).
    */
   flashColor?: string
   /**
@@ -30,11 +30,11 @@ export type PayloadLivePreviewInspectorConfig = {
    * (`'smooth'`) or jumps straight there (`'instant'`).
    *
    * The animation shows an editor where the form went, which is why it is the
-   * default - but it is also the slowest part of a reveal: the flash and the
-   * cursor only land once the page has stopped moving. Measured on a
-   * twelve-section page, the animation alone was 0.9-1.3s of a ~1.8s reveal.
-   * Choose `'instant'` where responsiveness matters more than the motion. A
-   * reduced-motion preference is honoured either way.
+   * default. It is short and capped (250-550ms, whatever the distance) and
+   * follows the field while Payload shifts the layout under it, but the flash
+   * and the cursor still wait for it to end. Choose `'instant'` where
+   * responsiveness matters more than the motion. A reduced-motion preference
+   * is honoured either way.
    * @default 'smooth'
    */
   scrollBehavior?: 'instant' | 'smooth'

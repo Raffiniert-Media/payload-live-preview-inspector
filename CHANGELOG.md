@@ -1,5 +1,109 @@
 # Changelog
 
+## 1.12.0
+
+### One click reaches any field, on complex pages too
+
+Measured on the new complex-page fixture (`dev/collections/Pages.ts`: forty
+collapsed sections, tabs inside block rows, arrays in collapsed rows in
+collapsed rows, a collapsible in the last tab), click to flash, one click each:
+
+| Target | Before | After |
+| --- | --- | --- |
+| Field in collapsed section 31 of 40, other tab | 2903 ms | 940 ms |
+| Array item three collapsed levels deep | 2904 ms | 982 ms |
+| Array row inside a collapsed collapsible, last tab | **not reached** | 398 ms |
+| Named tab | 1972 ms | 183 ms |
+
+(Wall-clock time as seen by Playwright, including its own polling. The reveal
+itself, per its `performance.measure` entry, took 583 ms for the deepest case.)
+
+- **The route comes from the field config.** The listener used to find a
+  field's tab by clicking through tabs and waiting up to `tabSwitchWaitMs` on
+  each one. It now plans the route from the collection's client field config
+  and the form state: which tab of which tabs field (nested tabs inside block
+  rows included, told apart per row), which collapsible fields to open and
+  which rows to expand. The tab search is left as a fallback for what the
+  config can't explain.
+- **Rows expand in one step.** Every collapsed row on the way is expanded
+  through the form state (`SET_ROW_COLLAPSED`) at once, not one toggle click
+  per level, each waiting for the previous one to render.
+- **Collapsible fields open.** A closed collapsible keeps its content at
+  `display: none`, so Payload never mounted the fields inside it, and a reveal
+  had nothing to find. Its toggle is now part of the plan.
+- **A second click cancels the first.** Each reveal gets an `AbortController`.
+  Before, an older reveal's tab search went on clicking tabs underneath the
+  newer one, and finally "restored" the original tab over it.
+- **The scroll follows the field.** The browser's smooth scroll took up to
+  ~0.9 s over long distances and aimed at a position fixed at the start, which
+  Payload then moved by mounting fields on the way, so a second scroll was
+  needed after it. The scroll is now a short, capped animation (250-550 ms)
+  that re-measures its target on every frame and steers toward the deepest
+  part of the path that has mounted so far. The editor's own wheel, touch or
+  key input ends it.
+- **Reveals are measurable.** Each reveal leaves a `performance.measure`
+  entry with per-phase timings, logged in development.
+
+### A click is answered the moment it happens
+
+Before, the first ~250 ms after a click showed nothing - the admin was switching
+tabs and expanding rows, often out of view, before anything moved.
+
+- **In the preview, at once:** the element is framed and tinted, a ripple
+  spreads from the pointer, and a chip names the field by the label the admin
+  shows for it (`→ Überschrift`), sent back with the admin's first reply. Drawn
+  in an overlay layer of its own, never onto the page's markup.
+- **In the admin, at once:** when the field is in the current tab, the scroll
+  starts with the click and bends onto the field as it mounts, instead of
+  waiting for the rows to expand first. Each tab switched to and row expanded
+  glows briefly, the hint names the target, and the field arrives with a glow.
+- **In the admin's colours:** the preview's marks and the admin flash take
+  Payload's accent (`--theme-success-500`, light or dark theme) unless
+  `hoverColor` / `flashColor` are set.
+
+### Both directions glide, without a jolt at the end
+
+Traced frame by frame on the complex page:
+
+- **Preview: no more header jump.** The preview scrolled to the element and
+  *then* out from under the sticky header - a 570px leap after the page had
+  stopped. It now asks the page for the header's height on every frame of the
+  scroll (`topInset`, bars stacked on top of each other included) and lands
+  clear of it in one motion. An element already fully in view stays put.
+- **Admin: no catch-up leaps.** A frame Payload spends rendering (mounting a
+  row's fields mid-scroll) used to be caught up in one jump of up to 184px;
+  animation time is now capped per frame, so the motion slows for a moment
+  instead (largest frame-to-frame change on the grid target: 184px → 47px).
+- **Moves by what is left, not along a fixed curve.** Every frame covers a
+  share of the distance still remaining, re-measured then, so a target that
+  shifts bends the motion instead of teleporting it.
+- **Corrections glide.** A shift after the scroll (a field mounting right
+  after arrival) is taken up by a short glide instead of a jump.
+
+### A click answers at once, and says so when it can't
+
+- The clicked element pulses while the admin reveals its field. When there is
+  no field to go to (a row deleted after the preview rendered), it shakes red
+  and the admin's hint says why, instead of nothing happening at all.
+  (`REVEAL_STATUS_MESSAGE_TYPE`; an older admin simply sends no status and the
+  mark goes after 400 ms.)
+
+### Auto-tagging is incremental
+
+- After the first pass, only what a mutation touched is tagged again: added
+  subtrees are scanned, elements whose text changed have their own tag
+  re-judged. That also fixes **stale tags**: React reuses DOM nodes, so an
+  element kept the stega/match tag of its *old* text after an edit.
+- The admin pushes document values when they change (debounced, only when
+  different) instead of the preview requesting the whole form after every
+  render batch. `blockType` and `id` are no longer sent: they are never
+  content, and every block type was logged as an ambiguous value.
+- Container inference is linear in tags × depth instead of rows × tags, and
+  recomputed from scratch so a container can't outlive the leaves it came from.
+- Measured while typing 32 characters on the complex page, script time went
+  from ~462 ms to ~425 ms. On that page the typing cost is mostly Payload and
+  React; larger preview DOMs are where the difference grows.
+
 ## 1.11.1
 
 ### The preview no longer parks a field behind the site's sticky header

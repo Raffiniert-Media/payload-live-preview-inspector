@@ -6,6 +6,7 @@ import { buildConfig } from 'payload'
 import sharp from 'sharp'
 import { fileURLToPath } from 'url'
 
+import { Pages } from './collections/Pages.js'
 import { testEmailAdapter } from './helpers/testEmailAdapter.js'
 import { seed } from './seed.js'
 
@@ -31,8 +32,9 @@ export default buildConfig({
         { name: 'mobile', height: 667, label: 'Mobile', width: 375 },
         { name: 'desktop', height: 900, label: 'Desktop', width: 1440 },
       ],
-      collections: ['posts'],
-      url: ({ data }) => `http://localhost:3000/preview/posts/${data.id}`,
+      collections: ['posts', 'pages'],
+      url: ({ collectionConfig, data }) =>
+        `http://localhost:3000/preview/${collectionConfig?.slug ?? 'posts'}/${data.id}`,
     },
   },
   collections: [
@@ -121,6 +123,7 @@ export default buildConfig({
         },
       ],
     },
+    Pages,
     {
       slug: 'media',
       fields: [],
@@ -153,6 +156,7 @@ export default buildConfig({
   plugins: [
     payloadLivePreviewInspector({
       collections: {
+        pages: true,
         posts: true,
       },
       globals: {

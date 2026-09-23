@@ -2,6 +2,7 @@
 
 import { useLivePreview } from '@payloadcms/live-preview-react'
 import { RichText } from '@payloadcms/richtext-lexical/react'
+import { useEffect, useState } from 'react'
 
 /**
  * A host page that wants the same clicks, registered the way a real one is.
@@ -59,6 +60,11 @@ const Layer = ({ children }: { children: string }) => (
 )
 
 export const PreviewClient = ({ initialData }: Props) => {
+  // For the e2e suite: set once hydrated. Effects run child-first, so the
+  // inspector (a child) is listening by the time this is.
+  const [hydrated, setHydrated] = useState(false)
+  useEffect(() => setHydrated(true), [])
+
   const { data } = useLivePreview<Post>({
     initialData,
     serverURL: 'http://localhost:3000',
@@ -70,7 +76,7 @@ export const PreviewClient = ({ initialData }: Props) => {
   const page = inspectable(data, { stega: true })
 
   return (
-    <main style={{ fontFamily: 'sans-serif', margin: '0 auto', maxWidth: 640, padding: '2rem' }}>
+    <main data-hydrated={hydrated || undefined} style={{ fontFamily: 'sans-serif', margin: '0 auto', maxWidth: 640, padding: '2rem' }}>
       <LivePreviewInspectorClient />
       <aside
         style={{

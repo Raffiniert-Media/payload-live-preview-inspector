@@ -200,6 +200,24 @@ describe('revealTabForElement', () => {
     expect(meta.classList.contains('tabs-field__tab-button--active')).toBe(false)
   })
 
+  it('stops clicking and restores nothing once a newer reveal aborts it', async () => {
+    const [content, meta, seo] = buildTabs(['Content', 'Meta', 'SEO'], 0)
+    const controller = new AbortController()
+    const clicks: string[] = []
+    for (const button of [content, meta, seo]) {
+      button.addEventListener('click', () => clicks.push(button.textContent ?? ''))
+    }
+    // The newer reveal takes over while the sweep waits on the first tab.
+    meta.addEventListener('click', () => setTimeout(() => controller.abort(), 5))
+
+    const el = await revealTabForElement(() => document.getElementById('field-missing'), 200, document, controller.signal)
+
+    expect(el).toBeNull()
+    // Neither the next tab nor the restoring click on "Content" - either
+    // would undo the tab the newer reveal just switched to.
+    expect(clicks).toEqual(['Meta'])
+  })
+
   it('defaults to a generous per-tab wait (1500ms), not a couple of frames', () => {
     // Regression guard: a too-short default (250ms) let the sweep give up on
     // the correct tab before a heavier tab's fields (rich-text editors,
@@ -368,6 +386,17 @@ describe('collectLeafValues', () => {
     expect(collectLeafValues(formState)).toEqual([{ path: 'layout.$a.nested.$x.label', value: 'Deep' }])
   })
 
+  it('skips row bookkeeping (blockType, id), which is never content', () => {
+    const formState = {
+      layout: { rows: [{ id: 'a' }] },
+      'layout.0.blockType': { value: 'hero' },
+      'layout.0.heading': { value: 'Welcome' },
+      'layout.0.id': { value: 'a' },
+    }
+
+    expect(collectLeafValues(formState)).toEqual([{ path: 'layout.$a.heading', value: 'Welcome' }])
+  })
+
   it('skips non-string and empty values', () => {
     const formState = {
       checkbox: { value: true },
@@ -497,27 +526,48 @@ describe('expandCollapsedAncestors', () => {
 
 describe('scrollToElement', () => {
   afterEach(() => {
-    vi.useRealTimers()
     vi.unstubAllGlobals()
   })
 
-  /** Real-timer wait long enough for the stable-position window (a few rAF frames). */
-  const settle = () => new Promise((resolve) => setTimeout(resolve, 150))
-
   /**
-   * happy-dom never actually scrolls - make `window.scrollY` track the
-   * `scrollBy` calls so the no-movement guard doesn't cut corrections short.
-   * Returns a restore function to run before the test ends.
+   * happy-dom never scrolls - simulate a page: `scrollY` follows the
+   * `scrollTo`/`scrollBy` calls (clamped to `maxY`, like a real document
+   * end), and the element's viewport top is its document position minus it.
    */
-  const trackScrollY = () => {
+  const simulatePage = ({
+    afterScroll,
+    docTop,
+    maxY = Number.POSITIVE_INFINITY,
+  }: {
+    afterScroll?: (y: number) => void
+    docTop: number
+    maxY?: number
+  }) => {
     let y = 0
-    const scrollBy = vi.fn((options: { top: number }) => {
-      y += options.top
-    })
+    const page = { docTop }
+    const setY = (next: number) => {
+      y = Math.max(0, Math.min(maxY, next))
+      afterScroll?.(y)
+    }
+    const scrollTo = vi.fn((options: { top: number }) => setY(options.top))
+    const scrollBy = vi.fn((options: { top: number }) => setY(y + options.top))
+    vi.stubGlobal('scrollTo', scrollTo)
     vi.stubGlobal('scrollBy', scrollBy)
+    vi.stubGlobal('matchMedia', vi.fn().mockReturnValue({ matches: false }))
     const descriptor = Object.getOwnPropertyDescriptor(window, 'scrollY')
     Object.defineProperty(window, 'scrollY', { configurable: true, get: () => y })
+
+    const element = (position: () => number) => {
+      const el = document.createElement('div')
+      document.body.append(el)
+      vi.spyOn(el, 'getBoundingClientRect').mockImplementation(() => ({ top: position() - y }) as DOMRect)
+      return el
+    }
+
     return {
+      el: element(() => page.docTop),
+      element,
+      page,
       restore: () => {
         if (descriptor) {
           Object.defineProperty(window, 'scrollY', descriptor)
@@ -526,209 +576,205 @@ describe('scrollToElement', () => {
         }
       },
       scrollBy,
+      scrollTo,
+      y: () => y,
     }
   }
 
-  it('scrolls by the element top minus the offset', () => {
-    const el = document.createElement('div')
-    document.body.append(el)
-    vi.spyOn(el, 'getBoundingClientRect').mockReturnValue({ top: 500 } as DOMRect)
-    const scrollBy = vi.fn()
-    vi.stubGlobal('scrollBy', scrollBy)
+  it('animates the page until the element sits at the offset', async () => {
+    const sim = simulatePage({ docTop: 3000 })
 
-    void scrollToElement(el, 80)
+    await scrollToElement(sim.el, 80)
 
-    expect(scrollBy).toHaveBeenCalledWith({ behavior: 'smooth', top: 420 })
+    expect(sim.scrollBy.mock.calls.length).toBeGreaterThan(3)
+    expect(sim.y()).toBeCloseTo(2920, 0)
+    sim.restore()
   })
 
-  it('scrolls instantly instead of animating when the user prefers reduced motion', () => {
-    const el = document.createElement('div')
-    document.body.append(el)
-    vi.spyOn(el, 'getBoundingClientRect').mockReturnValue({ top: 500 } as DOMRect)
-    const scrollBy = vi.fn()
-    vi.stubGlobal('scrollBy', scrollBy)
-    vi.stubGlobal('matchMedia', vi.fn().mockReturnValue({ matches: true }))
+  it('keeps the animation short however far it goes', async () => {
+    const sim = simulatePage({ docTop: 50_000 })
+    const startedAt = performance.now()
 
-    void scrollToElement(el, 80)
+    await scrollToElement(sim.el, 80)
 
-    expect(scrollBy).toHaveBeenCalledWith({ behavior: 'instant', top: 420 })
+    expect(performance.now() - startedAt).toBeLessThan(1_000)
+    expect(sim.y()).toBeCloseTo(49_920, 0)
+    sim.restore()
   })
 
-  it('resolves immediately when the element is already in position', async () => {
-    const el = document.createElement('div')
-    document.body.append(el)
-    vi.spyOn(el, 'getBoundingClientRect').mockReturnValue({ top: 80 } as DOMRect)
-    const scrollBy = vi.fn()
-    vi.stubGlobal('scrollBy', scrollBy)
+  it('follows an element that moves while the page is scrolling toward it', async () => {
+    const sim = simulatePage({ docTop: 3000 })
+    // Rows expanding above the target push it down mid-flight.
+    setTimeout(() => {
+      sim.page.docTop = 3600
+    }, 50)
 
-    await scrollToElement(el, 80)
+    await scrollToElement(sim.el, 80)
 
-    expect(scrollBy).not.toHaveBeenCalled()
+    expect(sim.y()).toBeCloseTo(3520, 0)
+    sim.restore()
   })
 
-  it('resolves immediately (without waiting for "scrollend") when already visible in the viewport, even if not exactly at the offset', async () => {
-    const el = document.createElement('div')
-    document.body.append(el)
-    // On screen (within happy-dom's default 768px innerHeight) but nowhere
-    // near the 80px offset - still nudged toward it, but not worth a wait.
-    vi.spyOn(el, 'getBoundingClientRect').mockReturnValue({ top: 300 } as DOMRect)
-    const scrollBy = vi.fn()
-    vi.stubGlobal('scrollBy', scrollBy)
+  it('bends toward a deeper element the moment the target getter returns it', async () => {
+    const sim = simulatePage({ docTop: 3000 })
+    const deeper = sim.element(() => 3400)
+    let mounted = false
+    setTimeout(() => {
+      mounted = true
+    }, 50)
 
-    await scrollToElement(el, 80)
+    await scrollToElement(() => (mounted ? deeper : sim.el), 80)
 
-    expect(scrollBy).toHaveBeenCalledWith({ behavior: 'smooth', top: 220 })
+    expect(sim.y()).toBeCloseTo(3320, 0)
+    sim.restore()
   })
 
-  it('resolves once "scrollend" fires when the element is off-screen and lands on target', async () => {
-    const el = document.createElement('div')
-    document.body.append(el)
-    // Beyond happy-dom's default 768px innerHeight - genuinely off-screen.
-    let top = 2000
-    vi.spyOn(el, 'getBoundingClientRect').mockImplementation(() => ({ top }) as DOMRect)
-    vi.stubGlobal('scrollBy', vi.fn())
-
-    let resolved = false
-    void scrollToElement(el, 80).then(() => {
-      resolved = true
+  it('slows down over a frame the page spent rendering, instead of leaping to catch up', async () => {
+    const steps: number[] = []
+    let last = 0
+    let stalled = false
+    const sim = simulatePage({
+      afterScroll: (y) => {
+        steps.push(Math.abs(y - last))
+        last = y
+        if (!stalled && y > 1000) {
+          // The main thread busy for 200ms, like React mounting a row's fields.
+          stalled = true
+          const until = performance.now() + 200
+          while (performance.now() < until) {
+            // spin
+          }
+        }
+      },
+      docTop: 3000,
     })
 
-    await Promise.resolve()
-    expect(resolved).toBe(false)
+    await scrollToElement(sim.el, 80)
 
-    // Settled exactly at the offset once the scroll finishes - no correction needed.
-    top = 80
-    window.dispatchEvent(new Event('scrollend'))
-    await settle()
+    expect(sim.y()).toBeCloseTo(2920, 0)
+    // Uncapped, the frame after the stall covered 200ms of the curve at once.
+    expect(Math.max(...steps)).toBeLessThan(700)
+  })
 
-    expect(resolved).toBe(true)
+  it('keeps clear of an offset that changes while the page moves (a header that shows up)', async () => {
+    const sim = simulatePage({ docTop: 3000 })
+    let inset = 12
+    setTimeout(() => {
+      inset = 76
+    }, 60)
+
+    await scrollToElement(sim.el, () => inset, 'smooth', undefined, true)
+
+    expect(sim.y()).toBeCloseTo(2924, 0)
+  })
+
+  it('jumps instead of animating when the user prefers reduced motion', async () => {
+    const sim = simulatePage({ docTop: 500 })
+    vi.stubGlobal('matchMedia', vi.fn().mockReturnValue({ matches: true }))
+
+    await scrollToElement(sim.el, 80)
+
+    expect(sim.scrollTo).not.toHaveBeenCalled()
+    expect(sim.scrollBy).toHaveBeenCalledWith({ behavior: 'instant', top: 420 })
+    sim.restore()
   })
 
   it('jumps instead of animating when the caller asks for it', async () => {
-    const el = document.createElement('div')
-    document.body.append(el)
-    let top = 2000
-    vi.spyOn(el, 'getBoundingClientRect').mockImplementation(() => ({ top }) as DOMRect)
-    const { restore, scrollBy } = trackScrollY()
+    const sim = simulatePage({ docTop: 3000 })
 
-    let resolved = false
-    void scrollToElement(el, 80, 'instant').then(() => {
-      resolved = true
-    })
+    await scrollToElement(sim.el, 80, 'instant')
 
-    expect(scrollBy).toHaveBeenNthCalledWith(1, { behavior: 'instant', top: 1920 })
-
-    top = 80
-    window.dispatchEvent(new Event('scrollend'))
-    await settle()
-
-    expect(resolved).toBe(true)
-    restore()
+    expect(sim.scrollTo).not.toHaveBeenCalled()
+    expect(sim.scrollBy).toHaveBeenCalledWith({ behavior: 'instant', top: 2920 })
+    sim.restore()
   })
 
-  it('re-measures after the scroll settles and issues further corrections until it converges', async () => {
-    const el = document.createElement('div')
-    document.body.append(el)
-    let top = 2000
-    vi.spyOn(el, 'getBoundingClientRect').mockImplementation(() => ({ top }) as DOMRect)
-    const { restore, scrollBy } = trackScrollY()
+  it('does nothing when the element is already in position', async () => {
+    const sim = simulatePage({ docTop: 80 })
 
-    let resolved = false
-    void scrollToElement(el, 80).then(() => {
-      resolved = true
-    })
+    await scrollToElement(sim.el, 80)
 
-    top = 40 // layout shifted mid-scroll - still short of the offset
-    window.dispatchEvent(new Event('scrollend'))
-    await settle()
-
-    expect(resolved).toBe(false)
-    expect(scrollBy).toHaveBeenNthCalledWith(1, { behavior: 'smooth', top: 1920 })
-    // The journey animates, the correction does not: it compensates for
-    // layout that shifted during the scroll, so the element is on screen and
-    // the delta is small - while another animation would cost the reveal
-    // another few hundred ms of waiting on `scrollend`.
-    expect(scrollBy).toHaveBeenNthCalledWith(2, { behavior: 'instant', top: -40 })
-
-    top = 80 // converged after the correction
-    window.dispatchEvent(new Event('scrollend'))
-    await settle()
-
-    expect(resolved).toBe(true)
-    expect(scrollBy).toHaveBeenCalledTimes(2)
-    restore()
+    expect(sim.scrollTo).not.toHaveBeenCalled()
+    expect(sim.scrollBy).not.toHaveBeenCalled()
+    sim.restore()
   })
 
-  it('stops retrying once the correction budget is exhausted', async () => {
-    const el = document.createElement('div')
-    document.body.append(el)
-    // Never converges: content keeps shifting on every measurement.
-    vi.spyOn(el, 'getBoundingClientRect').mockReturnValue({ top: 2000 } as DOMRect)
-    const { restore, scrollBy } = trackScrollY()
+  it('resolves right away when the element is already on screen, nudging it in the background', async () => {
+    // Within happy-dom's 768px viewport, but not at the offset.
+    const sim = simulatePage({ docTop: 400 })
 
-    let resolved = false
-    void scrollToElement(el, 80).then(() => {
-      resolved = true
-    })
+    await scrollToElement(sim.el, 80)
+    expect(sim.y()).toBeLessThan(320)
 
-    // Initial scroll + 6 corrections, each waiting for its own "scrollend".
-    for (let i = 0; i < 8 && !resolved; i++) {
-      window.dispatchEvent(new Event('scrollend'))
-      await settle()
-    }
-
-    expect(resolved).toBe(true)
-    expect(scrollBy).toHaveBeenCalledTimes(7)
-    restore()
+    await new Promise((resolve) => setTimeout(resolve, 700))
+    expect(sim.y()).toBeCloseTo(320, 0)
+    sim.restore()
   })
 
-  it('stops correcting when the page cannot scroll any further (target near the document bottom)', async () => {
-    const el = document.createElement('div')
-    document.body.append(el)
-    vi.spyOn(el, 'getBoundingClientRect').mockReturnValue({ top: 2000 } as DOMRect)
-    // Plain stub: window.scrollY stays put, like a page already scrolled to its end.
-    const scrollBy = vi.fn()
-    vi.stubGlobal('scrollBy', scrollBy)
+  it('stops where it is once its signal aborts - a newer reveal took over', async () => {
+    const sim = simulatePage({ docTop: 3000 })
+    const controller = new AbortController()
+    setTimeout(() => controller.abort(), 60)
 
-    let resolved = false
-    void scrollToElement(el, 80).then(() => {
-      resolved = true
-    })
+    await scrollToElement(sim.el, 80, 'smooth', controller.signal)
 
-    for (let i = 0; i < 8 && !resolved; i++) {
-      window.dispatchEvent(new Event('scrollend'))
-      await settle()
-    }
-
-    expect(resolved).toBe(true)
-    // Initial scroll + a single correction that produced no movement.
-    expect(scrollBy).toHaveBeenCalledTimes(2)
+    expect(sim.y()).toBeGreaterThan(0)
+    expect(sim.y()).toBeLessThan(2920)
+    sim.restore()
   })
 
-  it('falls back to resolving after a timeout if "scrollend" never fires', async () => {
-    vi.useFakeTimers({
-      toFake: ['setTimeout', 'clearTimeout', 'requestAnimationFrame', 'cancelAnimationFrame', 'performance'],
+  it('lets go the moment the editor scrolls for themselves', async () => {
+    const sim = simulatePage({ docTop: 3000 })
+    setTimeout(() => window.dispatchEvent(new Event('wheel')), 60)
+
+    await scrollToElement(sim.el, 80)
+
+    expect(sim.y()).toBeLessThan(2920)
+    sim.restore()
+  })
+
+  it('corrects for layout that shifts right after the animation ends', async () => {
+    // A deferred field mounts above the target as soon as the page arrives.
+    const sim = simulatePage({
+      afterScroll: (y) => {
+        if (y >= 2920) {
+          sim.page.docTop = 3250
+        }
+      },
+      docTop: 3000,
     })
-    const el = document.createElement('div')
-    document.body.append(el)
-    let top = 2000
-    vi.spyOn(el, 'getBoundingClientRect').mockImplementation(() => ({ top }) as DOMRect)
-    vi.stubGlobal('scrollBy', vi.fn())
 
-    let resolved = false
-    void scrollToElement(el, 80).then(() => {
-      resolved = true
-    })
+    const scrolls = sim.scrollBy.mock.calls.length
+    await scrollToElement(sim.el, 80)
 
-    await vi.advanceTimersByTimeAsync(999)
-    expect(resolved).toBe(false)
+    // Glided there in several steps, not jumped.
+    expect(sim.scrollBy.mock.calls.length - scrolls).toBeGreaterThan(3)
+    expect(sim.y()).toBeCloseTo(3170, 0)
+    sim.restore()
+  })
 
-    // Converged by the time the fallback fires - after the stable-position
-    // window passes, no further correction round is needed.
-    top = 80
-    await vi.advanceTimersByTimeAsync(1)
-    await vi.advanceTimersByTimeAsync(200)
-    expect(resolved).toBe(true)
+  it('stops correcting when the page cannot scroll any further (target near the document end)', async () => {
+    const sim = simulatePage({ docTop: 3000, maxY: 2500 })
+    const startedAt = performance.now()
+
+    await scrollToElement(sim.el, 80)
+
+    expect(sim.y()).toBe(2500)
+    // One correction attempt that moved nothing, not the whole budget.
+    expect(performance.now() - startedAt).toBeLessThan(1_200)
+    sim.restore()
+  })
+
+  it('cancels a scroll still running in the background when a new one starts', async () => {
+    const sim = simulatePage({ docTop: 400 })
+    const other = sim.element(() => 5000)
+
+    await scrollToElement(sim.el, 80) // on screen: keeps animating in the background
+    await scrollToElement(other, 80)
+
+    await new Promise((resolve) => setTimeout(resolve, 700))
+    expect(sim.y()).toBeCloseTo(4920, 0)
+    sim.restore()
   })
 })
 
@@ -813,6 +859,19 @@ describe('waitForElement', () => {
     found = el
     await vi.advanceTimersByTimeAsync(32)
     expect(resolved).toBe(true)
+  })
+})
+
+describe('waitForElement abort', () => {
+  it('resolves null as soon as its signal aborts, without waiting out the budget', async () => {
+    const controller = new AbortController()
+    const startedAt = performance.now()
+    setTimeout(() => controller.abort(), 10)
+
+    const el = await waitForElement(() => null, 5_000, { signal: controller.signal })
+
+    expect(el).toBeNull()
+    expect(performance.now() - startedAt).toBeLessThan(1_000)
   })
 })
 

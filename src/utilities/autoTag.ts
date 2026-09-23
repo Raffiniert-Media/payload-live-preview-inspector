@@ -109,7 +109,7 @@ const normalizeText = (text: string): string => stegaClean(text).replace(/\s+/g,
 const warnedAmbiguousValues = new Set<string>()
 
 /** Dev-only: say *why* a value can never be matched (scans rerun constantly, so log once). */
-const warnAmbiguousValues = (leaves: DocumentLeafValue[], pathByValue: Map<string, null | string>): void => {
+const warnAmbiguousValues = (leaves: DocumentLeafValue[], pathByValue: ValueIndex): void => {
   const ambiguous = new Map<string, string[]>()
 
   for (const { path, value } of leaves) {
@@ -135,44 +135,54 @@ const warnAmbiguousValues = (leaves: DocumentLeafValue[], pathByValue: Map<strin
 }
 
 /**
- * Tags elements whose entire text content equals a document field's value -
- * the zero-config layer that needs no frontend data changes at all. Only
- * unambiguous values are used: a value shared by several fields is skipped,
- * and only whole-text-node matches count. Never overwrites existing tags.
+ * Normalized field value → the one path it belongs to, or `null` when several
+ * fields share it (ambiguous, never matched). Built once per set of document
+ * values, not on every scan: normalizing every value is the expensive half of
+ * value matching, and the values change far less often than the DOM does.
  */
-export const applyValueMatching = (root: Document | Element, leaves: DocumentLeafValue[]): void => {
-  // A value mapping to more than one path is ambiguous - mark it `null`.
-  const pathByValue = new Map<string, null | string>()
+export type ValueIndex = Map<string, null | string>
+
+export const buildValueIndex = (leaves: DocumentLeafValue[]): ValueIndex => {
+  const index: ValueIndex = new Map()
 
   for (const { path, value } of leaves) {
     const normalized = normalizeText(value)
     if (normalized.length < MIN_MATCH_LENGTH) {
       continue
     }
-    const existing = pathByValue.get(normalized)
-    pathByValue.set(normalized, existing === undefined || existing === path ? path : null)
+    const existing = index.get(normalized)
+    index.set(normalized, existing === undefined || existing === path ? path : null)
   }
 
   if (process.env.NODE_ENV !== 'production') {
-    warnAmbiguousValues(leaves, pathByValue)
+    warnAmbiguousValues(leaves, index)
   }
 
-  if (pathByValue.size === 0) {
+  return index
+}
+
+/** The path a text node's whole (normalized) text matches, if exactly one field has that value. */
+const matchText = (text: null | string, index: ValueIndex): null | string => {
+  if (!text) {
+    return null
+  }
+  const normalized = normalizeText(text)
+  return normalized.length < MIN_MATCH_LENGTH ? null : (index.get(normalized) ?? null)
+}
+
+/**
+ * Tags elements under `root` whose entire text content equals a document
+ * field's value - the zero-config layer that needs no frontend data changes
+ * at all. Only unambiguous values are used, and only whole-text-node matches
+ * count. Never overwrites existing tags.
+ */
+export const applyValueIndex = (root: Document | Element, index: ValueIndex): void => {
+  if (index.size === 0) {
     return
   }
 
   walkTextNodes(root, (node) => {
-    const text = node.nodeValue
-    if (!text) {
-      return
-    }
-
-    const normalized = normalizeText(text)
-    if (normalized.length < MIN_MATCH_LENGTH) {
-      return
-    }
-
-    const path = pathByValue.get(normalized)
+    const path = matchText(node.nodeValue, index)
     if (!path) {
       return
     }
@@ -182,6 +192,65 @@ export const applyValueMatching = (root: Document | Element, leaves: DocumentLea
       setAutoTag(el, path, 'match')
     }
   })
+}
+
+/** `applyValueIndex` for a one-off set of values. */
+export const applyValueMatching = (root: Document | Element, leaves: DocumentLeafValue[]): void =>
+  applyValueIndex(root, buildValueIndex(leaves))
+
+/**
+ * Judges one element's own automatic tag afresh, after its text changed.
+ *
+ * React reuses DOM nodes: when a value is edited, the same `<h2>` gets new
+ * text, and the tag stega or value matching gave it for the *old* text would
+ * otherwise stay - pointing a click at the wrong field, or at a field whose
+ * value is no longer on screen at all. Only the automatic `stega`/`match`
+ * tags are re-judged; explicit `pathOf()` tags and inferred containers are
+ * not this function's to touch.
+ */
+export const retagElement = (el: Element, { index, stega }: { index: null | ValueIndex; stega: boolean }): void => {
+  const source = el.getAttribute(LIVE_PREVIEW_AUTO_ATTRIBUTE)
+  if (el.hasAttribute(LIVE_PREVIEW_PATH_ATTRIBUTE) && source !== 'stega' && source !== 'match') {
+    return
+  }
+  if (source) {
+    el.removeAttribute(LIVE_PREVIEW_PATH_ATTRIBUTE)
+    el.removeAttribute(LIVE_PREVIEW_AUTO_ATTRIBUTE)
+  }
+  if (NON_CONTENT_TAGS.has(el.tagName)) {
+    return
+  }
+
+  const texts = Array.from(el.childNodes).filter((node): node is Text => node.nodeType === Node.TEXT_NODE)
+
+  if (stega) {
+    for (const node of texts) {
+      const text = node.nodeValue
+      const [path] = text && hasStegaHint(text) ? findStegaPaths(text) : []
+      if (path) {
+        setAutoTag(el, path, 'stega')
+        return
+      }
+    }
+    for (const attr of STEGA_ATTRIBUTES) {
+      const value = el.getAttribute(attr)
+      const [path] = value && hasStegaHint(value) ? findStegaPaths(value) : []
+      if (path) {
+        setAutoTag(el, path, 'stega')
+        return
+      }
+    }
+  }
+
+  if (index) {
+    for (const node of texts) {
+      const path = matchText(node.nodeValue, index)
+      if (path) {
+        setAutoTag(el, path, 'match')
+        return
+      }
+    }
+  }
 }
 
 /**
@@ -347,18 +416,34 @@ const commonAncestor = (els: Element[]): Element | null => {
  * the whole row - without anyone writing `pathOf(block)`. Conservative by
  * design: a candidate containing tags from a different row (interleaved
  * markup), an already-tagged element, or `<body>` itself is never used.
+ *
+ * Recomputed from scratch on every call - earlier inferred containers are
+ * dropped first - because the leaves they were inferred from change: a row
+ * that gains or loses a leaf can have a different common ancestor, and a
+ * stale container would keep claiming clicks for the old one.
+ *
+ * The purity check walks up from every tag once instead of querying every
+ * candidate's subtree: linear in tags × depth, where one query per row was
+ * rows × tags, which on a forty-section page is the difference between a
+ * few hundred steps and tens of thousands on every pass.
  */
 export const inferBlockContainers = (doc: Document): void => {
-  const tagged = Array.from(doc.querySelectorAll(`[${LIVE_PREVIEW_PATH_ATTRIBUTE}]`))
+  for (const el of Array.from(doc.querySelectorAll(`[${LIVE_PREVIEW_AUTO_ATTRIBUTE}="container"]`))) {
+    el.removeAttribute(LIVE_PREVIEW_PATH_ATTRIBUTE)
+    el.removeAttribute(LIVE_PREVIEW_AUTO_ATTRIBUTE)
+  }
+
+  const pathByElement = new Map<Element, string>()
   const existingPaths = new Set<string>()
   const leavesByRowPath = new Map<string, Element[]>()
 
-  for (const el of tagged) {
+  for (const el of Array.from(doc.querySelectorAll(`[${LIVE_PREVIEW_PATH_ATTRIBUTE}]`))) {
     const path = el.getAttribute(LIVE_PREVIEW_PATH_ATTRIBUTE)
     if (!path) {
       continue
     }
 
+    pathByElement.set(el, path)
     existingPaths.add(path)
 
     const segments = path.split('.')
@@ -372,6 +457,10 @@ export const inferBlockContainers = (doc: Document): void => {
       leavesByRowPath.set(rowPath, group)
     }
   }
+
+  // Row paths per candidate element, in the order the rows were found - two
+  // nested rows can pick the same element, and the outer one then wins.
+  const candidates = new Map<Element, string[]>()
 
   for (const [rowPath, leaves] of leavesByRowPath) {
     if (existingPaths.has(rowPath)) {
@@ -388,14 +477,35 @@ export const inferBlockContainers = (doc: Document): void => {
       continue
     }
 
-    const impure = Array.from(candidate.querySelectorAll(`[${LIVE_PREVIEW_PATH_ATTRIBUTE}]`)).some((el) => {
-      const path = el.getAttribute(LIVE_PREVIEW_PATH_ATTRIBUTE)
-      return path !== rowPath && !path?.startsWith(`${rowPath}.`)
-    })
-    if (impure) {
-      continue
-    }
+    candidates.set(candidate, [...(candidates.get(candidate) ?? []), rowPath])
+  }
 
-    setAutoTag(candidate, rowPath, 'container')
+  if (candidates.size === 0) {
+    return
+  }
+
+  const impure = new Map<Element, Set<string>>()
+
+  for (const [el, path] of pathByElement) {
+    for (let ancestor = el.parentElement; ancestor; ancestor = ancestor.parentElement) {
+      const rows = candidates.get(ancestor)
+      if (!rows) {
+        continue
+      }
+      for (const rowPath of rows) {
+        if (path !== rowPath && !path.startsWith(`${rowPath}.`)) {
+          const set = impure.get(ancestor) ?? new Set<string>()
+          set.add(rowPath)
+          impure.set(ancestor, set)
+        }
+      }
+    }
+  }
+
+  for (const [candidate, rows] of candidates) {
+    const rowPath = rows.find((row) => !impure.get(candidate)?.has(row))
+    if (rowPath) {
+      setAutoTag(candidate, rowPath, 'container')
+    }
   }
 }

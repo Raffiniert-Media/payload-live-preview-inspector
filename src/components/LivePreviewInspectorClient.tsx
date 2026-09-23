@@ -1,33 +1,47 @@
 'use client'
 
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 
+import type { AutoTagger } from '../utilities/autoTagger.js'
 import type { DocumentLeafValue } from '../utilities/pathResolution.js'
 
-import {
-  applyValueMatching,
-  findTaggedElementAt,
-  findTaggedElementByPath,
-  inferBlockContainers,
-  scanStega,
-} from '../utilities/autoTag.js'
+import { findTaggedElementAt, findTaggedElementByPath } from '../utilities/autoTag.js'
+import { createAutoTagger } from '../utilities/autoTagger.js'
 import { caretHintFromPoint, parseCaretHint } from '../utilities/caret.js'
+import { createClickOverlay } from '../utilities/clickOverlay.js'
 import { LIVE_PREVIEW_HOVER_CLASS_NAME } from '../utilities/hoverClassName.js'
 import {
   CLICK_MESSAGE_TYPE,
   DOCUMENT_VALUES_MESSAGE_TYPE,
   FOCUS_MESSAGE_TYPE,
   REQUEST_DOCUMENT_VALUES_MESSAGE_TYPE,
+  REVEAL_STATUS_MESSAGE_TYPE,
   SETTINGS_MESSAGE_TYPE,
+  THEME_MESSAGE_TYPE,
 } from '../utilities/messageTypes.js'
 import { LIVE_PREVIEW_PATH_ATTRIBUTE } from '../utilities/pathAttribute.js'
-import { flashElement, uncover, waitForScrollEnd } from '../utilities/pathResolution.js'
+import {
+  flashElement,
+  scrollToElement,
+  topInset,
+  uncover,
+  UNCOVER_MARGIN_PX,
+} from '../utilities/pathResolution.js'
 import classes from './LivePreviewInspectorClient.module.css'
 
 export { LIVE_PREVIEW_HOVER_CLASS_NAME }
 
-/** Minimum gap between two document-value requests to the admin panel. */
-const REQUEST_THROTTLE_MS = 300
+/**
+ * How long a clicked element waits for the admin to acknowledge the click.
+ * An admin that never does is running a version without reveal status - the
+ * pending mark then goes quietly instead of lingering.
+ */
+const ACK_TIMEOUT_MS = 400
+/** Longest a reveal is shown as pending once acknowledged. */
+const PENDING_MAX_MS = 8_000
+
+/** Custom property every mark in the preview takes its colour from. */
+const ACCENT_PROPERTY = '--payload-live-preview-inspector-accent'
 
 export type LivePreviewInspectorClientProps = {
   /**
@@ -56,8 +70,9 @@ export type LivePreviewInspectorClientProps = {
    */
   disableLinks?: boolean
   /**
-   * Outline color used to highlight the hovered element. Defaults to the
-   * shipped CSS (`LivePreviewInspectorClient.module.css`) if omitted.
+   * Colour of every mark in the preview - hover outline, click frame, label
+   * chip, focus flash. Defaults to the admin's accent colour, which the admin
+   * sends when the preview loads (Payload's `--theme-success-500`).
    */
   hoverColor?: string
   /**
@@ -180,14 +195,82 @@ export const LivePreviewInspectorClient: React.FC<LivePreviewInspectorClientProp
   targetOrigin,
   valueMatching = true,
 }) => {
+  // The auto-tagger lives in its own effect; clicks and hovers flush it so
+  // they never resolve against tags still waiting for an idle moment.
+  const taggerRef = useRef<AutoTagger | null>(null)
+
   useEffect(() => {
     if (window.self === window.top) {
       // Not embedded in an iframe (e.g. viewed directly outside live preview) - no-op.
       return
     }
 
+    const resolvedOrigin = targetOrigin ?? resolveTargetOrigin()
     let hovered: HTMLElement | null = null
     let hoverFrame = 0
+
+    /*
+     * The click being revealed, marked on its element until the admin says
+     * how it went. Without it a click on a large page gave no sign of life
+     * for the second or so a reveal can take - and a second click is what an
+     * editor does when the first seemed to do nothing.
+     */
+    let clickCounter = 0
+    let pendingID: number | undefined
+    let pendingTimer: ReturnType<typeof setTimeout> | undefined
+    const overlay = createClickOverlay(document, {
+      box: classes.box,
+      chip: classes.chip,
+      clip: classes.clip,
+      layer: classes.layer,
+      ripple: classes.ripple,
+    })
+
+    const endPending = (outcome?: 'done' | 'not-found') => {
+      clearTimeout(pendingTimer)
+      pendingID = undefined
+      if (outcome) {
+        overlay.finish(outcome)
+      } else {
+        overlay.hide()
+      }
+    }
+
+    const onStatus = (event: MessageEvent) => {
+      if (event.source !== window.parent || (resolvedOrigin !== '*' && event.origin !== resolvedOrigin)) {
+        return
+      }
+      const { data } = event
+      if (!data || typeof data !== 'object') {
+        return
+      }
+
+      if (data.type === THEME_MESSAGE_TYPE) {
+        // A configured `hoverColor` wins over the admin's accent.
+        if (!hoverColor && typeof data.accent === 'string' && data.accent) {
+          document.documentElement.style.setProperty(ACCENT_PROPERTY, data.accent)
+        }
+        return
+      }
+
+      if (data.type !== REVEAL_STATUS_MESSAGE_TYPE || pendingID === undefined || data.id !== pendingID) {
+        return
+      }
+
+      if (data.status === 'started') {
+        clearTimeout(pendingTimer)
+        pendingTimer = setTimeout(() => endPending(), PENDING_MAX_MS)
+        if (typeof data.label === 'string') {
+          overlay.setLabel(data.label)
+        }
+        return
+      }
+
+      if (data.status === 'not-found') {
+        overlay.setLabel('Not in this form')
+      }
+      endPending(data.status === 'not-found' ? 'not-found' : 'done')
+    }
 
     // Point-based first: `elementsFromPoint` sees tagged elements *through*
     // covering overlays (full-card links etc.) that swallow every pointer
@@ -197,11 +280,14 @@ export const LivePreviewInspectorClient: React.FC<LivePreviewInspectorClientProp
       findTaggedElementAt(document, event.clientX, event.clientY) ??
       ((event.target as Element | null)?.closest?.(`[${LIVE_PREVIEW_PATH_ATTRIBUTE}]`) as HTMLElement | null)
 
+    // One colour for every mark: `hoverColor` when configured, otherwise the
+    // admin's accent once it arrives (see `THEME_MESSAGE_TYPE`).
+    if (hoverColor) {
+      document.documentElement.style.setProperty(ACCENT_PROPERTY, hoverColor)
+    }
+
     const unhighlight = (el: HTMLElement) => {
       el.classList.remove(classes.hovered, LIVE_PREVIEW_HOVER_CLASS_NAME)
-      if (hoverColor) {
-        el.style.removeProperty('outline-color')
-      }
     }
 
     const setHovered = (el: HTMLElement | null) => {
@@ -213,9 +299,6 @@ export const LivePreviewInspectorClient: React.FC<LivePreviewInspectorClientProp
       }
       if (el) {
         el.classList.add(classes.hovered, LIVE_PREVIEW_HOVER_CLASS_NAME)
-        if (hoverColor) {
-          el.style.outlineColor = hoverColor
-        }
       }
       hovered = el
     }
@@ -230,6 +313,7 @@ export const LivePreviewInspectorClient: React.FC<LivePreviewInspectorClientProp
       }
       hoverFrame = requestAnimationFrame(() => {
         hoverFrame = 0
+        taggerRef.current?.flush()
         setHovered(findTarget(event))
       })
     }
@@ -272,6 +356,7 @@ export const LivePreviewInspectorClient: React.FC<LivePreviewInspectorClientProp
         swallow(event)
       }
 
+      taggerRef.current?.flush()
       const el = findTarget(event)
       if (!el) {
         return
@@ -294,10 +379,21 @@ export const LivePreviewInspectorClient: React.FC<LivePreviewInspectorClientProp
       // whenever the point isn't on text belonging to `el`.
       const caret = caretHintFromPoint(document, event.clientX, event.clientY, el)
 
-      window.parent.postMessage(
-        { type: CLICK_MESSAGE_TYPE, caret, path },
-        targetOrigin ?? resolveTargetOrigin(),
-      )
+      const id = ++clickCounter
+      // The click mark replaces the hover outline - including one a hover
+      // frame from the move just before the click would still apply. Moving
+      // the pointer brings hover back.
+      cancelAnimationFrame(hoverFrame)
+      hoverFrame = 0
+      setHovered(null)
+      overlay.show(el, { x: event.clientX, y: event.clientY })
+      pendingID = id
+      // An admin that never acknowledges runs a version without reveal
+      // status - the mark then goes quietly instead of lingering.
+      clearTimeout(pendingTimer)
+      pendingTimer = setTimeout(() => endPending(), ACK_TIMEOUT_MS)
+
+      window.parent.postMessage({ id, type: CLICK_MESSAGE_TYPE, caret, path }, resolvedOrigin)
     }
 
     /*
@@ -311,9 +407,10 @@ export const LivePreviewInspectorClient: React.FC<LivePreviewInspectorClientProp
      */
     window.parent.postMessage(
       { type: SETTINGS_MESSAGE_TYPE, disableInteractions, interactionModifier },
-      targetOrigin ?? resolveTargetOrigin(),
+      resolvedOrigin,
     )
 
+    window.addEventListener('message', onStatus)
     document.addEventListener('mousemove', onMouseMove)
     document.documentElement.addEventListener('mouseleave', onMouseLeave)
 
@@ -338,6 +435,8 @@ export const LivePreviewInspectorClient: React.FC<LivePreviewInspectorClientProp
     window.addEventListener('click', onClick, { capture: true })
 
     return () => {
+      window.removeEventListener('message', onStatus)
+      endPending()
       document.removeEventListener('mousemove', onMouseMove)
       document.documentElement.removeEventListener('mouseleave', onMouseLeave)
       window.removeEventListener('click', onClick, { capture: true })
@@ -376,32 +475,29 @@ export const LivePreviewInspectorClient: React.FC<LivePreviewInspectorClientProp
         return
       }
 
-      const behavior: ScrollBehavior = window.matchMedia('(prefers-reduced-motion: reduce)').matches
-        ? 'instant'
-        : 'smooth'
-      el.scrollIntoView({ behavior, block: 'nearest', inline: 'nearest' })
-
       /*
-       * And then out from under the site's own sticky header.
+       * Clear of the site's sticky header from the first frame on: where the
+       * element should land is re-measured as the page moves (see
+       * `topInset`), so the scroll ends where it should instead of ending
+       * behind the header and jumping out from under it afterwards. Measured
+       * against the dev page's header before this: a 570px leap after the
+       * scroll had already stopped.
        *
-       * `block: 'nearest'` moves the minimum amount, which means an element
-       * approached from below aligns to the *top* of the viewport - and on a
-       * site with a sticky header, the top of the viewport is the header.
-       * Measured against the theme this plugin was written for: focusing a
-       * field in the admin put its element at y=-1 with a header occupying
-       * 0-99, so the first hundred pixels of what the editor asked to see were
-       * behind it.
-       *
-       * Asked of the page rather than configured: a number would have to be
-       * the height of a header this plugin cannot know, on a site it does not
-       * control, at a width it cannot predict. See `hiddenBehindOverlay`.
+       * An element already fully in view, clear of the header, stays put -
+       * the editor is looking at it.
        */
+      const offset = () => topInset(el) + UNCOVER_MARGIN_PX
+      const { bottom, top } = el.getBoundingClientRect()
+      const inView = top >= offset() && bottom <= window.innerHeight
       void (async () => {
-        await waitForScrollEnd()
+        if (!inView) {
+          await scrollToElement(el, offset, 'smooth', undefined, true)
+        }
 
+        // Only a safety net now: a header that changed height at the last
+        // moment. Normally it finds nothing to do.
         await uncover(el)
-
-        flashElement(el, { className: classes.focused, color: hoverColor })
+        flashElement(el, { className: classes.focused })
       })()
     }
 
@@ -412,54 +508,20 @@ export const LivePreviewInspectorClient: React.FC<LivePreviewInspectorClientProp
     }
   }, [hoverColor, targetOrigin])
 
-  // Auto-tagging: decode stega paths and/or match field values whenever the
-  // preview (re-)renders, then infer block containers from the tagged leaves.
+  // Auto-tagging: decode stega paths and/or match field values as the
+  // preview renders, then infer block containers from the tagged leaves -
+  // incrementally, see `createAutoTagger`.
   useEffect(() => {
     if (window.self === window.top || (!stega && !valueMatching)) {
       return
     }
 
     const resolvedOrigin = targetOrigin ?? resolveTargetOrigin()
+    const tagger = createAutoTagger(document, { stega, valueMatching })
+    taggerRef.current = tagger
 
-    let leaves: DocumentLeafValue[] = []
     let receivedLeaves = false
-    let scheduledScan = 0
-    let requestTimer: ReturnType<typeof setTimeout> | undefined
     let bootstrapTimer: ReturnType<typeof setTimeout> | undefined
-    let lastRequestAt = 0
-
-    const scan = () => {
-      scheduledScan = 0
-      if (stega) {
-        scanStega(document)
-      }
-      if (valueMatching && leaves.length > 0) {
-        applyValueMatching(document, leaves)
-      }
-      inferBlockContainers(document)
-    }
-
-    const scheduleScan = () => {
-      if (!scheduledScan) {
-        scheduledScan = requestAnimationFrame(scan)
-      }
-    }
-
-    const requestLeaves = () => {
-      if (!valueMatching) {
-        return
-      }
-      const wait = lastRequestAt + REQUEST_THROTTLE_MS - Date.now()
-      if (wait > 0) {
-        requestTimer ??= setTimeout(() => {
-          requestTimer = undefined
-          requestLeaves()
-        }, wait)
-        return
-      }
-      lastRequestAt = Date.now()
-      window.parent.postMessage({ type: REQUEST_DOCUMENT_VALUES_MESSAGE_TYPE }, resolvedOrigin)
-    }
 
     const onMessage = (event: MessageEvent) => {
       if (event.source !== window.parent) {
@@ -474,58 +536,43 @@ export const LivePreviewInspectorClient: React.FC<LivePreviewInspectorClientProp
         return
       }
 
-      leaves = (data.leaves as unknown[]).filter(
-        (leaf): leaf is DocumentLeafValue =>
-          !!leaf &&
-          typeof leaf === 'object' &&
-          typeof (leaf as DocumentLeafValue).path === 'string' &&
-          typeof (leaf as DocumentLeafValue).value === 'string',
-      )
       receivedLeaves = true
-      scheduleScan()
+      tagger.setLeaves(
+        (data.leaves as unknown[]).filter(
+          (leaf): leaf is DocumentLeafValue =>
+            !!leaf &&
+            typeof leaf === 'object' &&
+            typeof (leaf as DocumentLeafValue).path === 'string' &&
+            typeof (leaf as DocumentLeafValue).value === 'string',
+        ),
+      )
     }
-
-    const observer = new MutationObserver(() => {
-      scheduleScan()
-      // The preview re-rendered, so field values likely changed too.
-      requestLeaves()
-    })
 
     if (valueMatching) {
       window.addEventListener('message', onMessage)
-    }
-    observer.observe(document.documentElement, { characterData: true, childList: true, subtree: true })
 
-    scheduleScan()
-
-    // The admin listener may mount after us (or not at all, when the plugin
-    // isn't registered for this document) - retry the initial request with
-    // backoff instead of waiting for a DOM mutation that may never come.
-    let bootstrapAttempts = 0
-    const bootstrap = () => {
-      if (receivedLeaves || bootstrapAttempts >= 5) {
-        return
+      // Asked once; the admin pushes every later change by itself. It may
+      // mount after us (or not at all, when the plugin isn't registered for
+      // this document), so the first request is retried with backoff.
+      let bootstrapAttempts = 0
+      const bootstrap = () => {
+        if (receivedLeaves || bootstrapAttempts >= 5) {
+          return
+        }
+        bootstrapAttempts += 1
+        window.parent.postMessage({ type: REQUEST_DOCUMENT_VALUES_MESSAGE_TYPE }, resolvedOrigin)
+        bootstrapTimer = setTimeout(bootstrap, 500 * bootstrapAttempts)
       }
-      bootstrapAttempts += 1
-      requestLeaves()
-      bootstrapTimer = setTimeout(bootstrap, 500 * bootstrapAttempts)
+      bootstrap()
     }
-    bootstrap()
 
     return () => {
-      observer.disconnect()
-      if (valueMatching) {
-        window.removeEventListener('message', onMessage)
+      tagger.disconnect()
+      if (taggerRef.current === tagger) {
+        taggerRef.current = null
       }
-      if (scheduledScan) {
-        cancelAnimationFrame(scheduledScan)
-      }
-      if (requestTimer) {
-        clearTimeout(requestTimer)
-      }
-      if (bootstrapTimer) {
-        clearTimeout(bootstrapTimer)
-      }
+      window.removeEventListener('message', onMessage)
+      clearTimeout(bootstrapTimer)
     }
   }, [stega, targetOrigin, valueMatching])
 

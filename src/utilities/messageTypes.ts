@@ -8,7 +8,8 @@
 /**
  * iframe → admin: a tagged element was clicked; carries the field `path` and,
  * when the click landed on text, a `caret` hint (`{ offset, text }`) locating
- * the clicked position within that text. Older clients omit `caret`.
+ * the clicked position within that text. Older clients omit `caret`, and
+ * `id` - echoed back in `REVEAL_STATUS_MESSAGE_TYPE`.
  */
 export const CLICK_MESSAGE_TYPE = 'payload-live-preview-inspector:click'
 
@@ -18,7 +19,11 @@ export const CLICK_MESSAGE_TYPE = 'payload-live-preview-inspector:click'
  */
 export const DOCUMENT_VALUES_MESSAGE_TYPE = 'payload-live-preview-inspector:document-values'
 
-/** iframe → admin: request a fresh `DOCUMENT_VALUES_MESSAGE_TYPE` snapshot. */
+/**
+ * iframe → admin: request a `DOCUMENT_VALUES_MESSAGE_TYPE` snapshot. Sent when
+ * the preview loads; from then on the admin pushes a new snapshot whenever
+ * the values change.
+ */
 export const REQUEST_DOCUMENT_VALUES_MESSAGE_TYPE =
   'payload-live-preview-inspector:request-document-values'
 
@@ -42,3 +47,26 @@ export const FOCUS_MESSAGE_TYPE = 'payload-live-preview-inspector:focus'
  * would be showing its editors an instruction that does nothing.
  */
 export const SETTINGS_MESSAGE_TYPE = 'payload-live-preview-inspector:settings'
+
+/**
+ * admin → iframe: how the reveal for click `id` is going - `started` as soon
+ * as the admin has the click, then `done` or `not-found`. Lets the preview
+ * acknowledge a click at once and say so when there is no field to go to,
+ * instead of leaving the editor to wonder whether it registered and click
+ * again. A reveal cancelled by a newer click reports nothing.
+ */
+/*
+ * `started` also carries `label`: the field's label as the admin shows it,
+ * so the preview can name where the click is going while it gets there.
+ */
+export const REVEAL_STATUS_MESSAGE_TYPE = 'payload-live-preview-inspector:reveal-status'
+
+export type RevealStatus = 'done' | 'not-found' | 'started'
+
+/**
+ * admin → iframe: the admin's accent colour (Payload's `--theme-success-500`,
+ * resolved in its current light/dark theme), so the preview's hover, click
+ * and focus marks look like part of the admin rather than of the plugin.
+ * Sent in reply to `SETTINGS_MESSAGE_TYPE`, i.e. whenever a preview loads.
+ */
+export const THEME_MESSAGE_TYPE = 'payload-live-preview-inspector:theme'
