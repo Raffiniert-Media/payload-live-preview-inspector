@@ -34,7 +34,7 @@ export default buildConfig({
       ],
       collections: ['posts', 'pages'],
       url: ({ collectionConfig, data }) =>
-        `http://localhost:3000/preview/${collectionConfig?.slug ?? 'posts'}/${data.id}`,
+        `http://localhost:${process.env.PORT ?? 3000}/preview/${collectionConfig?.slug ?? 'posts'}/${data.id}`,
     },
   },
   collections: [

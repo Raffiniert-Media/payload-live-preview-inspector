@@ -10,11 +10,14 @@ import {
 } from '@payloadcms/ui'
 import { useEffect, useRef, useState } from 'react'
 
+import type { Curtain } from '../utilities/curtain.js'
 import type { RevealStatus } from '../utilities/messageTypes.js'
 import type { DocumentLeafValue } from '../utilities/pathResolution.js'
 import type { BlocksMap, SchemaField } from '../utilities/revealPlan.js'
 
+import { createCamera } from '../utilities/camera.js'
 import { caretHintFromSelection, parseCaretHint } from '../utilities/caret.js'
+import { drawCurtain, openingAreaOf, tabContentOf, visibleRowsAfter } from '../utilities/curtain.js'
 import {
   CLICK_MESSAGE_TYPE,
   DOCUMENT_VALUES_MESSAGE_TYPE,
@@ -27,23 +30,29 @@ import {
 import {
   collectLeafValues,
   DEFAULT_COLLAPSIBLE_ANIMATION_MS,
+  DEFAULT_SCROLL_OFFSET,
   DEFAULT_TAB_SWITCH_WAIT_MS,
   expandCollapsedAncestors,
   fieldPathFromFormState,
+  findUnrenderedRows,
   focusElement,
   IDLE_GIVE_UP_MS,
+  isInOpeningView,
+  isInRestingView,
   pathFromFieldElement,
+  renotifyIntersection,
   resolvedPathDepth,
   resolveExactFieldElement,
   resolveFieldElement,
   resolveRowIDs,
   revealTabForElement,
   rowIDFromPath,
-  scrollToElement,
   flashElement as sharedFlashElement,
   toRowIDPath,
   waitForElement,
   waitForElementLayout,
+  waitForQuietFrames,
+  waitForStablePosition,
 } from '../utilities/pathResolution.js'
 import {
   describeTarget,
@@ -117,6 +126,12 @@ const accentColor = (): string =>
  * `className` as their state changes (a tab turning active), which would
  * wipe a class of ours on the very render the click causes.
  */
+/**
+ * How close to a tab bar or row header the page gets before it is opened -
+ * the last stretch of the motion, so opening doesn't wait for it to stop.
+ */
+const OPEN_WHEN_NEAR_PX = 120
+
 const pulse = (el: Element | null | undefined): void => {
   const accent = accentColor() || '#1587ba'
   el?.animate(
@@ -256,6 +271,7 @@ export const LivePreviewInspectorListener: React.FC<LivePreviewInspectorListener
 
     let noticeTimer: ReturnType<typeof setTimeout> | undefined
     let labelTimer: ReturnType<typeof setTimeout> | undefined
+    let healTimer: ReturnType<typeof setTimeout> | undefined
     const showNotFound = () => {
       clearTimeout(noticeTimer)
       setNotFoundNotice(true)
@@ -344,6 +360,80 @@ export const LivePreviewInspectorListener: React.FC<LivePreviewInspectorListener
       const { signal } = controller
       const timer = createRevealTimer(resolvedPath)
 
+      /** Sets `collapsed` on rows of one or more Array/Blocks fields - one dispatch per field, so none overwrites another. */
+      const setRowsCollapsed = (rows: { index: number; path: string }[], collapsed: boolean) => {
+        const byPath = new Map<string, Set<number>>()
+        for (const { index, path } of rows) {
+          byPath.set(path, (byPath.get(path) ?? new Set()).add(index))
+        }
+        for (const [path, indices] of byPath) {
+          const formRows = getFieldsRef.current()[path]?.rows
+          if (formRows) {
+            dispatchFieldsRef.current({
+              type: 'SET_ROW_COLLAPSED',
+              path,
+              updatedRows: formRows.map((row, i) => (indices.has(i) ? { ...row, collapsed } : row)),
+            })
+          }
+        }
+      }
+
+      // Open rows Payload rendered nothing into (see `findUnrenderedRows`):
+      // what an editor saw on a customer page, until they closed and reopened
+      // the row themselves. The same, done here - first invisibly, and only
+      // if that isn't enough, the way they did it. Any open row near the
+      // viewport counts, not only the ones this reveal opened: the one found
+      // stuck there had been open all along, inside a section the reveal
+      // opened.
+      const healUnrenderedRows = async (): Promise<void> => {
+        if (findUnrenderedRows().length === 0) {
+          return
+        }
+        // Still rendering is not stuck.
+        await waitForElement(() => null, 150, { signal })
+        let stuck = findUnrenderedRows()
+        if (stuck.length === 0 || signal.aborted) {
+          return
+        }
+        const allRendered = () => (findUnrenderedRows().length === 0 ? document.body : null)
+        const names = () => stuck.map(({ index, path }) => `"${path}.${index}"`).join(', ')
+
+        if (process.env.NODE_ENV !== 'production') {
+          // eslint-disable-next-line no-console -- intentional dev-only diagnostic
+          console.warn(
+            `[payload-live-preview-inspector] Open row(s) ${names()} with none of their fields rendered by Payload - asking again`,
+          )
+        }
+        await Promise.all(stuck.map(({ fields }) => renotifyIntersection(fields)))
+        await waitForElement(allRendered, 300, { signal })
+        stuck = findUnrenderedRows()
+        if (stuck.length === 0 || signal.aborted) {
+          return
+        }
+
+        if (process.env.NODE_ENV !== 'production') {
+          // eslint-disable-next-line no-console -- intentional dev-only diagnostic
+          console.warn(`[payload-live-preview-inspector] Row(s) ${names()} still empty - reopening`)
+        }
+        setRowsCollapsed(stuck, true)
+        // Closed for good first - Payload hides a closed row's content only
+        // once its closing animation has run.
+        await waitForElement(() => null, accordionAnimationMs, { signal })
+        if (!signal.aborted) {
+          setRowsCollapsed(stuck, false)
+        }
+      }
+
+      // Areas hidden while Payload renders into them (see `drawCurtain`).
+      // Always lifted in the end - an aborted or failed reveal must not leave
+      // anything invisible.
+      const curtains: Curtain[] = []
+      const liftCurtains = () => {
+        for (const curtain of curtains.splice(0)) {
+          curtain.lift()
+        }
+      }
+
       const revealField = async (): Promise<'ancestor' | 'exact' | 'not-found'> => {
         // The path's actual form field (a stega path pointing inside e.g. a
         // rich-text value collapses to the rich-text field itself).
@@ -370,21 +460,22 @@ export const LivePreviewInspectorListener: React.FC<LivePreviewInspectorListener
         let planApplied = false
         const depthBeforePlan = resolvedPathDepth(resolvedPath)
 
-        // Move at once when the route stays in view: every tab on the way is
-        // already active and every collapsible open, so all that is left is
-        // expanding rows - and the page can glide toward the deepest part of
-        // the path that is rendered while that happens, bending onto the
-        // target as it mounts. Waiting for the expansion first is the pause
-        // between click and motion that made reveals feel hesitant.
-        // (Heading anywhere while a tab is still to be switched would aim at
-        // content about to be replaced.)
-        let glide: Promise<void> | undefined
+        // One camera for the whole reveal (see `createCamera`): every stop on
+        // the way bends the motion instead of ending it.
+        const camera = createCamera({ behavior: scrollBehavior, offset: scrollOffset ?? DEFAULT_SCROLL_OFFSET, signal })
+        /** The deepest part of the path that is rendered, asked afresh on every frame. */
+        const deepest = () => checkExact() ?? resolveFieldElement(resolvedPath)
+
+        // Move at once when nothing on the way is left to open - every tab
+        // active, every collapsible and row open: the page heads for the
+        // deepest part of the path that is rendered, bending onto the target
+        // as it mounts, with no pause between click and motion.
         const routeInView =
           plan &&
           schema &&
           plan.steps.every((step) => {
             if (step.kind === 'row') {
-              return true
+              return !formState[step.path]?.rows?.[step.index]?.collapsed
             }
             if (step.kind === 'collapsible') {
               const collapsible = document.getElementById(step.id)?.querySelector('.collapsible')
@@ -393,71 +484,102 @@ export const LivePreviewInspectorListener: React.FC<LivePreviewInspectorListener
             const tabsEl = findTabsElement(step, schema.fields, formState, schema.blocksMap)
             return Boolean(tabsEl && tabButtonsOf(tabsEl)[step.index]?.classList.contains(TAB_BUTTON_ACTIVE_CLASS))
           })
-        if (routeInView && resolveFieldElement(resolvedPath)) {
-          glide = scrollToElement(
-            () => checkExact() ?? resolveFieldElement(resolvedPath),
-            scrollOffset,
-            scrollBehavior,
-            signal,
-            true,
-          )
+        const target = deepest()
+        if (routeInView && target && !(checkExact() && isInRestingView(target))) {
+          camera.aim(deepest)
         }
 
         if (plan && schema && !checkExact()) {
-          // Every collapsed row on the way, in one go and through the form
-          // state that owns the flag - not one toggle click per level, each
-          // waiting for the last to render. Rows that aren't mounted yet (in
-          // another tab, below the fold) take the flag just the same and
-          // render expanded when they do.
-          let expanded = false
-          for (const step of plan.steps) {
-            if (step.kind !== 'row') {
-              continue
-            }
-            const rows = getFieldsRef.current()[step.path]?.rows
-            if (!rows?.[step.index]?.collapsed) {
-              continue
-            }
-            dispatchFieldsRef.current({
-              type: 'SET_ROW_COLLAPSED',
-              path: step.path,
-              updatedRows: rows.map((row, index) => (index === step.index ? { ...row, collapsed: false } : row)),
-            })
-            expanded = true
-          }
-
-          if (expanded) {
-            // Let React commit the expansion before anything reads the DOM:
-            // a row still *rendered* collapsed would look like a toggle to
-            // click to the accordion fallback below, which would then close
-            // what was just opened.
-            await nextFrames(2)
-            if (signal.aborted) {
-              return 'not-found'
-            }
-            for (const step of plan.steps) {
-              if (step.kind === 'row') {
-                pulse(
-                  document
-                    .getElementById(rowIDFromPath(`${step.path}.${step.index}`) ?? '')
-                    ?.querySelector('.collapsible__toggle-wrap'),
-                )
+          // Go to where each thing opens and open it there. Opened out of
+          // sight, a tab switch clamps the page's scroll and a row grows
+          // somewhere the editor isn't looking - all they see is a jump.
+          // It opens as the page arrives, not after it has stopped: the
+          // motion goes on from there to the next stop or the field.
+          //
+          // Except for a tab: switching it replaces everything beneath it,
+          // and done mid-motion that cut the motion short with a jump. A
+          // tab switches once the page is still.
+          const bringIntoView = async (control: HTMLElement | null | undefined, { atRest = false } = {}) => {
+            if (control && !isInOpeningView(control)) {
+              // Never travel blind: what opened before has rendered by now
+              // (this step's control was found in it), and once it has
+              // settled it fades in as the page moves off - settled first,
+              // or it would still be shifting while the editor watches.
+              if (curtains.length > 0) {
+                await waitForQuietFrames(signal)
               }
+              liftCurtains()
+              camera.aim(control)
+              await (atRest ? camera.arrived() : camera.near(OPEN_WHEN_NEAR_PX))
             }
           }
+          const rowHeaderOf = (path: string, index: number) =>
+            document
+              .getElementById(rowIDFromPath(`${path}.${index}`) ?? '')
+              ?.querySelector<HTMLElement>('.collapsible__toggle-wrap') ?? null
 
-          // Tabs and collapsibles from the outside in: an inner one only
-          // exists once the outer one holding it is open. Only after
-          // something changed can the next one still be mounting, so only
-          // then is it waited for.
           planApplied = plan.complete
-          let clicked = expanded
+          let clicked = false
+          let rowsExpanded = false
 
-          for (const step of plan.steps) {
+          for (const [position, step] of plan.steps.entries()) {
             if (step.kind === 'row') {
+              if (rowsExpanded || !getFieldsRef.current()[step.path]?.rows?.[step.index]?.collapsed) {
+                continue
+              }
+
+              const find = () => rowHeaderOf(step.path, step.index)
+              await bringIntoView(clicked ? await waitForElement(find, tabSwitchWaitMs, { signal }) : find())
+              if (signal.aborted) {
+                return 'not-found'
+              }
+
+              // This row and every collapsed one inside it, in one go and
+              // through the form state that owns the flag - not one toggle
+              // click per level, each waiting for the last to render. Rows
+              // that aren't mounted yet (behind a tab still to switch) take
+              // the flag just the same and render expanded when they do.
+              const rows: { index: number; path: string }[] = []
+              for (const inner of plan.steps.slice(position)) {
+                if (inner.kind !== 'row') {
+                  continue
+                }
+                if (!getFieldsRef.current()[inner.path]?.rows?.[inner.index]?.collapsed) {
+                  continue
+                }
+                rows.push(inner)
+              }
+              // Nested rows open inside the first one: its box hides them all.
+              // The rows below it on screen step aside too - they would be
+              // pushed down in bursts as it fills - and come back where they
+              // end up.
+              const rowEl = document.getElementById(rowIDFromPath(`${step.path}.${step.index}`) ?? '')
+              curtains.push(drawCurtain(openingAreaOf(rowEl?.querySelector('.collapsible'))))
+              for (const below of visibleRowsAfter(rowEl)) {
+                curtains.push(drawCurtain(below, { fade: true }))
+              }
+              setRowsCollapsed(rows, false)
+              rowsExpanded = true
+              clicked = true
+
+              // Let React commit the expansion before anything reads the DOM:
+              // a row still *rendered* collapsed would look like a toggle to
+              // click to the accordion fallback below, which would then close
+              // what was just opened.
+              await nextFrames(2)
+              if (signal.aborted) {
+                return 'not-found'
+              }
+              for (const row of rows) {
+                pulse(rowHeaderOf(row.path, row.index))
+              }
               continue
             }
 
+            // Tabs and collapsibles from the outside in: an inner one only
+            // exists once the outer one holding it is open. Only after
+            // something changed can the next one still be mounting, so only
+            // then is it waited for.
             if (step.kind === 'collapsible') {
               const find = () => document.getElementById(step.id)
               const collapsibleEl = clicked ? await waitForElement(find, tabSwitchWaitMs, { signal }) : find()
@@ -470,10 +592,14 @@ export const LivePreviewInspectorListener: React.FC<LivePreviewInspectorListener
               }
               const collapsible = collapsibleEl.querySelector<HTMLElement>('.collapsible')
               if (collapsible?.classList.contains('collapsible--collapsed')) {
-                pulse(collapsible.querySelector(':scope > .collapsible__toggle-wrap'))
-                collapsible
-                  .querySelector<HTMLButtonElement>(':scope > .collapsible__toggle-wrap > .collapsible__toggle')
-                  ?.click()
+                const toggleWrap = collapsible.querySelector<HTMLElement>(':scope > .collapsible__toggle-wrap')
+                await bringIntoView(toggleWrap)
+                if (signal.aborted) {
+                  return 'not-found'
+                }
+                pulse(toggleWrap)
+                curtains.push(drawCurtain(openingAreaOf(collapsible)))
+                toggleWrap?.querySelector<HTMLButtonElement>(':scope > .collapsible__toggle')?.click()
                 clicked = true
               }
               continue
@@ -494,11 +620,27 @@ export const LivePreviewInspectorListener: React.FC<LivePreviewInspectorListener
             }
 
             if (!button.classList.contains(TAB_BUTTON_ACTIVE_CLASS)) {
+              await bringIntoView(button, { atRest: true })
+              if (signal.aborted) {
+                return 'not-found'
+              }
               pulse(button)
+              curtains.push(drawCurtain(tabContentOf(tabsEl)))
               button.click()
               clicked = true
             }
           }
+
+          timer.phase('open')
+
+          // Opened: the header was only a way there. Chasing it further - the
+          // page too short to bring it all the way up until the rows below
+          // it had rendered - was a motion of its own before the one to the
+          // field. The next aim is the field.
+          if (clicked) {
+            camera.hold()
+          }
+
 
           // Whatever the plan changed renders now - wait for it to show,
           // i.e. for the target or at least a deeper part of its path than
@@ -509,7 +651,20 @@ export const LivePreviewInspectorListener: React.FC<LivePreviewInspectorListener
               return 'not-found'
             }
           }
-          timer.phase('plan')
+          timer.phase('mount')
+          // And let it finish rendering before the page moves on: the fields
+          // it mounted, the editors they initialise.
+          if (clicked) {
+            await waitForQuietFrames(signal)
+            if (signal.aborted) {
+              return 'not-found'
+            }
+          }
+          await healUnrenderedRows()
+          if (signal.aborted) {
+            return 'not-found'
+          }
+          timer.phase('settle')
         }
 
         // Phase 2: whatever the plan didn't cover. Expanding a rendered
@@ -572,24 +727,50 @@ export const LivePreviewInspectorListener: React.FC<LivePreviewInspectorListener
             }
           }
 
-          // Aimed at the deepest part of the path that is rendered *on each
-          // frame*: the target mounts during this very scroll as soon as it
-          // comes within Payload's render margin of the viewport, and the
-          // motion then bends toward it instead of finishing the trip to an
-          // ancestor and starting a second one from there.
-          const ancestorEl = el
-          if (glide) {
-            // Already under way since the click - let it finish.
-            await glide
-            glide = undefined
-          } else {
-            await scrollToElement(
-              () => checkExact() ?? resolveFieldElement(resolvedPath) ?? ancestorEl,
-              scrollOffset,
-              scrollBehavior,
-              signal,
-            )
+          // Arrived already: opened right where the editor is looking, the
+          // field is in plain view - moving the page now would only take it
+          // away from under their eyes to put it at the offset. (Measured:
+          // that nudge was the second motion after nearly every row opened,
+          // the field sitting just under the header the page had come to.)
+          await camera.arrived()
+          // Payload renders a deep path level by level, each one a frame or
+          // more after the last. Aimed at every level as it appeared, that
+          // was one motion per level with a halt in between; once the target
+          // itself has shown, it is one motion, or none. Given up on silence:
+          // what only renders when scrolled near is left to the motion below.
+          if (step === 0 && !checkExact()) {
+            await waitForElement(checkExact, tabSwitchWaitMs, { idleMs: IDLE_GIVE_UP_MS, signal })
+            if (signal.aborted) {
+              return 'not-found'
+            }
           }
+          // And until it holds still: levels above it that are still
+          // rendering push it down in bursts, a few frames apart - followed
+          // as they came, that was a second motion after a halt. Behind the
+          // curtain, the wait shows nothing.
+          const arrived = checkExact()
+          if (step === 0 && arrived) {
+            await waitForStablePosition(arrived, { frames: 6, signal, timeoutMs: 600 })
+            if (signal.aborted) {
+              return 'not-found'
+            }
+          }
+          if (arrived && isInRestingView(arrived)) {
+            liftCurtains()
+            el = arrived
+            break
+          }
+
+          // Aimed at the deepest part of the path that is rendered *on each
+          // frame*: the target mounts during this very motion as soon as it
+          // comes within Payload's render margin of the viewport, and the
+          // motion bends toward it instead of finishing the trip to an
+          // ancestor and starting a second one from there. What opened
+          // fades in on the way.
+          const ancestorEl = el
+          camera.aim(() => deepest() ?? ancestorEl)
+          liftCurtains()
+          await camera.arrived()
           if (signal.aborted) {
             return 'not-found'
           }
@@ -621,8 +802,6 @@ export const LivePreviewInspectorListener: React.FC<LivePreviewInspectorListener
         }
         timer.phase('scroll')
 
-        sharedFlashElement(el, { className: classes.flash, color: flashColor, durationMs: flashDurationMs })
-
         // Cleared on a macrotask rather than right after the call: `focusin`
         // itself is synchronous, but an editor settling the selection we just
         // set (Lexical does) can move focus again in a microtask. Real user
@@ -641,16 +820,31 @@ export const LivePreviewInspectorListener: React.FC<LivePreviewInspectorListener
         if (caretEl) {
           const { bottom, top } = caretEl.getBoundingClientRect()
           if (top < 0 || bottom > window.innerHeight) {
-            await scrollToElement(caretEl, scrollOffset, scrollBehavior, signal)
+            camera.aim(caretEl)
+            await camera.arrived()
+            if (signal.aborted) {
+              return 'not-found'
+            }
           }
         }
+
+        // Last, once nothing moves any more: a field that lights up while the
+        // page still slides under it reads as restless, not as "here".
+        sharedFlashElement(el, { className: classes.flash, color: flashColor, durationMs: flashDurationMs })
         timer.phase('focus')
 
         return el === checkExact() ? 'exact' : 'ancestor'
       }
 
       void revealField().then((outcome) => {
+        liftCurtains()
         timer.end(signal.aborted ? 'aborted' : outcome)
+        // Rows deeper inside mount only after the ones around them rendered -
+        // one more look once all of it had the time to.
+        if (!signal.aborted) {
+          clearTimeout(healTimer)
+          healTimer = setTimeout(() => void healUnrenderedRows(), 600)
+        }
         if (!signal.aborted) {
           sendStatus(outcome === 'not-found' ? 'not-found' : 'done')
           labelTimer = setTimeout(() => setRevealLabel(undefined), 1_500)
@@ -669,7 +863,10 @@ export const LivePreviewInspectorListener: React.FC<LivePreviewInspectorListener
     // there reveals the field here.
     const sendFocus = (el: HTMLElement) => {
       const path = pathFromFieldElement(el)
-      if (!path) {
+      // A whole Array/Blocks field ("Add block", its own label) has no one
+      // place on the page to go to - better to stay put than to jump to
+      // its first row.
+      if (!path || getFieldsRef.current()[path]?.rows) {
         return
       }
 
@@ -752,6 +949,7 @@ export const LivePreviewInspectorListener: React.FC<LivePreviewInspectorListener
       clearTimeout(echoTimer)
       clearTimeout(noticeTimer)
       clearTimeout(labelTimer)
+      clearTimeout(healTimer)
       revealController?.abort()
       valuesChannelRef.current = null
     }

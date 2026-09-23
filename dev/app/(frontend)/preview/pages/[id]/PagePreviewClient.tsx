@@ -24,7 +24,8 @@ export const PagePreviewClient = ({ initialData }: Props) => {
 
   const { data } = useLivePreview<Page>({
     initialData,
-    serverURL: 'http://localhost:3000',
+    // Admin and preview share this dev server, whatever port it runs on.
+    serverURL: typeof window === 'undefined' ? 'http://localhost:3000' : window.location.origin,
   })
 
   const page = inspectable(data, { stega: true })

@@ -488,7 +488,11 @@ export const LivePreviewInspectorClient: React.FC<LivePreviewInspectorClientProp
        */
       const offset = () => topInset(el) + UNCOVER_MARGIN_PX
       const { bottom, top } = el.getBoundingClientRect()
-      const inView = top >= offset() && bottom <= window.innerHeight
+      // A section taller than the viewport never fits it: in view is also
+      // one that fills the viewport, or starts in its upper half.
+      const inView =
+        (top >= offset() && (bottom <= window.innerHeight || top <= window.innerHeight / 2)) ||
+        (top <= offset() && bottom >= window.innerHeight)
       void (async () => {
         if (!inView) {
           await scrollToElement(el, offset, 'smooth', undefined, true)

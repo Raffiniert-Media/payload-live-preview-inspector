@@ -37,6 +37,9 @@ export const Pages: CollectionConfig = {
                     // Labelled, to show the preview names fields the way the admin does.
                     { name: 'heading', type: 'text', label: 'Überschrift' },
                     { name: 'text', type: 'textarea' },
+                    // A Lexical editor per row, as real sections have - the heaviest
+                    // thing an expanding row mounts.
+                    { name: 'body', type: 'richText' },
                   ],
                 },
                 {

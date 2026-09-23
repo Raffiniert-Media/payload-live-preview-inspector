@@ -293,6 +293,15 @@ describe('findTaggedElementByPath', () => {
     expect(findTaggedElementByPath(document, 'body')).toBe(document.getElementById('run'))
   })
 
+  it('goes to a whole row’s own container, not its first leaf', () => {
+    document.body.innerHTML = `
+      <section id="row" ${LIVE_PREVIEW_PATH_ATTRIBUTE}="layout.$a">
+        <p>Intro without a tag</p>
+        <h2 id="leaf" ${LIVE_PREVIEW_PATH_ATTRIBUTE}="layout.$a.heading">Heading</h2>
+      </section>`
+    expect(findTaggedElementByPath(document, 'layout.$a')).toBe(document.getElementById('row'))
+  })
+
   it('never treats a same-prefixed sibling path as a descendant', () => {
     document.body.innerHTML = `<p id="other" ${LIVE_PREVIEW_PATH_ATTRIBUTE}="bodyOther.text">Text</p>`
     expect(findTaggedElementByPath(document, 'body')).toBeNull()

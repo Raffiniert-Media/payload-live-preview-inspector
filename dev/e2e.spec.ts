@@ -4,11 +4,11 @@ import { expect, test } from '@playwright/test'
 
 declare global {
   interface Window {
-    /** Set by the dev app's host-style capture listener when it sees the click. */
-    __hostSawClick?: boolean
     __activatedTabs?: Set<string>
     /** Tag names of preview elements that got the reverse-direction flash class. */
     __focusFlashes?: string[]
+    /** Set by the dev app's host-style capture listener when it sees the click. */
+    __hostSawClick?: boolean
   }
 }
 
@@ -701,7 +701,13 @@ test('the modifier hands an in-page link to the host, without navigating', async
  * `performance.measure` entry each reveal leaves behind.
  */
 
-type RevealMeasure = { duration: number; outcome: string; path: string; phases: Record<string, number> }
+type RevealMeasure = {
+  duration: number
+  longestFrames?: Record<string, number>
+  outcome: string
+  path: string
+  phases: Record<string, number>
+}
 
 const REVEAL_MEASURE = 'payload-live-preview-inspector:reveal'
 
@@ -728,6 +734,129 @@ const nextReveal = async (page: Page, before: number): Promise<RevealMeasure> =>
 const resetPreferences = async (page: Page) => {
   const response = await page.request.delete('/api/payload-preferences?where[id][exists]=true')
   expect(response.ok()).toBe(true)
+}
+
+type Motion = {
+  layoutShift: number
+  maxStep: number
+  movedAfterFlash: number
+  moves: number
+  reversals: number
+  trace: string
+}
+
+/**
+ * Records the admin's scroll position frame by frame until `field` flashes
+ * and for a moment after - what an editor perceives as smooth or not, which
+ * a duration can't tell: a quick reveal can still stop, start again, turn
+ * back, or keep moving under a field that has already lit up.
+ */
+const recordMotion = (page: Page, field: string) =>
+  page.evaluate((selector) => {
+    type Trace = { flashedAt?: number; frames: { at: number; d: number; y: number }[]; shift: number }
+    const trace: Trace = { frames: [], shift: 0 }
+    ;(window as unknown as { __motion: Trace }).__motion = trace
+    // Content moving under the eye that no scroll explains - a row's fields
+    // popping in, a tab's content swapped: the browser's own layout-shift score.
+    new PerformanceObserver((list) => {
+      for (const entry of list.getEntries() as unknown as { value: number }[]) {
+        trace.shift += entry.value
+      }
+    }).observe({ type: 'layout-shift' })
+
+    // What the editor sees move, frame to frame: the field once it can be
+    // seen, otherwise what is on screen - never something hidden behind a
+    // curtain (rendering there moves nothing anyone sees), nor the scroll
+    // position alone (the browser also shifts it to keep the view steady
+    // while content above resizes, which nobody sees either).
+    const hidden = (el: Element) => Boolean(el.closest('[style*="opacity: 0"]'))
+    const visibleProbes = (): Element[] => {
+      const target = document.querySelector(selector)
+      if (target && !hidden(target)) {
+        const { bottom, top } = target.getBoundingClientRect()
+        if (bottom > 0 && top < window.innerHeight) {
+          return [target]
+        }
+      }
+      // In the form's column - not on the nav or the preview, which stay put.
+      const column = document.querySelector('.render-fields')?.getBoundingClientRect()
+      const x = column ? column.left + Math.min(40, column.width / 2) : window.innerWidth * 0.3
+      return [0.25, 0.5, 0.75]
+        .map((y) => document.elementFromPoint(x, window.innerHeight * y))
+        .filter((el): el is Element => Boolean(el) && !hidden(el!) && getComputedStyle(el!).position !== 'sticky')
+    }
+
+    let probes: { el: Element; top: number }[] = []
+    const startedAt = performance.now()
+    const tick = (now: number) => {
+      const deltas = probes
+        .filter(({ el }) => el.isConnected)
+        .map(({ el, top }) => top - el.getBoundingClientRect().top)
+        .sort((a, b) => a - b)
+      const d = deltas.length ? deltas[Math.floor(deltas.length / 2)] : 0
+      trace.frames.push({ at: now, d, y: window.scrollY })
+      probes = visibleProbes().map((el) => ({ el, top: el.getBoundingClientRect().top }))
+
+      if (trace.flashedAt === undefined && /flash/.test(document.querySelector(selector)?.className ?? '')) {
+        trace.flashedAt = now
+      }
+      if (now - startedAt < 8_000 && (trace.flashedAt === undefined || now - trace.flashedAt < 600)) {
+        requestAnimationFrame(tick)
+      }
+    }
+    requestAnimationFrame(tick)
+  }, field)
+
+const motionOf = async (page: Page): Promise<Motion> => {
+  await page.waitForTimeout(650)
+  return page.evaluate(() => {
+    const { flashedAt, frames, shift } = (
+      window as unknown as { __motion: { flashedAt?: number; frames: { at: number; d: number; y: number }[]; shift: number } }
+    ).__motion
+    let maxStep = 0
+    let moves = 0
+    let reversals = 0
+    let movedAfterFlash = 0
+    let direction = 0
+    let still = true
+    // A motion counts once it covers 20px - a pixel or two of drift is
+    // nothing anyone sees as the page moving again.
+    let travelled = 0
+    for (const { at, d } of frames.slice(1)) {
+      if (Math.abs(d) < 1) {
+        still = true
+        continue
+      }
+      maxStep = Math.max(maxStep, Math.abs(d))
+      if (still) {
+        travelled = 0
+      }
+      const before = travelled
+      travelled += Math.abs(d)
+      if (before < 20 && travelled >= 20) {
+        moves += 1
+      }
+      still = false
+      const sign = Math.sign(d)
+      if (direction !== 0 && sign !== direction) {
+        reversals += 1
+      }
+      direction = sign
+      if (flashedAt !== undefined && at > flashedAt) {
+        movedAfterFlash += Math.abs(d)
+      }
+    }
+    // `DEBUG_REVEALS=1`: the frames themselves - ms relative to the flash, visible motion.
+    const trace = frames.map((f) => [Math.round(f.at - (flashedAt ?? 0)), Math.round(f.d)])
+    return {
+      layoutShift: Math.round(shift * 1000) / 1000,
+      maxStep: Math.round(maxStep),
+      movedAfterFlash: Math.round(movedAfterFlash),
+      moves,
+      reversals,
+      trace: JSON.stringify(trace),
+    }
+  })
 }
 
 const COMPLEX_TARGETS = [
@@ -759,9 +888,17 @@ test('complex page: every field is reached with one click, exactly, within budge
     page.on('console', (message) => message.text().includes('live-preview-inspector') && console.log(message.text()))
   }
 
+  if (process.env.CPU_THROTTLE) {
+    // A slower machine than the one running the suite: where a heavy row
+    // mount turns into a visible stutter.
+    const cdp = await page.context().newCDPSession(page)
+    await cdp.send('Emulation.setCPUThrottlingRate', { rate: Number(process.env.CPU_THROTTLE) })
+  }
+
   for (const target of COMPLEX_TARGETS) {
     const before = await revealCount(page)
     const startedAt = Date.now()
+    await recordMotion(page, target.field)
     await frame.getByText(target.text, { exact: false }).first().click()
 
     // Click to flash, as the editor sees it - measurable against any version
@@ -781,18 +918,176 @@ test('complex page: every field is reached with one click, exactly, within budge
 
     const reveal = await nextReveal(page, before)
     const phases = Object.entries(reveal.phases)
-      .map(([name, ms]) => `${name} ${ms}`)
+      .map(([name, ms]) => `${name} ${ms}${reveal.longestFrames ? ` [frame ${reveal.longestFrames[name]}]` : ''}`)
       .join(' / ')
-    report.push(`${wall}ms (reveal ${Math.round(reveal.duration)}ms ${reveal.outcome}) - ${target.why} (${phases})`)
+    const motion = await motionOf(page)
+    if (process.env.DEBUG_REVEALS) {
+      // eslint-disable-next-line no-console -- opt-in debugging aid
+      console.log(`MOTION ${target.why}: ${motion.trace}`)
+    }
+    report.push(
+      `${wall}ms (reveal ${Math.round(reveal.duration)}ms ${reveal.outcome}) - ${target.why} (${phases})` +
+        ` - ${motion.moves} move(s), ${motion.reversals} reversal(s), largest step ${motion.maxStep}px,` +
+        ` ${motion.movedAfterFlash}px after the flash, layout shift ${motion.layoutShift}`,
+    )
 
     expect(reveal.outcome, target.why).toBe('exact')
     await expect(page.locator(target.field), target.why).toBeInViewport()
     expect(reveal.duration, target.why).toBeLessThan(REVEAL_BUDGET_MS)
+    // Smooth, not only quick: the page is still once the field lights up,
+    // and it got there without a jump - a tab switched out of sight used to
+    // drop the page by thousands of pixels in one frame. (Turning back is
+    // fine: up to a tab bar, then down into the tab, is the way there.)
+    expect(motion.movedAfterFlash, `${target.why}: page moved after the flash`).toBeLessThan(4)
+    expect(motion.maxStep, `${target.why}: page jumped`).toBeLessThan(600)
+    // One motion to where things open, at most one more to the field - not a
+    // halt and a new start at every level of a nested path.
+    expect(motion.moves, `${target.why}: stop-and-go`).toBeLessThanOrEqual(2)
   }
 
   test.info().annotations.push({ type: 'reveals', description: report.join('\n') })
   // eslint-disable-next-line no-console -- the numbers are the point of this test
   console.log(`complex page reveals:\n  ${report.join('\n  ')}`)
+})
+
+test('complex page: opening a row in the admin takes the preview to that section, never to the top', async ({
+  page,
+}) => {
+  test.setTimeout(process.env.CI ? 240_000 : 90_000)
+  await login(page)
+  const frame = await openLivePreview(page, 'pages')
+  await page.locator('.tabs-field__tab-button', { hasText: 'Sections' }).click()
+
+  // The row's header is in the row but in none of its fields - it used to
+  // resolve to the whole blocks field, and the preview went to its first
+  // row: the top of the page.
+  const header = page.locator('#sections-row-30 .collapsible__toggle-wrap').first()
+  // Clear of the admin's sticky document controls, which would take the click.
+  await header.evaluate((el) => el.scrollIntoView({ block: 'center' }))
+  // Where an editor clicks to open it: the header's free right part (the
+  // block name input covers its left).
+  const box = (await header.boundingBox())!
+  await header.click({ position: { x: box.width * 0.75, y: box.height / 2 } })
+  await expect(page.locator('#field-sections__30__heading')).toBeVisible()
+
+  const section = frame.locator('h2', { hasText: 'Feature section 31' })
+  await expect(section).toBeInViewport()
+  await expect(frame.locator('h1')).not.toBeInViewport()
+
+  // The blocks field itself has no one place on the page: the preview stays.
+  const addBlock = page.locator('#field-sections').getByRole('button', { name: /add block/i }).last()
+  await addBlock.evaluate((el) => el.scrollIntoView({ block: 'center' }))
+  await addBlock.click()
+  await page.waitForTimeout(1_000)
+  await expect(section).toBeInViewport()
+  await page.keyboard.press('Escape')
+})
+
+test('complex page: a row Payload fails to render into is rendered anyway', async ({ page }) => {
+  test.setTimeout(process.env.CI ? 240_000 : 90_000)
+  // What editors saw on a customer page: a row the reveal opened stayed
+  // empty - Payload renders a row's fields only once an IntersectionObserver
+  // reports them near the viewport, and that report never came. Recreated
+  // here by swallowing every report for a moment after the click.
+  await page.addInitScript(() => {
+    const Native = window.IntersectionObserver
+    window.IntersectionObserver = class extends Native {
+      constructor(callback: IntersectionObserverCallback, options?: IntersectionObserverInit) {
+        super((entries, observer) => {
+          if (!(window as unknown as { __swallowIntersections?: boolean }).__swallowIntersections) {
+            callback(entries, observer)
+          }
+        }, options)
+      }
+    }
+  })
+  await login(page)
+  const frame = await openLivePreview(page, 'pages')
+  await page.locator('.tabs-field__tab-button', { hasText: 'Sections' }).click()
+  await expect(page.locator('#sections-row-30')).toBeAttached()
+
+  await page.evaluate(() => {
+    const w = window as unknown as { __swallowIntersections?: boolean }
+    w.__swallowIntersections = true
+    setTimeout(() => (w.__swallowIntersections = false), 1_200)
+  })
+  await frame.locator('h2', { hasText: 'Feature section 31' }).click()
+
+  await expect(page.locator('#field-sections__30__heading')).toHaveClass(/flash/, { timeout: 10_000 })
+  await expect(page.locator('#field-sections__30__heading')).toBeInViewport()
+})
+
+test('complex page: a row that was open all along, inside a section the reveal opens, is rendered too', async ({
+  page,
+}) => {
+  test.setTimeout(process.env.CI ? 240_000 : 90_000)
+  // The row found stuck on the customer page: not one the reveal opened, but
+  // one Payload remembered open inside a section the reveal opened.
+  await page.addInitScript(() => {
+    const Native = window.IntersectionObserver
+    window.IntersectionObserver = class extends Native {
+      constructor(callback: IntersectionObserverCallback, options?: IntersectionObserverInit) {
+        super((entries, observer) => {
+          if (!(window as unknown as { __swallowIntersections?: boolean }).__swallowIntersections) {
+            callback(entries, observer)
+          }
+        }, options)
+      }
+    }
+  })
+  await login(page)
+  const frame = await openLivePreview(page, 'pages')
+  await page.locator('.tabs-field__tab-button', { hasText: 'Sections' }).click()
+
+  const toggle = async (id: string) => {
+    const header = page.locator(`#${id} .collapsible__toggle-wrap`).first()
+    await header.evaluate((el) => el.scrollIntoView({ block: 'center' }))
+    const box = (await header.boundingBox())!
+    await header.click({ position: { x: box.width * 0.75, y: box.height / 2 } })
+  }
+  await toggle('sections-row-40')
+  await toggle('sections-40-rows-row-1')
+  await expect(page.locator('#field-sections__40__rows__1__layout')).toBeAttached()
+  await toggle('sections-row-40')
+  await expect(page.locator('#sections-row-40 > * > .collapsible, #sections-row-40 .collapsible').first()).toHaveClass(
+    /collapsible--collapsed/,
+  )
+
+  await page.evaluate(() => {
+    const w = window as unknown as { __swallowIntersections?: boolean }
+    w.__swallowIntersections = true
+    setTimeout(() => (w.__swallowIntersections = false), 1_200)
+  })
+  await frame.getByText('Grid row 2 column 2 headline').first().click()
+
+  const target = page.locator('#field-sections__40__rows__1__columns__1__content__0__headline')
+  await expect(target).toHaveClass(/flash/, { timeout: 10_000 })
+  await expect(target).toBeInViewport()
+})
+
+test('complex page: a second click in the same section leaves what is already open alone', async ({ page }) => {
+  test.setTimeout(process.env.CI ? 240_000 : 90_000)
+  await login(page)
+  const frame = await openLivePreview(page, 'pages')
+  const openColumn = page.locator('#sections-40-rows-1-columns-row-1')
+  await frame.getByText('Grid row 2 column 2 headline').first().click()
+  await expect(page.locator('#field-sections__40__rows__1__columns__1__content__0__headline')).toHaveClass(/flash/)
+
+  // The column just revealed sits right below the one the next click opens.
+  // Opening that one may fade in what opens - never the open column beside
+  // it, which used to fade out and in again for nothing.
+  await openColumn.evaluate((el) => {
+    const w = window as unknown as { __openColumnHidden?: boolean }
+    new MutationObserver(() => {
+      if ((el as HTMLElement).style.opacity === '0') {
+        w.__openColumnHidden = true
+      }
+    }).observe(el, { attributeFilter: ['style'], attributes: true })
+  })
+  await frame.getByText('Grid row 2 column 1 headline').first().click()
+  await expect(page.locator('#field-sections__40__rows__1__columns__0__content__0__headline')).toHaveClass(/flash/)
+
+  expect(await page.evaluate(() => (window as unknown as { __openColumnHidden?: boolean }).__openColumnHidden)).toBeFalsy()
 })
 
 test('complex page: a second click during a reveal wins, and the first one leaves no trace', async ({ page }) => {

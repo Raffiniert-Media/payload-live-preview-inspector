@@ -7,6 +7,7 @@ import {
   expandCollapsedAncestors,
   fieldIDFromPath,
   fieldPathFromFormState,
+  findUnrenderedRows,
   flashElement,
   focusElement,
   pathFromFieldElement,
@@ -18,6 +19,7 @@ import {
   rowIDFromPath,
   scrollToElement,
   toRowIDPath,
+  unrenderedRowFields,
   waitForElement,
   waitForElementLayout,
 } from './pathResolution.js'
@@ -85,6 +87,24 @@ describe('pathFromFieldElement', () => {
     document.body.innerHTML =
       '<div data-field-path="body"><div class="lexical-editor" contenteditable="true"><p>text</p></div></div>'
     expect(pathFromFieldElement(document.querySelector('p')!)).toBe('body')
+  })
+
+  it('reads a row off its header, not the Array/Blocks field around it', () => {
+    // The row toggle sits in the row, but in none of its fields; the next id
+    // up is the whole blocks field - whose first row is the top of the page.
+    document.body.innerHTML = `
+      <div id="field-layout">
+        <div id="layout-row-3"><div class="collapsible__toggle-wrap"><button>Toggle</button></div></div>
+        <div id="layout-3-items-row-1"><button id="nested">Toggle</button></div>
+      </div>`
+    expect(pathFromFieldElement(document.querySelector('button')!)).toBe('layout.3')
+    expect(pathFromFieldElement(document.getElementById('nested')!)).toBe('layout.3.items.1')
+  })
+
+  it('passes over the scroll id an Array row header also carries', () => {
+    document.body.innerHTML = `
+      <div id="items-row-1"><div id="scroll-_r_5_-row-1"><span id="label">Row 02</span></div></div>`
+    expect(pathFromFieldElement(document.getElementById('label')!)).toBe('items.1')
   })
 
   it('returns null when the element is outside any field', () => {
@@ -556,6 +576,12 @@ describe('scrollToElement', () => {
     vi.stubGlobal('matchMedia', vi.fn().mockReturnValue({ matches: false }))
     const descriptor = Object.getOwnPropertyDescriptor(window, 'scrollY')
     Object.defineProperty(window, 'scrollY', { configurable: true, get: () => y })
+    // The document is as tall as `maxY` lets it scroll.
+    const heightDescriptor = Object.getOwnPropertyDescriptor(document.documentElement, 'scrollHeight')
+    Object.defineProperty(document.documentElement, 'scrollHeight', {
+      configurable: true,
+      get: () => (Number.isFinite(maxY) ? maxY : 1e9) + window.innerHeight,
+    })
 
     const element = (position: () => number) => {
       const el = document.createElement('div')
@@ -573,6 +599,11 @@ describe('scrollToElement', () => {
           Object.defineProperty(window, 'scrollY', descriptor)
         } else {
           Reflect.deleteProperty(window, 'scrollY')
+        }
+        if (heightDescriptor) {
+          Object.defineProperty(document.documentElement, 'scrollHeight', heightDescriptor)
+        } else {
+          Reflect.deleteProperty(document.documentElement, 'scrollHeight')
         }
       },
       scrollBy,
@@ -762,6 +793,17 @@ describe('scrollToElement', () => {
     expect(sim.y()).toBe(2500)
     // One correction attempt that moved nothing, not the whole budget.
     expect(performance.now() - startedAt).toBeLessThan(1_200)
+    sim.restore()
+  })
+
+  it('does not wait out an animation that cannot move the page (target past the document end)', async () => {
+    const sim = simulatePage({ docTop: 3000, maxY: 0 })
+    const startedAt = performance.now()
+
+    await scrollToElement(sim.el, 80, 'smooth', undefined, true)
+
+    expect(sim.scrollBy).not.toHaveBeenCalled()
+    expect(performance.now() - startedAt).toBeLessThan(50)
     sim.restore()
   })
 
@@ -1000,5 +1042,44 @@ describe('flashElement', () => {
 
     expect(el.style.getPropertyValue('--payload-live-preview-inspector-flash-color')).toBe('#ff0000')
     expect(el.style.animationDuration).toBe('500ms')
+  })
+})
+
+describe('unrenderedRowFields', () => {
+  const row = (collapsed: boolean, fields: string) => {
+    document.body.innerHTML = `
+      <div id="layout-row-0">
+        <div class="collapsible${collapsed ? ' collapsible--collapsed' : ''}">
+          <div class="collapsible__toggle-wrap"></div>
+          <div><div class="collapsible__content"><div class="render-fields">${fields}</div></div></div>
+        </div>
+      </div>`
+    return document.getElementById('layout-row-0')
+  }
+
+  it('finds the fields container of an open row Payload rendered nothing into', () => {
+    expect(unrenderedRowFields(row(false, ''))?.className).toBe('render-fields')
+  })
+
+  it('leaves a rendered row, a closed one and a missing one alone', () => {
+    expect(unrenderedRowFields(row(false, '<div class="field-type"></div>'))).toBeNull()
+    expect(unrenderedRowFields(row(true, ''))).toBeNull()
+    expect(unrenderedRowFields(null)).toBeNull()
+  })
+})
+
+describe('findUnrenderedRows', () => {
+  it('lists every open, empty row with its path - not scroll ids, closed or rendered rows', () => {
+    const row = (id: string, collapsed: boolean, fields: string) => `
+      <div id="${id}"><div class="collapsible${collapsed ? ' collapsible--collapsed' : ''}">
+        <div><div class="render-fields">${fields}</div></div>
+      </div></div>`
+    document.body.innerHTML =
+      row('layout-4-rows-row-1', false, '') +
+      row('layout-4-rows-row-2', true, '') +
+      row('layout-row-0', false, '<div class="field-type"></div>') +
+      row('scroll-_r_1_-row-0', false, '')
+
+    expect(findUnrenderedRows().map(({ index, path }) => `${path}.${index}`)).toEqual(['layout.4.rows.1'])
   })
 })

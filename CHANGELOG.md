@@ -1,5 +1,127 @@
 # Changelog
 
+## 1.13.0
+
+### Preview → admin: one motion, and nothing popping in
+
+On large, nested pages a reveal still read as jumpy: it travelled, halted,
+opened something, halted again and travelled on, while rows and tabs filled
+in visible bursts. On a customer page the scrolling itself also stuttered.
+
+- **Scrolling runs off the main thread.** The admin is now scrolled by the
+  browser's own smooth scrolling instead of frame by frame from script.
+  Measured in Chrome: through a 300 ms block of the main thread, a smooth
+  scroll went on and covered 1562 px, where the script-driven one stood
+  still. A reveal blocks the main thread constantly, since every row it opens
+  renders fields and every rich-text editor starts up. That was the stutter.
+- **One camera per reveal** (`createCamera`). A new aim is handed to the
+  browser while the page is still moving, and the speed carries over into it
+  (178 → 153 → 124 px per frame, no stop). The page opens a row as it
+  arrives at its header, not after it has stopped. Tabs are the exception:
+  switching one replaces everything beneath it, so it waits until the page
+  is still.
+- **No chasing a header the page can't reach yet.** Near the end of a list,
+  the page is too short to bring a header all the way up until the rows
+  below it have rendered. The camera used to follow it as the page grew, a
+  motion of its own before the one to the field. Once opened, the header is
+  let go.
+- **One motion to the field, or none.** Payload renders a deep path level by
+  level. The page now waits, unseen, until the target has appeared and holds
+  still, then travels once. If the field is already in plain view after
+  opening, the page doesn't move at all. Before, it nudged the field up to
+  the offset after nearly every row.
+- **Curtains** (`drawCurtain`). While Payload renders into a row, a
+  collapsible or a switched tab, that area is invisible, and it fades in
+  (220 ms) once finished. The rows below an opening row step aside the same
+  way, instead of being pushed down in bursts. Only closed rows do that: an
+  open row is content the editor may just have looked at (a second click in
+  the same section, opening the column next to the one revealed before), and
+  fading it out and in replayed an animation for something that never
+  changed. What is already open isn't touched: a click on a field whose way
+  is open is a single glide, or nothing at all when the field is in view. Only opacity changes, which
+  runs on the compositor, and Payload's IntersectionObservers ignore it.
+  Curtains are always lifted before the page travels and when a reveal ends
+  or is aborted.
+
+Measured on the complex dev page, including at 4× CPU throttling: at most
+two motions per reveal (was up to four, with a halt between each), and
+layout shift at 0.02 or less (was up to 0.087). The e2e test now fails on more
+than two motions. It measures what can be seen: the field once it is
+visible, otherwise content on screen, but nothing behind a curtain.
+
+
+### Opening a row in the admin no longer sends the preview to the top
+
+A row's header (its toggle, its label, the block name input) sits inside the
+row but inside none of its fields. Looking for the field that had focus, the
+listener climbed past the row to the whole Array/Blocks field, and the preview
+went to that field's first row: the top of the page, whichever row had been
+opened. The header now resolves to its row, and the preview glides to that
+section (unless it is in view already; a section taller than the viewport
+counts as in view once it fills it). The Array/Blocks field itself ("Add
+block") has no one place on the page, so it no longer moves the preview at
+all.
+
+### A row that opens empty is rendered anyway
+
+On a customer page, a row a reveal had opened sometimes stayed empty: open,
+no fields, until the editor closed and reopened it by hand. Payload renders a
+row's fields only once an IntersectionObserver reports them near the viewport
+(`RenderIfInViewport`), and for those rows the report never came. Every open
+row near the viewport is now checked after a reveal, not only the ones it opened
+itself: the row found stuck on that page had been open all along (Payload
+remembered it) inside a section the reveal opened. If a row is open and in
+rendering range, but still empty after a moment, its empty fields container is hidden for two
+frames (invisible, since it is empty), which has the observer report again.
+If even that doesn't help, the row is closed and reopened, which is what the
+editor did by hand. Both steps are logged in development. The e2e suite
+recreates the missing report by swallowing the observer's callbacks for a
+moment. Without this, the reveal never reaches the field.
+
+An Array row's header also carries a second id of the row-id shape
+(`scroll-<react id>-row-<index>`); the header detection above no longer
+takes it for a path.
+
+### Preview → admin: go there, open it, then light it up
+
+Recorded frame by frame on the complex dev page, a reveal lit the field up
+and then moved the page under it: by 448 px for a named tab inside a collapsed
+row, and a tab switched out of sight dropped the page by 2914 px in a single
+frame. It now works in the same order an editor would:
+
+- **Go to where things open first.** Before a row is expanded, a tab switched
+  or a collapsible opened, the page glides to its header or tab bar if that
+  isn't in view. It then opens where the editor is looking, and the page holds
+  still while it does, instead of a row growing under a page in motion.
+- **Let it render before moving on.** After opening, the reveal waits for the
+  admin to render smoothly again (a few frames in a row within budget, 400 ms
+  at most). The fields a row mounts and the rich-text editors they start no
+  longer drop frames out of the next scroll.
+- **Stay put when the field is in view.** A field opened in plain view isn't
+  moved to the scroll offset any more.
+- **Light it up last.** The flash waits until the page has stopped, the
+  caret scroll into a long rich text included.
+- **No waiting on a scroll that can't happen.** A target past the top or end
+  of the document used to animate for the full duration without anything
+  moving.
+
+Measured on the complex page: nothing moves after the flash in any case (was
+up to 448 px), and the largest single-frame step is 291 px (was 2914 px). The
+reveal takes somewhat longer where it now travels to a header first (up to
+~1.9 s for a collapsible in the last tab), in exchange for one calm motion per
+step.
+
+### Measuring smoothness
+
+- Every reveal's `performance.measure` entry now also carries `longestFrames`,
+  the longest gap between two frames per phase; the dev console flags a phase
+  over 50 ms.
+- The complex-page e2e test records the admin's motion frame by frame and
+  fails on movement after the flash or a jump. `CPU_THROTTLE=4` runs it on a
+  simulated slower machine, and the sections now include a rich-text field,
+  as real ones do.
+- `PORT=3100 pnpm test:e2e` runs the suite on another port than 3000.
+
 ## 1.12.0
 
 ### One click reaches any field, on complex pages too

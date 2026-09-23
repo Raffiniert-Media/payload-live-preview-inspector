@@ -20,13 +20,17 @@ export const fieldIDFromPath = (path: string): string => `field-${path.replace(/
 /** Prefix used by every non-rich-text field's `id`, set on whichever element is its actual control. */
 const FIELD_ID_PREFIX = 'field-'
 
+/** Payload's id for an Array/Blocks row's wrapper: `<parent path, dots as dashes>-row-<index>`. */
+const ROW_ID_PATTERN = /^(.+)-row-(\d+)$/
+
 /**
  * The inverse of `fieldIDFromPath`/Payload's own `data-field-path`: given a
  * DOM element inside the admin form (typically the one that just received
  * focus), climbs to the nearest ancestor that identifies a field and returns
  * its path - with current numeric row indices, not `$rowId` markers (see
  * `toRowIDPath` to convert). `null` when `el` isn't inside a field at all
- * (e.g. a sidebar button).
+ * (e.g. a sidebar button). Inside a row but outside its fields (the row's
+ * header), it is the row's own path.
  *
  * Checked in one upward walk rather than two separate `closest()` calls, so
  * whichever attribute sits closest to `el` wins - e.g. a field nested inside
@@ -43,6 +47,16 @@ export const pathFromFieldElement = (el: HTMLElement): null | string => {
     }
     if (node.id.startsWith(FIELD_ID_PREFIX)) {
       return node.id.slice(FIELD_ID_PREFIX.length).replace(/__/g, '.')
+    }
+    // A row's header (its toggle, its label) sits inside the row but inside
+    // none of its fields. Climbing on would reach the whole Array/Blocks
+    // field - and the preview would go to its first row, i.e. to the top of
+    // the page, whichever row was opened.
+    // (An Array row's header carries a second id of that shape, `scroll-<react
+    // id>-row-<index>`, for Payload's own scroll-to-new-row - not a path.)
+    const row = node.id.startsWith('scroll-') ? null : ROW_ID_PATTERN.exec(node.id)
+    if (row) {
+      return `${row[1].replace(/-/g, '.')}.${row[2]}`
     }
     node = node.parentElement
   }
@@ -568,7 +582,12 @@ const STABLE_POSITION_TIMEOUT_MS = 400
  * measuring in that window reads a position that is about to shift again,
  * which made corrections chase a moving target and give up short of it.
  */
-const waitForStablePosition = (el: HTMLElement): Promise<void> =>
+type StablePositionOptions = { frames?: number; signal?: AbortSignal; timeoutMs?: number }
+
+export const waitForStablePosition = (
+  el: HTMLElement,
+  { frames = STABLE_POSITION_FRAMES, signal, timeoutMs = STABLE_POSITION_TIMEOUT_MS }: StablePositionOptions = {},
+): Promise<void> =>
   new Promise((resolve) => {
     const startedAt = performance.now()
     let lastTop = el.getBoundingClientRect().top
@@ -579,7 +598,7 @@ const waitForStablePosition = (el: HTMLElement): Promise<void> =>
       stableFrames = Math.abs(top - lastTop) < SCROLL_CONVERGENCE_THRESHOLD_PX ? stableFrames + 1 : 0
       lastTop = top
 
-      if (stableFrames >= STABLE_POSITION_FRAMES || performance.now() - startedAt >= STABLE_POSITION_TIMEOUT_MS) {
+      if (signal?.aborted || stableFrames >= frames || performance.now() - startedAt >= timeoutMs) {
         resolve()
         return
       }
@@ -588,6 +607,109 @@ const waitForStablePosition = (el: HTMLElement): Promise<void> =>
 
     requestAnimationFrame(tick)
   })
+
+/**
+ * Resolves once the page renders smoothly again - `quietFrames` frames in a
+ * row, each within `maxFrameMs` of the last - or after `timeoutMs` at the
+ * latest.
+ *
+ * What an expanded row or a switched tab costs doesn't end with its first
+ * frame: Payload mounts its fields over the next few, rich-text editors
+ * initialise after that. A scroll started into that work drops frames and
+ * stutters; started after it, the same scroll runs clean.
+ */
+export const waitForQuietFrames = (
+  signal?: AbortSignal,
+  { maxFrameMs = 24, quietFrames = 2, timeoutMs = 400 } = {},
+): Promise<void> =>
+  new Promise((resolve) => {
+    const startedAt = performance.now()
+    let lastFrameAt: number | undefined
+    let quiet = 0
+
+    const tick = (now: number) => {
+      quiet = lastFrameAt !== undefined && now - lastFrameAt <= maxFrameMs ? quiet + 1 : 0
+      lastFrameAt = now
+      if (signal?.aborted || quiet >= quietFrames || now - startedAt >= timeoutMs) {
+        resolve()
+        return
+      }
+      requestAnimationFrame(tick)
+    }
+
+    requestAnimationFrame(tick)
+  })
+
+/**
+ * Whether `el` can be looked at where it is: whole, clear of the bars at the
+ * top, and not squeezed against the bottom edge. A field that is doesn't
+ * need the page moved to be seen.
+ */
+export const isInRestingView = (el: HTMLElement): boolean => {
+  const { bottom, top } = el.getBoundingClientRect()
+  return top >= topInset(el) && bottom <= window.innerHeight * 0.9
+}
+
+/**
+ * Whether `el` is where an editor would watch it open: clear of the bars at
+ * the top, and high enough that whatever opens beneath it shows too.
+ */
+export const isInOpeningView = (el: HTMLElement): boolean => {
+  const { top } = el.getBoundingClientRect()
+  return top >= topInset(el) && top <= window.innerHeight * 0.6
+}
+
+/**
+ * A row's fields container that stayed empty although the row is open - or
+ * `null` when the row is closed, rendered, or not there.
+ *
+ * Payload renders a row's fields only once an IntersectionObserver reports
+ * them near the viewport (`RenderIfInViewport`), and the container is where
+ * that observer looks. On some pages a row opened programmatically never got
+ * that report: open, and empty, until the editor closed and reopened it.
+ */
+export const unrenderedRowFields = (row: HTMLElement | null): HTMLElement | null => {
+  const collapsible = row?.querySelector('.collapsible')
+  if (!collapsible || collapsible.classList.contains('collapsible--collapsed')) {
+    return null
+  }
+  const fields = collapsible.querySelector<HTMLElement>('.render-fields')
+  return fields && fields.childElementCount === 0 ? fields : null
+}
+
+export type UnrenderedRow = { fields: HTMLElement; index: number; path: string; row: HTMLElement }
+
+/**
+ * Every open Array/Blocks row near the viewport whose fields Payload hasn't
+ * rendered (see `unrenderedRowFields`) - whoever opened it. Found on a
+ * customer page: a row Payload itself had remembered open, inside a section
+ * the reveal opened, stayed empty just the same.
+ */
+export const findUnrenderedRows = (): UnrenderedRow[] =>
+  Array.from(document.querySelectorAll<HTMLElement>('[id*="-row-"]')).flatMap((row) => {
+    const match = row.id.startsWith('scroll-') ? null : ROW_ID_PATTERN.exec(row.id)
+    const fields = match ? unrenderedRowFields(row) : null
+    return match && fields && isWithinRenderMargin(row)
+      ? [{ fields, index: Number(match[2]), path: match[1].replace(/-/g, '.'), row }]
+      : []
+  })
+
+/** Within the distance Payload renders ahead of the viewport (its observer's 1000px root margin). */
+export const isWithinRenderMargin = (el: HTMLElement): boolean => {
+  const { bottom, top } = el.getBoundingClientRect()
+  return bottom >= -1000 && top <= window.innerHeight + 1000
+}
+
+/**
+ * Has the browser re-evaluate `el` for every IntersectionObserver watching it:
+ * hidden for two frames, then shown again - a change of state an observer
+ * has to report. On an empty container, nothing visible happens.
+ */
+export const renotifyIntersection = async (el: HTMLElement): Promise<void> => {
+  el.style.display = 'none'
+  await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+  el.style.removeProperty('display')
+}
 
 export const waitForScrollEnd = (signal?: AbortSignal): Promise<void> =>
   new Promise((resolve) => {
@@ -760,6 +882,14 @@ const MAX_FRAME_MS = 34
 export const scrollDuration = (distance: number): number =>
   Math.min(SCROLL_MAX_DURATION_MS, SCROLL_MIN_DURATION_MS + Math.abs(distance) * SCROLL_MS_PER_PX)
 
+/**
+ * The part of a scroll by `delta` the page can actually make - none of it
+ * past the top or the end of the document. Aiming beyond would animate for
+ * the full duration without anything moving, the reveal waiting on it.
+ */
+const reachableDelta = (delta: number): number =>
+  Math.max(-window.scrollY, Math.min(delta, document.documentElement.scrollHeight - window.innerHeight - window.scrollY))
+
 const easeInOutCubic = (t: number): number => (t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2)
 
 /** Input that means the editor is scrolling for themselves. */
@@ -800,7 +930,7 @@ const animateScroll = (
       return
     }
 
-    const duration = durationMs ?? scrollDuration(first.getBoundingClientRect().top - resolveOffset(offset))
+    const duration = durationMs ?? scrollDuration(reachableDelta(first.getBoundingClientRect().top - resolveOffset(offset)))
     let elapsed = 0
     let lastFrameAt: number | undefined
     let eased = 0
@@ -895,7 +1025,7 @@ export const scrollToElement = async (
 
   const { top } = el.getBoundingClientRect()
   const initialDelta = top - resolveOffset(offset)
-  if (Math.abs(initialDelta) < SCROLL_CONVERGENCE_THRESHOLD_PX) {
+  if (Math.abs(reachableDelta(initialDelta)) < SCROLL_CONVERGENCE_THRESHOLD_PX) {
     return
   }
 

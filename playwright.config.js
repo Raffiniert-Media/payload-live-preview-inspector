@@ -1,5 +1,8 @@
 import { defineConfig, devices } from '@playwright/test'
 
+/** `PORT=3100 pnpm test:e2e` keeps the suite off a dev server of another project on 3000. */
+const port = process.env.PORT ?? '3000'
+
 /**
  * Read environment variables from file.
  * https://github.com/motdotla/dotenv
@@ -50,7 +53,7 @@ export default defineConfig({
   ],
   use: {
     /* Base URL to use in actions like `await page.goto('/')`. */
-    baseURL: 'http://localhost:3000',
+    baseURL: `http://localhost:${port}`,
 
     /* Collect trace when retrying the failed test. See https://playwright.dev/docs/trace-viewer */
     trace: 'on-first-retry',
@@ -58,6 +61,6 @@ export default defineConfig({
   webServer: {
     command: 'pnpm dev',
     reuseExistingServer: !process.env.CI,
-    url: 'http://localhost:3000/admin',
+    url: `http://localhost:${port}/admin`,
   },
 })

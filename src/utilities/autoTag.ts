@@ -348,6 +348,8 @@ const elementRenderingCaret = (doc: Document, path: string, caretText: string): 
 /**
  * Finds the tagged element that best matches an admin-side field path:
  *
+ * - a whole row's own container, for a path that ends at a row (the editor
+ *   opened or clicked its header),
  * - the element rendering the text around `caretText`, when the admin knew
  *   where in the field its caret was. Every run of a rich-text field carries
  *   a path under the same field, so without this a focused editor can only
@@ -368,6 +370,16 @@ export const findTaggedElementByPath = (doc: Document, path: string, caretText?:
     const rendering = elementRenderingCaret(doc, path, caretText)
     if (rendering) {
       return rendering
+    }
+  }
+
+  // A whole row - its header was clicked in the admin: the row's own
+  // container is where it starts on the page, while its first tagged leaf
+  // can sit anywhere inside it.
+  if (isRowIDSegment(path.split('.').at(-1) ?? '')) {
+    const row = elementWithExactPath(doc, path)
+    if (row) {
+      return row
     }
   }
 
