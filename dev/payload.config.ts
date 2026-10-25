@@ -40,6 +40,8 @@ export default buildConfig({
   collections: [
     {
       slug: 'posts',
+      // Drafts: a status in the document controls, and versions to go to -
+      // what page mode keeps in its one bar.
       fields: [
         // Unnamed tabs: they don't add a path segment, but Payload unmounts
         // the inactive tab's fields - exercises the listener's tab sweep.
@@ -122,6 +124,7 @@ export default buildConfig({
           ],
         },
       ],
+      versions: { drafts: true },
     },
     Pages,
     {

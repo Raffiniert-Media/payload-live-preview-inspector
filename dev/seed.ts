@@ -129,7 +129,9 @@ export const seed = async (payload: Payload) => {
   // Two files to choose between: the page has the first, "Replace" puts in the second.
   const media = []
   for (const [name, png] of SEED_IMAGES) {
-    const { docs } = await payload.find({ collection: 'media', limit: 1, where: { filename: { equals: name } } })
+    // By its stem: a file left on disk from an earlier database makes Payload number the next one (seed-red-1.png).
+    const stem = name.replace(/\.png$/, '')
+    const { docs } = await payload.find({ collection: 'media', limit: 1, where: { filename: { contains: stem } } })
     const data = Buffer.from(png, 'base64')
     media.push(
       docs[0] ??

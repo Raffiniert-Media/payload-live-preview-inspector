@@ -8,16 +8,19 @@ While the live preview is open, Payload's frame steps back (`editor.pageMode`,
 on by default, switched per browser):
 
 - **On a wide screen** Payload's header and the document's title bar fold into
-  the bar with the save buttons, which carries the title and the way back to
-  the list - 180 px of chrome above the work became 56. Payload's size, zoom
-  and breakpoint controls make way for the screen widths.
-- **On a phone** the preview fills the screen under that one bar - measured on
-  a customer site at 390 × 844: 299 px of preview before, 800 now. A tap
+  the bar with the save buttons, which carries the title, the way back to the
+  list, the status - with Payload's way back to the published version - and
+  the versions, with their count: 180 px of chrome above the work became 56.
+  Payload's size, zoom and breakpoint controls make way for the screen widths.
+- **On a phone** the preview fills the screen under the buttons and one short
+  line with the status and the versions - measured on a customer site at
+  390 × 844: 299 px of preview before, about 770 now. A tap
   brings the form up from below with only that block, the page keeping the
   upper part; the path bar's close button puts it away again.
 - **A button at the bottom right** holds the editor's switches - page mode,
-  focus mode, the outline - named, each with a line on what it does, and the
-  way to the document's versions. Payload's colours and nothing of its own.
+  focus mode, the outline - named, each with a line on what it does. Payload's
+  colours and nothing of its own; 48 px, the size of an icon button in
+  Payload's admin.
 
 ### Defaults that changed
 

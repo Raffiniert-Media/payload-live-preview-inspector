@@ -1591,7 +1591,8 @@ test('editor: “Replace” puts another file into an upload field in one step, 
 }) => {
   await openEditor(page)
   const field = page.locator('#field-image')
-  await expect(field).toContainText('seed-red.png', { timeout: 30_000 })
+  // By stem: Payload numbers a file whose name is taken on disk (seed-red-1.png).
+  await expect(field).toContainText(/seed-red(-\d+)?\.png/, { timeout: 30_000 })
   // No pencil: on a page it reads as "edit this image here", and it edits the
   // file everywhere it is used.
   await expect(field.locator('.upload-relationship-details__edit')).toBeHidden()
@@ -1599,11 +1600,11 @@ test('editor: “Replace” puts another file into an upload field in one step, 
   await field.locator('[data-payload-live-preview-inspector-replace]').click()
   const drawer = page.locator('.drawer--is-open')
   await expect(drawer).toBeVisible()
-  await drawer.getByText('seed-blue.png', { exact: true }).click()
+  await drawer.getByText(/^seed-blue(-\d+)?\.png$/).click()
 
   await expect(drawer).toBeHidden()
-  await expect(field).toContainText('seed-blue.png')
-  await expect(field).not.toContainText('seed-red.png')
+  await expect(field).toContainText(/seed-blue(-\d+)?\.png/)
+  await expect(field).not.toContainText('seed-red')
   // A change like any other: the document has something to save.
   await expect(page.locator('#action-save')).toBeEnabled()
 })
@@ -1661,8 +1662,8 @@ test('page mode: Payload’s header folds into the bar with the save buttons, an
   await expect(page.locator(dockItem('page-mode'))).toHaveAttribute('aria-checked', 'true')
   await expect(page.locator(dockItem('focus-mode'))).toHaveAttribute('aria-checked', 'true')
   await expect(page.locator(dockItem('outline'))).toHaveAttribute('aria-checked', 'false')
-  // This collection keeps no versions, so there is no way to them either.
-  await expect(page.locator(dockItem('versions'))).toHaveCount(0)
+  // This collection keeps no versions, so the bar offers no way to them.
+  await expect(page.locator('[data-payload-live-preview-inspector-page-versions]')).toHaveCount(0)
 
   // Off: Payload's layout is back, and stays so on the next visit.
   await page.click(dockItem('page-mode'))
@@ -1675,6 +1676,29 @@ test('page mode: Payload’s header folds into the bar with the save buttons, an
   await expect(page.locator('.doc-header')).toBeVisible({ timeout: 30_000 })
   await expect(page.locator(EDITOR)).toBeAttached()
   await expect(page.locator('html[data-payload-live-preview-inspector-page]')).toHaveCount(0)
+})
+
+test('page mode keeps the status and the way to the versions, on a wide screen and on a phone', async ({ browser }) => {
+  for (const viewport of [
+    { height: 900, width: 1440 },
+    { height: 844, width: 390 },
+  ]) {
+    const context = await browser.newContext({ hasTouch: viewport.width < 500, viewport })
+    const page = await context.newPage()
+    try {
+      await login(page)
+      await forgetEditorChoices(page)
+      await openLivePreview(page, 'posts')
+      await expect(page.locator('html[data-payload-live-preview-inspector-page]')).toHaveCount(1)
+      await expect(page.locator('.doc-header')).toBeHidden()
+      await expect(page.locator('.doc-controls__status')).toBeInViewport()
+      const versions = page.locator('[data-payload-live-preview-inspector-page-versions]')
+      await expect(versions).toBeInViewport()
+      await expect(versions).toHaveAttribute('href', /\/admin\/collections\/posts\/[^/]+\/versions$/)
+    } finally {
+      await context.close()
+    }
+  }
 })
 
 test('page mode on a phone: the page fills the screen, a tap brings up just that block, and the form goes down again', async ({
@@ -1694,6 +1718,8 @@ test('page mode on a phone: the page fills the screen, a tap brings up just that
     await expect(page.locator('.app-header')).toBeHidden()
     await expect(page.locator('#live-preview-toggler')).toBeInViewport()
     await expect(page.locator(`${DOCK} [role=note]`)).toBeVisible()
+    // The title is in the bar's other line; the way back is beside the buttons.
+    await expect(page.locator('[data-payload-live-preview-inspector-page-title]')).toBeHidden()
 
     // A tap: the form comes up with that block, the page above it.
     await firstSection(frame).tap()

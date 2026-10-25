@@ -34,6 +34,8 @@ export const HOST = {
   outline: 'outline',
   /** Page mode's title, first in the bar with the save buttons. */
   pageTitle: 'page-title',
+  /** Page mode's way to the versions, after the status. */
+  pageVersions: 'page-versions',
   /** "Replace" on an upload field's file card. */
   uploadReplace: 'upload-replace',
   /** The editor's bar above the form: outline, focus mode, the path. */
@@ -128,8 +130,20 @@ ${page} ${c(PAYLOAD_CLASS.livePreviewToolbarBreakpoint)} {
   ${page} ${c(PAYLOAD_CLASS.docControls)} {
     top: 0;
   }
-  ${page} ${c(PAYLOAD_CLASS.docControlsContent)},
   ${page} ${c(PAYLOAD_CLASS.livePreviewToolbar)} {
+    display: none;
+  }
+  /*
+   * Of Payload's line above the buttons, the status - with its way back to the
+   * published version, when there are changes - and the way to the versions:
+   * one short line. The title and the way back to the list are in the bar.
+   */
+  ${page} ${c(PAYLOAD_CLASS.docControlsContent)} {
+    padding-bottom: 4px;
+    padding-top: 4px;
+  }
+  ${page} ${c(PAYLOAD_CLASS.docControlsContent)} ${c(PAYLOAD_CLASS.docControlsListItem)}:not(${c(PAYLOAD_CLASS.docControlsStatus)}),
+  ${page} ${host(HOST.pageTitle)} {
     display: none;
   }
   ${pageNoPanel} ${c(PAYLOAD_CLASS.editMain)},

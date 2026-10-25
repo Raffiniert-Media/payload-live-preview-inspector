@@ -1,12 +1,12 @@
 'use client'
 
-import { Link, useDocumentTitle } from '@payloadcms/ui'
+import { Link, useDocumentInfo, useDocumentTitle } from '@payloadcms/ui'
 import React from 'react'
 
 import type { EditorStrings } from '../../utilities/i18n.js'
 
 import classes from './Editor.module.css'
-import { BackIcon } from './icons.js'
+import { BackIcon, VersionsIcon } from './icons.js'
 
 type Props = {
   /** Where "back" goes - the collection's list - and what it is called. */
@@ -39,5 +39,21 @@ export const PageTitle: React.FC<Props> = ({ back, strings }) => {
         </span>
       )}
     </div>
+  )
+}
+
+/**
+ * The document's versions, after its status: where Payload's title bar had
+ * the tab - with how many there are - and the way to the published one, to
+ * compare with it or go back to it.
+ */
+export const PageVersions: React.FC<{ href: string; strings: EditorStrings }> = ({ href, strings }) => {
+  const { versionCount } = useDocumentInfo()
+  return (
+    <Link className={classes.pageVersions} data-payload-live-preview-inspector-page-versions="" href={href}>
+      <VersionsIcon />
+      <span>{strings.versions}</span>
+      {versionCount ? <span className={classes.pageVersionsCount}>{versionCount}</span> : null}
+    </Link>
   )
 }

@@ -55,8 +55,8 @@ export const watchDom = (root: Node, callback: () => void): (() => void) => {
   }
 }
 
-/** Where a host goes: first in `parent`, or right before `before`. */
-export type HostPlace = { before?: Element | null; parent: Element } | null
+/** Where a host goes: first in `parent`, right before `before`, or last (`append`). */
+export type HostPlace = { append?: boolean; before?: Element | null; parent: Element } | null
 
 /**
  * An element of the editor's own, kept at a place in Payload's markup - first
@@ -89,8 +89,12 @@ export const useHost = (name: string, place: () => HostPlace, enabled: boolean):
         }
         return
       }
-      const { before = null, parent } = where
-      if (before) {
+      const { append = false, before = null, parent } = where
+      if (append) {
+        if (parent.lastElementChild !== el) {
+          parent.append(el)
+        }
+      } else if (before) {
         if (el.parentElement !== parent || el.nextElementSibling !== before) {
           parent.insertBefore(el, before)
         }

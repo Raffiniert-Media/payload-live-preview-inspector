@@ -31,6 +31,10 @@ export const PAYLOAD_CLASS = {
   docControlsContent: 'doc-controls__content',
   /** In that bar, on the right: the live preview's switch and the save buttons. */
   docControlsControls: 'doc-controls__controls',
+  /** In that bar, on the left: one entry - the status, the autosave note, a date. */
+  docControlsListItem: 'doc-controls__list-item',
+  /** That entry for the status - with Payload's way back to the published version. */
+  docControlsStatus: 'doc-controls__status',
   /** In that bar, among the status: one of the dates (last modified, created). */
   docControlsValueWrap: 'doc-controls__value-wrap',
   /** The document's title and its views (edit, versions, API), above the bar. Rendered by `@payloadcms/next`. */

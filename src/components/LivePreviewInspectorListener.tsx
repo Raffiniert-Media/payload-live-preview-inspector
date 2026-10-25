@@ -116,9 +116,9 @@ import { Dock, type DockAction, type DockSwitch } from './editor/Dock.js'
 import { useHost, useMaxWidth, useStored, watchDom } from './editor/dom.js'
 import editorClasses from './editor/Editor.module.css'
 import { editorStyles, HOST, PAGE_ATTRIBUTE, PANEL_ATTRIBUTE } from './editor/editorStyles.js'
-import { BackIcon, FocusIcon, FormIcon, OutlineIcon, PageIcon, VersionsIcon } from './editor/icons.js'
+import { BackIcon, FocusIcon, FormIcon, OutlineIcon, PageIcon } from './editor/icons.js'
 import { OutlinePanel } from './editor/OutlinePanel.js'
-import { PageTitle } from './editor/PageTitle.js'
+import { PageTitle, PageVersions } from './editor/PageTitle.js'
 import { PathBar } from './editor/PathBar.js'
 import { PreviewTools } from './editor/PreviewTools.js'
 import { duplicateRow, insertRowBelow, isRowAction, moveRow, removeRow, splitRowPath } from './editor/rowActions.js'
@@ -2180,6 +2180,15 @@ const Inspector: React.FC<LivePreviewInspectorListenerProps> = ({
         ? `${adminBase}/globals/${globalSlug}/versions`
         : undefined
     : undefined
+  // After the status: where Payload's title bar had the versions tab.
+  const pageVersionsHost = useHost(
+    HOST.pageVersions,
+    () => {
+      const content = docControlsContentEl()
+      return content ? { append: true, parent: content } : null
+    },
+    pageMode && Boolean(versionsHref),
+  )
   // The form as a sheet over the page: page mode on a phone.
   const sheet = pageMode && stacked && features.stacked
   const dockSwitches: DockSwitch[] = [
@@ -2216,12 +2225,10 @@ const Inspector: React.FC<LivePreviewInspectorListenerProps> = ({
         ]
       : []),
   ]
-  const dockActions: DockAction[] = [
-    ...(sheet && !panelOpen
+  const dockActions: DockAction[] =
+    sheet && !panelOpen
       ? [{ name: 'open-form', icon: <FormIcon />, label: strings.openForm, onSelect: () => setPanelOpen(true) }]
-      : []),
-    ...(versionsHref ? [{ name: 'versions', href: versionsHref, icon: <VersionsIcon />, label: strings.versions }] : []),
-  ]
+      : []
 
   const modifier = previewSettings?.interactionModifier ?? ''
   const modifierLabel = Object.hasOwn(MODIFIER_LABELS, modifier) ? MODIFIER_LABELS[modifier] : undefined
@@ -2249,6 +2256,9 @@ const Inspector: React.FC<LivePreviewInspectorListenerProps> = ({
         </Link>
       )}
       {pageTitleHost && createPortal(<PageTitle back={back} strings={strings} />, pageTitleHost)}
+      {pageVersionsHost &&
+        versionsHref &&
+        createPortal(<PageVersions href={versionsHref} strings={strings} />, pageVersionsHost)}
       {features.pageMode && previewOpen && (
         <Dock
           actions={dockActions}
