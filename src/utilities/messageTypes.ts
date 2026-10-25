@@ -70,3 +70,26 @@ export type RevealStatus = 'done' | 'not-found' | 'started'
  * Sent in reply to `SETTINGS_MESSAGE_TYPE`, i.e. whenever a preview loads.
  */
 export const THEME_MESSAGE_TYPE = 'payload-live-preview-inspector:theme'
+
+/**
+ * admin → iframe: every Array/Blocks row of the document, by row-id path, with
+ * its label, its place among its siblings and what may be done to it - and the
+ * words the block toolbar uses, in the admin's language. Sent when the preview
+ * loads and whenever the rows change. See `PreviewRow`.
+ */
+export const STRUCTURE_MESSAGE_TYPE = 'payload-live-preview-inspector:structure'
+
+/**
+ * admin → iframe: the row the editor is at (`path`, by row ids), or `null`.
+ * The preview frames it and puts the block toolbar on it.
+ */
+export const SELECT_MESSAGE_TYPE = 'payload-live-preview-inspector:select'
+
+/** admin → iframe: a row the editor points at in the outline (`path`), or `null` - marked, not scrolled to. */
+export const HOVER_MESSAGE_TYPE = 'payload-live-preview-inspector:hover'
+
+/**
+ * iframe → admin: a button of the block toolbar - `action` (see `RowAction`)
+ * on the row at `path`, by row ids.
+ */
+export const ROW_ACTION_MESSAGE_TYPE = 'payload-live-preview-inspector:row-action'

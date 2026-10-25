@@ -1,3 +1,5 @@
+import { collapsibleOf, isCollapsedCollapsible, PAYLOAD_CLASS, selectorOf } from './payloadAdmin.js'
+
 /** How long a revealed area takes to fade in. */
 const LIFT_MS = 220
 /** How long something already on screen takes to fade out. */
@@ -49,11 +51,11 @@ export const drawCurtain = (el: HTMLElement | null | undefined, { fade = false }
 
 /** The part of a row or collapsible that opens: Payload's animated content box. */
 export const openingAreaOf = (collapsible: Element | null | undefined): HTMLElement | null =>
-  collapsible?.querySelector<HTMLElement>(':scope > .rah-static') ?? null
+  collapsible?.querySelector<HTMLElement>(`:scope > ${selectorOf(PAYLOAD_CLASS.animatedContent)}`) ?? null
 
 /** The part of a tabs field that a tab switch replaces. */
 export const tabContentOf = (tabsEl: Element | null | undefined): HTMLElement | null =>
-  tabsEl?.querySelector<HTMLElement>(':scope > .tabs-field__content-wrap') ?? null
+  tabsEl?.querySelector<HTMLElement>(`:scope > ${selectorOf(PAYLOAD_CLASS.tabsContentWrap)}`) ?? null
 
 /**
  * The closed rows after `row` in its list that are on screen - pushed down
@@ -70,7 +72,7 @@ export const visibleRowsAfter = (row: Element | null | undefined): HTMLElement[]
     if (sibling.getBoundingClientRect().top >= window.innerHeight) {
       break
     }
-    if (sibling.querySelector('.collapsible')?.classList.contains('collapsible--collapsed')) {
+    if (isCollapsedCollapsible(collapsibleOf(sibling))) {
       rows.push(sibling)
     }
   }

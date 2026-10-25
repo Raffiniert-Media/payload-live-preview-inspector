@@ -3,10 +3,14 @@
 import { useEffect, useRef } from 'react'
 
 import type { AutoTagger } from '../utilities/autoTagger.js'
+import type { BlockToolbar, BlockToolbarAction } from '../utilities/blockToolbar.js'
+import type { PreviewStrings } from '../utilities/i18n.js'
 import type { DocumentLeafValue } from '../utilities/pathResolution.js'
+import type { PreviewRow } from '../utilities/structure.js'
 
 import { findTaggedElementAt, findTaggedElementByPath } from '../utilities/autoTag.js'
 import { createAutoTagger } from '../utilities/autoTagger.js'
+import { createBlockToolbar } from '../utilities/blockToolbar.js'
 import { caretHintFromPoint, parseCaretHint } from '../utilities/caret.js'
 import { createClickOverlay } from '../utilities/clickOverlay.js'
 import { LIVE_PREVIEW_HOVER_CLASS_NAME } from '../utilities/hoverClassName.js'
@@ -14,12 +18,16 @@ import {
   CLICK_MESSAGE_TYPE,
   DOCUMENT_VALUES_MESSAGE_TYPE,
   FOCUS_MESSAGE_TYPE,
+  HOVER_MESSAGE_TYPE,
   REQUEST_DOCUMENT_VALUES_MESSAGE_TYPE,
   REVEAL_STATUS_MESSAGE_TYPE,
+  ROW_ACTION_MESSAGE_TYPE,
+  SELECT_MESSAGE_TYPE,
   SETTINGS_MESSAGE_TYPE,
+  STRUCTURE_MESSAGE_TYPE,
   THEME_MESSAGE_TYPE,
 } from '../utilities/messageTypes.js'
-import { LIVE_PREVIEW_PATH_ATTRIBUTE } from '../utilities/pathAttribute.js'
+import { LIVE_PREVIEW_PATH_ATTRIBUTE, rowIDPathOf } from '../utilities/pathAttribute.js'
 import {
   flashElement,
   scrollToElement,
@@ -44,6 +52,16 @@ const PENDING_MAX_MS = 8_000
 const ACCENT_PROPERTY = '--payload-live-preview-inspector-accent'
 
 export type LivePreviewInspectorClientProps = {
+  /**
+   * A frame around the block the editor is at - the one they clicked into here,
+   * or the one they are editing in the form - with a toolbar on it: move it,
+   * duplicate it, add one below, remove it, or step out to the block around it.
+   * The admin decides what each block allows, and does it; this only asks.
+   * Needs the admin half of this plugin at the same version or later - an older
+   * admin never sends the rows, and the toolbar never appears.
+   * @default true
+   */
+  blockToolbar?: boolean
   /**
    * When true, a click inside the Live Preview iframe that resolves to a field
    * *only* reveals that field: the page's own handler never runs, so a card
@@ -186,7 +204,21 @@ const resolveTargetOrigin = (): string => {
   return '*'
 }
 
+const isPreviewRow = (value: unknown): value is PreviewRow =>
+  Boolean(value) &&
+  typeof value === 'object' &&
+  typeof (value as PreviewRow).path === 'string' &&
+  typeof (value as PreviewRow).label === 'string' &&
+  typeof (value as PreviewRow).index === 'number' &&
+  typeof (value as PreviewRow).count === 'number' &&
+  Boolean((value as PreviewRow).abilities) &&
+  typeof (value as PreviewRow).abilities === 'object'
+
+const isPreviewStrings = (value: unknown): value is PreviewStrings =>
+  Boolean(value) && typeof value === 'object' && typeof (value as PreviewStrings).moveUp === 'string'
+
 export const LivePreviewInspectorClient: React.FC<LivePreviewInspectorClientProps> = ({
+  blockToolbar = true,
   disableInteractions = true,
   disableLinks = true,
   hoverColor,
@@ -226,6 +258,28 @@ export const LivePreviewInspectorClient: React.FC<LivePreviewInspectorClientProp
       ripple: classes.ripple,
     })
 
+    /** The admin's words for what the preview says, once it has sent them. */
+    let strings: null | PreviewStrings = null
+
+    const toolbar: BlockToolbar | null = blockToolbar
+      ? createBlockToolbar(
+          document,
+          {
+            frame: classes.selectionFrame,
+            hoverFrame: classes.hoverFrame,
+            label: classes.toolbarLabel,
+            layer: classes.selectionLayer,
+            toolbar: classes.toolbar,
+            toolbarButton: classes.toolbarButton,
+            toolbarSeparator: classes.toolbarSeparator,
+          },
+          {
+            onAction: (action: BlockToolbarAction, path: string) =>
+              window.parent.postMessage({ type: ROW_ACTION_MESSAGE_TYPE, action, path }, resolvedOrigin),
+          },
+        )
+      : null
+
     const endPending = (outcome?: 'done' | 'not-found') => {
       clearTimeout(pendingTimer)
       pendingID = undefined
@@ -253,6 +307,26 @@ export const LivePreviewInspectorClient: React.FC<LivePreviewInspectorClientProp
         return
       }
 
+      if (data.type === STRUCTURE_MESSAGE_TYPE) {
+        if (isPreviewStrings(data.strings)) {
+          strings = data.strings
+        }
+        if (toolbar && strings && Array.isArray(data.rows)) {
+          toolbar.setStructure((data.rows as unknown[]).filter(isPreviewRow), strings)
+        }
+        return
+      }
+
+      if (data.type === SELECT_MESSAGE_TYPE) {
+        toolbar?.select(typeof data.path === 'string' ? data.path : null)
+        return
+      }
+
+      if (data.type === HOVER_MESSAGE_TYPE) {
+        toolbar?.hover(typeof data.path === 'string' ? data.path : null)
+        return
+      }
+
       if (data.type !== REVEAL_STATUS_MESSAGE_TYPE || pendingID === undefined || data.id !== pendingID) {
         return
       }
@@ -267,7 +341,7 @@ export const LivePreviewInspectorClient: React.FC<LivePreviewInspectorClientProp
       }
 
       if (data.status === 'not-found') {
-        overlay.setLabel('Not in this form')
+        overlay.setLabel(strings?.notInForm ?? 'Not in this form')
       }
       endPending(data.status === 'not-found' ? 'not-found' : 'done')
     }
@@ -314,7 +388,8 @@ export const LivePreviewInspectorClient: React.FC<LivePreviewInspectorClientProp
       hoverFrame = requestAnimationFrame(() => {
         hoverFrame = 0
         taggerRef.current?.flush()
-        setHovered(findTarget(event))
+        // Over the toolbar, the page beneath it is not what the pointer is on.
+        setHovered(toolbar?.owns(event.target) ? null : findTarget(event))
       })
     }
 
@@ -332,6 +407,11 @@ export const LivePreviewInspectorClient: React.FC<LivePreviewInspectorClientProp
     }
 
     const onClick = (event: MouseEvent) => {
+      // The toolbar's own buttons: theirs, not the page's and not a reveal.
+      if (toolbar?.owns(event.target)) {
+        return
+      }
+
       const link = (event.target as Element | null)?.closest?.('a[href]') as HTMLAnchorElement | null
 
       // The escape hatch: with the modifier held, the page is just a page.
@@ -387,6 +467,8 @@ export const LivePreviewInspectorClient: React.FC<LivePreviewInspectorClientProp
       hoverFrame = 0
       setHovered(null)
       overlay.show(el, { x: event.clientX, y: event.clientY })
+      // The block the click landed in is the one the editor is at now.
+      toolbar?.select(rowIDPathOf(path))
       pendingID = id
       // An admin that never acknowledges runs a version without reveal
       // status - the mark then goes quietly instead of lingering.
@@ -410,7 +492,14 @@ export const LivePreviewInspectorClient: React.FC<LivePreviewInspectorClientProp
       resolvedOrigin,
     )
 
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        toolbar?.select(null)
+      }
+    }
+
     window.addEventListener('message', onStatus)
+    document.addEventListener('keydown', onKeyDown)
     document.addEventListener('mousemove', onMouseMove)
     document.documentElement.addEventListener('mouseleave', onMouseLeave)
 
@@ -436,6 +525,8 @@ export const LivePreviewInspectorClient: React.FC<LivePreviewInspectorClientProp
 
     return () => {
       window.removeEventListener('message', onStatus)
+      document.removeEventListener('keydown', onKeyDown)
+      toolbar?.destroy()
       endPending()
       document.removeEventListener('mousemove', onMouseMove)
       document.documentElement.removeEventListener('mouseleave', onMouseLeave)
@@ -445,7 +536,7 @@ export const LivePreviewInspectorClient: React.FC<LivePreviewInspectorClientProp
       }
       setHovered(null)
     }
-  }, [disableInteractions, disableLinks, hoverColor, interactionModifier, targetOrigin])
+  }, [blockToolbar, disableInteractions, disableLinks, hoverColor, interactionModifier, targetOrigin])
 
   // Reverse direction: a field focused in the admin form scrolls to and
   // flashes the matching element here, the same way a click there scrolls

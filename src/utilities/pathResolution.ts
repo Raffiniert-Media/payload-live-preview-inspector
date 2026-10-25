@@ -2,11 +2,33 @@ import type { CaretHint } from './caret.js'
 
 import { applyCaretHint } from './caret.js'
 import { isRowIDSegment, rowIDFromSegment, rowIDSegment } from './pathAttribute.js'
+import {
+  collapsibleOf,
+  FIELD_ID_PREFIX,
+  FIELD_PATH_ATTRIBUTE,
+  fieldIDFromPath,
+  isCollapsedCollapsible,
+  pathFromRowID,
+  PAYLOAD_CLASS,
+  ROW_ID_PATTERN,
+  rowIDFromPath,
+  SCROLL_ID_PREFIX,
+  selectorOf,
+  toggleButtonOf,
+} from './payloadAdmin.js'
+
+export { fieldIDFromPath, rowIDFromPath }
 
 /** Structurally compatible with `@payloadcms/ui`'s `FormState`, without depending on it. */
 export type MinimalFormState = Record<
   string,
-  { rows?: Array<{ blockType?: string; collapsed?: boolean; id: string }>; value?: unknown } | undefined
+  | {
+      passesCondition?: boolean
+      rows?: Array<{ blockType?: string; collapsed?: boolean; id: string }>
+      valid?: boolean
+      value?: unknown
+    }
+  | undefined
 >
 
 /** A string-valued form field, addressed by a `$rowId`-based path. */
@@ -14,14 +36,6 @@ export type DocumentLeafValue = { path: string; value: string }
 
 export const DEFAULT_COLLAPSIBLE_ANIMATION_MS = 350
 export const DEFAULT_SCROLL_OFFSET = 100
-
-export const fieldIDFromPath = (path: string): string => `field-${path.replace(/\./g, '__')}`
-
-/** Prefix used by every non-rich-text field's `id`, set on whichever element is its actual control. */
-const FIELD_ID_PREFIX = 'field-'
-
-/** Payload's id for an Array/Blocks row's wrapper: `<parent path, dots as dashes>-row-<index>`. */
-const ROW_ID_PATTERN = /^(.+)-row-(\d+)$/
 
 /**
  * The inverse of `fieldIDFromPath`/Payload's own `data-field-path`: given a
@@ -41,7 +55,7 @@ export const pathFromFieldElement = (el: HTMLElement): null | string => {
   let node: HTMLElement | null = el
 
   while (node) {
-    const dataFieldPath = node.getAttribute('data-field-path')
+    const dataFieldPath = node.getAttribute(FIELD_PATH_ATTRIBUTE)
     if (dataFieldPath) {
       return dataFieldPath
     }
@@ -54,26 +68,14 @@ export const pathFromFieldElement = (el: HTMLElement): null | string => {
     // the page, whichever row was opened.
     // (An Array row's header carries a second id of that shape, `scroll-<react
     // id>-row-<index>`, for Payload's own scroll-to-new-row - not a path.)
-    const row = node.id.startsWith('scroll-') ? null : ROW_ID_PATTERN.exec(node.id)
-    if (row) {
-      return `${row[1].replace(/-/g, '.')}.${row[2]}`
+    const rowPath = pathFromRowID(node.id)
+    if (rowPath) {
+      return rowPath
     }
     node = node.parentElement
   }
 
   return null
-}
-
-export const rowIDFromPath = (path: string): null | string => {
-  const match = /^(.*)\.(\d+)$/.exec(path)
-
-  if (!match) {
-    return null
-  }
-
-  const [, parentPath, rowIndex] = match
-
-  return `${parentPath.replace(/\./g, '-')}-row-${rowIndex}`
 }
 
 /**
@@ -96,7 +98,7 @@ export const resolveExactFieldElement = (path: string): HTMLElement | null => {
     return rowEl
   }
 
-  return document.querySelector<HTMLElement>(`[data-field-path="${path.replace(/["\\]/g, '\\$&')}"]`)
+  return document.querySelector<HTMLElement>(`[${FIELD_PATH_ATTRIBUTE}="${path.replace(/["\\]/g, '\\$&')}"]`)
 }
 
 /**
@@ -303,8 +305,8 @@ export const collectLeafValues = (formState: MinimalFormState): DocumentLeafValu
 }
 
 /** Payload's tabs-field tab button (see `@payloadcms/ui`'s Tabs field). */
-const TAB_BUTTON_SELECTOR = '.tabs-field__tab-button'
-const TAB_BUTTON_ACTIVE_CLASS = 'tabs-field__tab-button--active'
+const TAB_BUTTON_SELECTOR = selectorOf(PAYLOAD_CLASS.tabButton)
+const TAB_BUTTON_ACTIVE_CLASS = PAYLOAD_CLASS.tabButtonActive
 /**
  * Max wait for a just-activated tab panel to render its fields, before
  * assuming the target isn't in that tab and moving to the next one.
@@ -509,13 +511,14 @@ export const revealTabForElement = async (
 export const expandCollapsedAncestors = (el: HTMLElement): boolean => {
   const collapsibles = new Set<HTMLElement>()
 
-  let ancestor = el.closest<HTMLElement>('.collapsible')
+  const COLLAPSIBLE = selectorOf(PAYLOAD_CLASS.collapsible)
+  let ancestor = el.closest<HTMLElement>(COLLAPSIBLE)
   while (ancestor) {
     collapsibles.add(ancestor)
-    ancestor = ancestor.parentElement?.closest<HTMLElement>('.collapsible') ?? null
+    ancestor = ancestor.parentElement?.closest<HTMLElement>(COLLAPSIBLE) ?? null
   }
 
-  const ownCollapsible = el.querySelector<HTMLElement>('.collapsible')
+  const ownCollapsible = collapsibleOf(el)
   if (ownCollapsible) {
     collapsibles.add(ownCollapsible)
   }
@@ -523,10 +526,8 @@ export const expandCollapsedAncestors = (el: HTMLElement): boolean => {
   let expanded = false
 
   for (const collapsible of collapsibles) {
-    if (collapsible.classList.contains('collapsible--collapsed')) {
-      collapsible
-        .querySelector<HTMLButtonElement>(':scope > .collapsible__toggle-wrap > .collapsible__toggle')
-        ?.click()
+    if (isCollapsedCollapsible(collapsible)) {
+      toggleButtonOf(collapsible)?.click()
       expanded = true
     }
   }
@@ -669,11 +670,11 @@ export const isInOpeningView = (el: HTMLElement): boolean => {
  * that report: open, and empty, until the editor closed and reopened it.
  */
 export const unrenderedRowFields = (row: HTMLElement | null): HTMLElement | null => {
-  const collapsible = row?.querySelector('.collapsible')
-  if (!collapsible || collapsible.classList.contains('collapsible--collapsed')) {
+  const collapsible = collapsibleOf(row)
+  if (!collapsible || isCollapsedCollapsible(collapsible)) {
     return null
   }
-  const fields = collapsible.querySelector<HTMLElement>('.render-fields')
+  const fields = collapsible.querySelector<HTMLElement>(selectorOf(PAYLOAD_CLASS.renderFields))
   return fields && fields.childElementCount === 0 ? fields : null
 }
 
@@ -687,7 +688,7 @@ export type UnrenderedRow = { fields: HTMLElement; index: number; path: string; 
  */
 export const findUnrenderedRows = (): UnrenderedRow[] =>
   Array.from(document.querySelectorAll<HTMLElement>('[id*="-row-"]')).flatMap((row) => {
-    const match = row.id.startsWith('scroll-') ? null : ROW_ID_PATTERN.exec(row.id)
+    const match = row.id.startsWith(SCROLL_ID_PREFIX) ? null : ROW_ID_PATTERN.exec(row.id)
     const fields = match ? unrenderedRowFields(row) : null
     return match && fields && isWithinRenderMargin(row)
       ? [{ fields, index: Number(match[2]), path: match[1].replace(/-/g, '.'), row }]
@@ -1143,7 +1144,11 @@ const FOCUSABLE_SELECTOR = 'input, textarea, select, [contenteditable="true"]'
  * or `null` when the hint couldn't be applied and this fell back to plain
  * focusing.
  */
-export const focusElement = (el: HTMLElement, caret?: CaretHint): HTMLElement | null => {
+export const focusElement = (
+  el: HTMLElement,
+  caret?: CaretHint,
+  { inFields = false }: { inFields?: boolean } = {},
+): HTMLElement | null => {
   if (caret) {
     const caretEl = applyCaretHint(el, caret)
     if (caretEl) {
@@ -1151,7 +1156,18 @@ export const focusElement = (el: HTMLElement, caret?: CaretHint): HTMLElement | 
     }
   }
 
-  const focusable = el.matches(FOCUSABLE_SELECTOR) ? el : el.querySelector<HTMLElement>(FOCUSABLE_SELECTOR)
+  // A whole row: its first field, not the block-name input in its header.
+  const withinFields = inFields
+    ? el.querySelector<HTMLElement>(
+        FOCUSABLE_SELECTOR.split(',')
+          // `:scope` first: an ancestor outside `el` - the form's own field
+          // container - would match `.render-fields input` for every input.
+          .map((selector) => `:scope ${selectorOf(PAYLOAD_CLASS.renderFields)} ${selector.trim()}`)
+          .join(', '),
+      )
+    : null
+  const focusable =
+    withinFields ?? (el.matches(FOCUSABLE_SELECTOR) ? el : el.querySelector<HTMLElement>(FOCUSABLE_SELECTOR))
 
   focusable?.focus({ preventScroll: true })
 

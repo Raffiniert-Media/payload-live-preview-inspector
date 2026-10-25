@@ -27,3 +27,17 @@ export const rowIDSegment = (rowId: string): string => `${ROW_ID_MARKER}${rowId}
 export const isRowIDSegment = (segment: string): boolean => segment.startsWith(ROW_ID_MARKER)
 
 export const rowIDFromSegment = (segment: string): string => segment.slice(ROW_ID_MARKER.length)
+
+/**
+ * The row a tagged path lies in - its deepest row-id segment (`a.$1.b.$2.c` →
+ * `a.$1.b.$2`) - or `null` for a path outside every row.
+ */
+export const rowIDPathOf = (path: string): null | string => {
+  const segments = path.split('.')
+  for (let end = segments.length; end > 0; end--) {
+    if (isRowIDSegment(segments[end - 1])) {
+      return segments.slice(0, end).join('.')
+    }
+  }
+  return null
+}

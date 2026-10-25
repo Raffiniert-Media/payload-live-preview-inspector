@@ -171,3 +171,111 @@
     translate: 3px;
   }
 }
+
+/*
+ * The selected block: a frame, and the toolbar on it. In a layer of its own
+ * like the click mark, and reset hard - the toolbar sits inside someone else's
+ * page, whose `button` rules would otherwise style it.
+ */
+.selectionLayer {
+  inset: 0;
+  pointer-events: none;
+  position: fixed;
+  z-index: 2147483646;
+}
+
+.selectionFrame,
+.hoverFrame {
+  border-radius: 3px;
+  left: 0;
+  position: absolute;
+  top: 0;
+}
+
+.selectionFrame {
+  box-shadow:
+    0 0 0 2px var(--payload-live-preview-inspector-accent, #1587ba),
+    0 0 0 5px color-mix(in srgb, var(--payload-live-preview-inspector-accent, #1587ba) 18%, transparent);
+}
+
+.hoverFrame {
+  background: color-mix(in srgb, var(--payload-live-preview-inspector-accent, #1587ba) 8%, transparent);
+  outline: 2px dashed var(--payload-live-preview-inspector-accent, #1587ba);
+  outline-offset: 2px;
+}
+
+.toolbar {
+  align-items: center;
+  background: #1f1f1f;
+  border-radius: 7px;
+  box-shadow: 0 4px 16px rgb(0 0 0 / 22%), 0 0 0 1px rgb(255 255 255 / 8%);
+  display: flex;
+  gap: 1px;
+  left: 0;
+  padding: 3px;
+  pointer-events: auto;
+  position: absolute;
+  top: 0;
+}
+
+.toolbarButton {
+  all: unset;
+  align-items: center;
+  border-radius: 5px;
+  box-sizing: border-box;
+  color: #f2f2f2;
+  cursor: pointer;
+  display: inline-flex;
+  font: 500 12px/1 system-ui, -apple-system, 'Segoe UI', sans-serif;
+  height: 28px;
+  justify-content: center;
+  min-width: 28px;
+  padding: 0 6px;
+}
+
+.toolbarButton:hover:not(:disabled) {
+  background: rgb(255 255 255 / 12%);
+}
+
+.toolbarButton:focus-visible {
+  outline: 2px solid var(--payload-live-preview-inspector-accent, #1587ba);
+}
+
+.toolbarButton:disabled {
+  cursor: default;
+  opacity: 0.35;
+}
+
+.toolbarButton svg {
+  display: block;
+  height: 16px;
+  width: 16px;
+}
+
+.toolbarLabel {
+  background: var(--payload-live-preview-inspector-accent, #1587ba);
+  color: #fff;
+  max-width: 220px;
+  overflow: hidden;
+  padding: 0 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.toolbarButton.toolbarLabel:hover {
+  background: color-mix(in srgb, var(--payload-live-preview-inspector-accent, #1587ba) 85%, #fff);
+}
+
+.toolbarSeparator {
+  background: rgb(255 255 255 / 14%);
+  height: 18px;
+  margin: 0 3px;
+  width: 1px;
+}
+
+@media (pointer: coarse) {
+  .toolbarButton {
+    height: 36px;
+    min-width: 36px;
+  }
+}

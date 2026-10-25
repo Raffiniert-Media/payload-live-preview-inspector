@@ -1,6 +1,8 @@
 import type { MinimalFormState } from './pathResolution.js'
 
+import { humanize, translateLabel as translate } from './i18n.js'
 import { pathFromFieldElement } from './pathResolution.js'
+import { collapsibleIDFromPath, FIELD_ID_PREFIX, FIELD_PATH_ATTRIBUTE, PAYLOAD_CLASS, selectorOf } from './payloadAdmin.js'
 
 /**
  * The slice of Payload's client field config the planner reads - structurally
@@ -8,11 +10,14 @@ import { pathFromFieldElement } from './pathResolution.js'
  * this stays a pure, unit-testable module.
  */
 export type SchemaField = {
+  admin?: { disabled?: boolean; hidden?: boolean; isSortable?: boolean; readOnly?: boolean }
   blockReferences?: (SchemaBlock | string)[]
   blocks?: SchemaBlock[]
   fields?: SchemaField[]
   label?: unknown
-  labels?: { singular?: unknown }
+  labels?: { plural?: unknown; singular?: unknown }
+  maxRows?: number
+  minRows?: number
   name?: string
   tabs?: SchemaTab[]
   type: string
@@ -20,7 +25,12 @@ export type SchemaField = {
 
 export type SchemaTab = { fields: SchemaField[]; label?: unknown; name?: string }
 
-export type SchemaBlock = { fields: SchemaField[]; labels?: { singular?: unknown }; slug: string }
+export type SchemaBlock = {
+  fields: SchemaField[]
+  imageURL?: string
+  labels?: { plural?: unknown; singular?: unknown }
+  slug: string
+}
 
 export type BlocksMap = Record<string, SchemaBlock | undefined>
 
@@ -107,7 +117,7 @@ const locate = (
           const path = join(parentPath, `_index-${indexPath}`)
           return {
             field: inner.field,
-            steps: [{ id: `field-collapsible-${path.replace(/\./g, '__')}`, kind: 'collapsible' }, ...inner.steps],
+            steps: [{ id: collapsibleIDFromPath(path), kind: 'collapsible' }, ...inner.steps],
           }
         }
       }
@@ -122,7 +132,7 @@ const locate = (
   return null
 }
 
-const findBlock = (field: SchemaField, blockType: unknown, blocksMap: BlocksMap): null | SchemaBlock => {
+export const findBlock = (field: SchemaField, blockType: unknown, blocksMap: BlocksMap): null | SchemaBlock => {
   if (typeof blockType !== 'string') {
     return null
   }
@@ -256,25 +266,6 @@ const walk = (fields: SchemaField[], path: string, formState: MinimalFormState, 
   return { complete: true, steps, target }
 }
 
-/** `metaDescription` → `Meta Description`, the way Payload labels an unlabelled field. */
-const humanize = (name: string): string =>
-  name
-    .replace(/([a-z\d])([A-Z])/g, '$1 $2')
-    .replace(/[_-]+/g, ' ')
-    .replace(/^./, (first) => first.toUpperCase())
-
-/** A config label in the admin's language: a string, or a record of translations. */
-const translate = (label: unknown, language: string): string | undefined => {
-  if (typeof label === 'string') {
-    return label || undefined
-  }
-  if (label && typeof label === 'object') {
-    const translations = label as Record<string, unknown>
-    const text = translations[language] ?? translations.en ?? Object.values(translations)[0]
-    return typeof text === 'string' ? text : undefined
-  }
-  return undefined
-}
 
 /**
  * The name an editor knows the target by - the label the admin itself shows
@@ -298,9 +289,9 @@ export const labelOfTarget = (target: RevealTarget, language: string): string =>
 }
 
 /** Payload's tabs field (see `@payloadcms/ui`'s Tabs field). */
-const TABS_FIELD_SELECTOR = '.tabs-field'
-export const TAB_BUTTON_CLASS = 'tabs-field__tab-button'
-export const TAB_BUTTON_ACTIVE_CLASS = 'tabs-field__tab-button--active'
+const TABS_FIELD_SELECTOR = selectorOf(PAYLOAD_CLASS.tabsField)
+export const TAB_BUTTON_CLASS = PAYLOAD_CLASS.tabButton
+export const TAB_BUTTON_ACTIVE_CLASS = PAYLOAD_CLASS.tabButtonActive
 
 /** How many fields inside a tabs field to try before giving up on identifying it. */
 const MAX_IDENTIFYING_FIELDS = 8
@@ -328,12 +319,14 @@ export const findTabsElement = (
   root: Document | HTMLElement = document,
 ): HTMLElement | null => {
   for (const tabsEl of Array.from(root.querySelectorAll<HTMLElement>(TABS_FIELD_SELECTOR))) {
-    const content = tabsEl.querySelector(':scope > .tabs-field__content-wrap')
+    const content = tabsEl.querySelector(`:scope > ${selectorOf(PAYLOAD_CLASS.tabsContentWrap)}`)
     if (!content) {
       continue
     }
 
-    const fieldEls = Array.from(content.querySelectorAll<HTMLElement>('[id^="field-"], [data-field-path]')).slice(
+    const fieldEls = Array.from(
+      content.querySelectorAll<HTMLElement>(`[id^="${FIELD_ID_PREFIX}"], [${FIELD_PATH_ATTRIBUTE}]`),
+    ).slice(
       0,
       MAX_IDENTIFYING_FIELDS,
     )
@@ -377,6 +370,6 @@ export const findTabsElement = (
 export const tabButtonsOf = (tabsEl: HTMLElement): HTMLButtonElement[] =>
   Array.from(
     tabsEl.querySelectorAll<HTMLButtonElement>(
-      `:scope > .tabs-field__tabs-wrap > .tabs-field__tabs > .${TAB_BUTTON_CLASS}`,
+      `:scope > ${selectorOf(PAYLOAD_CLASS.tabsTabsWrap)} > ${selectorOf(PAYLOAD_CLASS.tabsTabs)} > .${TAB_BUTTON_CLASS}`,
     ),
   )

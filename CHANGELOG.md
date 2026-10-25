@@ -1,5 +1,70 @@
 # Changelog
 
+## 1.14.0
+
+### From click-to-field to an editor around the form
+
+Payload's edit view with live preview is a fixed 40/60 split, a form nested as
+deep as the content (section → row → column → component, up to eight levels in
+accordions and tabs), and on a phone the preview *or* the form. Payload 4 does
+not change that. This release builds the missing editor around the form,
+on top of what the plugin already does - finding any field from a click - and
+every part of it can be turned off (`editor` option, see `EditorFeatures`).
+
+- **A divider between form and preview.** Drag it, or use the arrow keys;
+  double-click (or Enter) puts Payload's 40/60 back. Remembered per browser as
+  a share, applied in pixels, and neither side gets narrower than 320 px.
+- **An outline of the document** beside the form: every Array and Blocks row
+  as a tree, named the way the form names it (`Section 3`) and recognisable by
+  what it holds (its block name, or the first words inside it), with rows that
+  fail validation marked. Built from the field config and the form state, so a
+  row closed three levels down is in it. A click goes there in the form and in
+  the preview; hovering marks the row in the preview. Filter, and the arrow
+  keys of an ARIA tree.
+- **A path bar** pinned above the form: `Section 3 › Row 1 › Column 2 › Text 1`,
+  every crumb a way back up.
+- **Focus mode.** The form shows only the block chosen in the preview, the
+  outline or the path bar - everything else, including the frames of the rows
+  around it, is set aside (attributes on Payload's markup, nothing in the form
+  state, nothing saved). "All fields" in the path bar shows everything again.
+  Off by default on a wide screen, on by default on a narrow one.
+- **A block toolbar in the preview.** The block the editor is at - clicked in
+  the preview, or the one whose field has focus in the form - is framed, with
+  its name and buttons to step out to the block around it, move it up or down,
+  duplicate it, add one below (Payload's own block drawer, the keyboard in its
+  search) and remove it. The admin decides what each row allows (`minRows`,
+  `maxRows`, `isSortable`, read-only) and does the work through Payload's form
+  API, so it is marked changed and saved like any edit. A move, a duplicate
+  and a removal each show a toast with **Undo**. The toolbar is drawn in its own layer, never on the
+  page's markup, and keeps clear of the site's sticky header.
+- **Screen widths.** Phone, tablet and desktop buttons lay the page out at
+  390, 768 or 1440 px (configurable), shrunk to fit the panel and refitted as
+  the divider moves, through Payload's own preview size and zoom - its toolbar
+  shows the same numbers and can take over.
+- **A layout for a narrow screen.** At and below Payload's 1024 px break the
+  preview sits above the form, with a divider between them to drag (touch
+  included), instead of the form disappearing. The outline opens as a sheet.
+- **German and English** for everything the editor says, by the admin's
+  language - the preview gets its words from the admin.
+
+### Payload's internal markup, in one place
+
+What the plugin reads of Payload's rendered admin - class names, ids,
+attributes - lives in `payloadAdmin.ts`, and `payloadAdmin.test.ts` checks
+every name against the installed `@payloadcms/ui`. An upgrade that renames one
+(Payload 4 redesigns the admin) fails there by name instead of a reveal quietly
+finding nothing.
+
+### Smaller changes
+
+- The hint in the document controls is in the admin's language and gives way
+  where the bar is crowded: as an icon carrying the sentence below 1700 px, not
+  at all on a phone, where it used to push Payload's own buttons off screen.
+- Nothing of the plugin runs in a document drawer opened on top of a document;
+  two listeners answered every click twice there.
+- Choices remembered in the browser are read after hydration, so the document
+  controls render the same on server and client.
+
 ## 1.13.0
 
 ### Preview → admin: one motion, and nothing popping in

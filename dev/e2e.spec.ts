@@ -632,6 +632,8 @@ test('a click the inspector cannot answer is left to the page', async ({ page })
 })
 
 test('the admin hint names the modifier the preview reported', async ({ page }) => {
+  // Wide enough for the whole sentence; narrower, an icon carries it.
+  await page.setViewportSize({ height: 900, width: 1800 })
   await login(page)
 
   await openLivePreview(page)
@@ -643,6 +645,14 @@ test('the admin hint names the modifier the preview reported', async ({ page }) 
    * default rather than this preview.
    */
   await expect(page.locator('text=hold ⌥ (Alt) to use the page instead')).toBeVisible()
+
+  // Where the document controls are crowded, the sentence is the icon's label.
+  await page.setViewportSize({ height: 800, width: 1280 })
+  await expect(page.locator('[data-payload-live-preview-inspector-hint-icon]')).toBeVisible()
+  await expect(page.locator('[data-payload-live-preview-inspector-hint-icon]')).toHaveAttribute(
+    'aria-label',
+    /hold ⌥ \(Alt\) to use the page instead/,
+  )
 })
 
 /*
@@ -1211,4 +1221,225 @@ test('complex page: focusing a field glides the preview to its element, clear of
   expect(steps.every((step) => step < 0)).toBe(true)
   const lastSteps = steps.slice(-3).map(Math.abs)
   expect(Math.max(...lastSteps)).toBeLessThan(50)
+})
+
+/*
+ * The editor around click-to-field: the divider, the outline, the path bar and
+ * focus mode, the preview's block toolbar, screen widths, and the stacked
+ * layout on a narrow screen. All on the complex page, whose form nothing here
+ * saves - the page has no drafts, and a reload throws every change away.
+ */
+
+const EDITOR = '[data-payload-live-preview-inspector-toolbar]'
+const BLOCK_TOOLBAR = '[data-payload-live-preview-inspector-block-toolbar] [role=toolbar]'
+const PATH_BAR = '[data-payload-live-preview-inspector-path]'
+const HIDDEN = '[data-payload-live-preview-inspector-hidden]'
+
+/** Every choice the editor remembers, forgotten - each test starts from the defaults. */
+const forgetEditorChoices = (page: Page) =>
+  page.evaluate(() => {
+    for (const key of Object.keys(localStorage)) {
+      if (key.startsWith('payload-live-preview-inspector:')) {
+        localStorage.removeItem(key)
+      }
+    }
+  })
+
+const openEditor = async (page: Page) => {
+  await login(page)
+  await forgetEditorChoices(page)
+  const frame = await openLivePreview(page, 'pages')
+  await expect(page.locator(EDITOR)).toBeAttached()
+  return frame
+}
+
+/**
+ * The first section's heading in the preview. By its text, not its accessible
+ * name: stega puts invisible characters into every heading, and `.first()`
+ * because "Feature section 1" also starts sections 10 to 19.
+ */
+const firstSection = (frame: ReturnType<Page['frameLocator']>) =>
+  frame.locator('h2', { hasText: 'Feature section 1' }).first()
+
+/** The labels of the outline's top-level rows, in order. */
+const outlineSections = (page: Page) =>
+  page.locator('[role=tree] > li > [role=treeitem]').evaluateAll((items) => items.map((item) => item.getAttribute('title')))
+
+test('editor: the divider sets how the screen is shared, and the choice outlasts a reload', async ({ page }) => {
+  await openEditor(page)
+  const handle = page.locator('[data-payload-live-preview-inspector-split]')
+  const preview = page.locator('.live-preview-window')
+  const box = (await handle.boundingBox())!
+  const before = (await preview.boundingBox())!.width
+
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(box.x - 200, box.y + box.height / 2, { steps: 8 })
+  await page.mouse.up()
+  await expect.poll(async () => (await preview.boundingBox())!.width).toBeGreaterThan(before + 150)
+  const dragged = (await preview.boundingBox())!.width
+
+  await page.reload()
+  await expect(page.locator('#live-preview-iframe')).toBeVisible({ timeout: 30_000 })
+  await expect.poll(async () => Math.round((await preview.boundingBox())!.width)).toBe(Math.round(dragged))
+
+  // Double-click puts Payload's own split back.
+  await page.locator('[data-payload-live-preview-inspector-split]').dblclick()
+  await expect.poll(async () => Math.round((await preview.boundingBox())!.width)).toBe(Math.round(before))
+})
+
+test('editor: the outline lists the rows by what they hold, and takes the form to one closed deep inside', async ({
+  page,
+}) => {
+  await openEditor(page)
+  await page.click('[data-payload-live-preview-inspector-outline-toggle]')
+  await expect(page.locator('[role=tree]')).toBeVisible()
+  expect((await outlineSections(page)).slice(0, 2)).toEqual(['Feature 1 · Feature section 1', 'Tabbed 2 · Tabbed section 2'])
+
+  // Section 31 is collapsed, in a tab that is not open.
+  await page.locator('[role=tree] input, [aria-label=Filter]').first().fill('Feature section 31')
+  await page.locator('[role=treeitem]', { hasText: 'Feature section 31' }).first().click()
+  await expect(page.locator('#sections-row-30')).toBeInViewport({ timeout: 10_000 })
+  await expect(page.locator(PATH_BAR)).toContainText('Feature 31')
+})
+
+test('editor: focus mode shows only the block clicked in the preview, and “All fields” everything again', async ({
+  page,
+}) => {
+  const frame = await openEditor(page)
+  await page.click('[data-payload-live-preview-inspector-focus-toggle]')
+  await firstSection(frame).click()
+
+  await expect(page.locator('#field-sections__0__heading')).toBeVisible({ timeout: 10_000 })
+  await expect(page.locator('#sections-row-1')).toBeHidden()
+  await expect(page.locator('#field-title')).toBeHidden()
+  await expect(page.locator(PATH_BAR)).toContainText('Feature 1')
+
+  await page.locator(`${PATH_BAR} button`, { hasText: /^All fields$/ }).click()
+  await expect(page.locator(HIDDEN)).toHaveCount(0)
+  await expect(page.locator('#sections-row-1')).toBeVisible()
+})
+
+test('editor: the block toolbar moves a block, and the move can be taken back', async ({ page }) => {
+  const frame = await openEditor(page)
+  await firstSection(frame).click()
+  const toolbar = frame.locator(BLOCK_TOOLBAR)
+  await expect(toolbar.locator('button').first()).toHaveText('Feature 1')
+  // The first block cannot go up.
+  await expect(toolbar.locator('button[data-action=up]')).toBeDisabled()
+
+  await toolbar.locator('button[data-action=down]').click()
+  await expect.poll(() => page.locator('#field-sections__1__heading').inputValue()).toBe('Feature section 1')
+  await expect(toolbar.locator('button').first()).toHaveText('Feature 2')
+
+  await page.locator('[data-sonner-toast] button', { hasText: 'Undo' }).click()
+  await expect.poll(() => page.locator('#field-sections__0__heading').inputValue()).toBe('Feature section 1')
+})
+
+test('editor: duplicate selects the copy, and remove takes exactly that', async ({ page }) => {
+  const frame = await openEditor(page)
+  await page.click('[data-payload-live-preview-inspector-outline-toggle]')
+  await firstSection(frame).click()
+  const toolbar = frame.locator(BLOCK_TOOLBAR)
+  const before = await outlineSections(page)
+
+  await toolbar.locator('button[data-action=duplicate]').click()
+  await expect.poll(() => outlineSections(page)).toHaveLength(before.length + 1)
+  expect((await outlineSections(page)).slice(0, 3)).toEqual([
+    'Feature 1 · Feature section 1',
+    'Feature 2 · Feature section 1',
+    'Tabbed 3 · Tabbed section 2',
+  ])
+  await expect(toolbar.locator('button').first()).toHaveText('Feature 2')
+
+  await toolbar.locator('button[data-action=remove]').click()
+  await expect.poll(() => outlineSections(page)).toEqual(before)
+})
+
+test('editor: add below opens Payload’s block drawer, typing searches it, and the new block gets the cursor', async ({
+  page,
+}) => {
+  const frame = await openEditor(page)
+  await firstSection(frame).click()
+  await frame.locator(`${BLOCK_TOOLBAR} button[data-action=insert]`).click()
+
+  const drawer = page.locator('.drawer--is-open')
+  await expect(drawer).toBeVisible()
+  // The click was in the preview; the keyboard came along to the drawer.
+  await expect(drawer.locator('input').first()).toBeFocused()
+  await page.keyboard.type('feat')
+  await drawer.getByText('Feature', { exact: true }).click()
+
+  await expect(page.locator('#field-sections__1__heading')).toBeFocused({ timeout: 10_000 })
+  // Below the clicked block, before the rest: the tabbed section moved down one.
+  // (Its header, which renders closed too, not its fields, which do not.)
+  await expect(page.locator('#sections-row-2')).toContainText('Tabbed')
+})
+
+test('editor: a screen width lays the page out at that width, fitted to the panel', async ({ page }) => {
+  const frame = await openEditor(page)
+  const innerWidth = () => frame.locator('html').evaluate(() => window.innerWidth)
+
+  await page.click('[data-viewport=desktop]')
+  await expect.poll(innerWidth).toBeGreaterThanOrEqual(1440)
+  expect(await innerWidth()).toBeLessThan(1443)
+  // Shrunk to fit, at a zoom Payload's toolbar prints as a whole number.
+  await expect(page.locator('.live-preview-toolbar-controls__zoom')).toHaveText(/^\d+%/)
+  const frameBox = (await page.locator('#live-preview-iframe').boundingBox())!
+  const panelBox = (await page.locator('.live-preview-window').boundingBox())!
+  expect(frameBox.x + frameBox.width).toBeLessThanOrEqual(panelBox.x + panelBox.width + 1)
+
+  await page.click('[data-viewport=mobile]')
+  await expect.poll(innerWidth).toBe(390)
+
+  // The chosen one again: back to the panel's own width.
+  await page.click('[data-viewport=mobile]')
+  await expect.poll(innerWidth).toBeGreaterThan(600)
+})
+
+test('editor: on a narrow screen the preview sits above the form, and a tap shows just that block', async ({
+  browser,
+}) => {
+  const context = await browser.newContext({ hasTouch: true, isMobile: true, viewport: { height: 844, width: 390 } })
+  const page = await context.newPage()
+  try {
+    const frame = await openEditor(page)
+    const preview = (await page.locator('.live-preview-window').boundingBox())!
+    const form = (await page.locator('.collection-edit__main').boundingBox())!
+    expect(preview.width).toBe(390)
+    expect(preview.y + preview.height).toBeLessThanOrEqual(form.y + 1)
+    await expect(page.locator('[data-payload-live-preview-inspector-split]')).toBeVisible()
+    // Payload's own buttons still fit beside the editor's.
+    await expect(page.locator('#live-preview-toggler')).toBeInViewport()
+
+    await firstSection(frame).tap()
+    // Focus mode is on by default here.
+    await expect(page.locator('#field-sections__0__heading')).toBeVisible({ timeout: 10_000 })
+    await expect(page.locator('#sections-row-1')).toBeHidden()
+  } finally {
+    await context.close()
+  }
+})
+
+test('editor: a choice remembered from the last visit does not upset hydration', async ({ page }) => {
+  await login(page)
+  await page.evaluate(() => {
+    localStorage.setItem('payload-live-preview-inspector:outline', 'true')
+    localStorage.setItem('payload-live-preview-inspector:focus-mode', 'true')
+    localStorage.setItem('payload-live-preview-inspector:viewport', '"mobile"')
+  })
+  await openLivePreview(page, 'pages')
+
+  // Loaded, not navigated to: only a page the server rendered is hydrated,
+  // and the document controls are rendered there without any storage.
+  const errors: string[] = []
+  page.on('console', (message) => {
+    if (message.type() === 'error') {
+      errors.push(message.text())
+    }
+  })
+  await page.reload()
+  await expect(page.locator('[role=tree]')).toBeVisible({ timeout: 30_000 })
+  await expect(page.locator('#live-preview-iframe')).toBeVisible()
+  expect(errors.filter((error) => /hydrat/i.test(error))).toEqual([])
 })

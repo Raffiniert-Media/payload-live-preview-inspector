@@ -49,6 +49,7 @@ export default [
             // default project is slow, so the rule wants the set enumerated.
             'src/*.test.ts',
             'src/utilities/*.test.ts',
+            'src/components/editor/*.test.ts',
           ],
         },
         // projectService: true,

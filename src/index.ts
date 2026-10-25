@@ -1,5 +1,10 @@
 import type { CollectionSlug, Config, GlobalSlug } from 'payload'
 
+import type { EditorFeatures } from './utilities/features.js'
+
+export type { EditorFeatures } from './utilities/features.js'
+export type { Viewport } from './utilities/layout.js'
+
 export type PayloadLivePreviewInspectorConfig = {
   /**
    * Maximum wait (ms) for a just-expanded accordion to render its content before scrolling.
@@ -11,6 +16,14 @@ export type PayloadLivePreviewInspectorConfig = {
    */
   collections?: Partial<Record<CollectionSlug, true>>
   disabled?: boolean
+  /**
+   * The editor around click-to-field: a divider between form and preview, an
+   * outline of the document's rows, a path bar, focus mode, screen widths for
+   * the preview, a block toolbar in the preview, and a stacked layout on a
+   * narrow screen. Every part is on unless turned off here - see
+   * `EditorFeatures`.
+   */
+  editor?: EditorFeatures
   /**
    * Flash outline/background color shown when scrolling to a field.
    * Defaults to the admin's accent colour (Payload's `--theme-success-500`).
@@ -70,6 +83,7 @@ export const payloadLivePreviewInspector =
     const createComponentConfig = () => ({
       clientProps: {
         accordionAnimationMs: pluginOptions.accordionAnimationMs,
+        editor: pluginOptions.editor,
         flashColor: pluginOptions.flashColor,
         flashDurationMs: pluginOptions.flashDurationMs,
         scrollBehavior: pluginOptions.scrollBehavior,

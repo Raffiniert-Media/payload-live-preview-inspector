@@ -1,30 +1,46 @@
 'use client'
 
 import {
+  BlocksDrawer,
+  toast,
   useAllFormFields,
   useConfig,
   useDocumentInfo,
+  useEditDepth,
   useForm,
   useLivePreviewContext,
+  useModal,
   useTranslation,
 } from '@payloadcms/ui'
-import { useEffect, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 
+import type { CaretHint } from '../utilities/caret.js'
 import type { Curtain } from '../utilities/curtain.js'
+import type { EditorFeatures } from '../utilities/features.js'
 import type { RevealStatus } from '../utilities/messageTypes.js'
 import type { DocumentLeafValue } from '../utilities/pathResolution.js'
 import type { BlocksMap, SchemaField } from '../utilities/revealPlan.js'
+import type { Outline, OutlineNode } from '../utilities/structure.js'
+import type { RowAction, RowFormAPI } from './editor/rowActions.js'
 
 import { createCamera } from '../utilities/camera.js'
 import { caretHintFromSelection, parseCaretHint } from '../utilities/caret.js'
 import { drawCurtain, openingAreaOf, tabContentOf, visibleRowsAfter } from '../utilities/curtain.js'
+import { previewStringsOf, stringsFor } from '../utilities/i18n.js'
+import { isolate } from '../utilities/isolate.js'
+import { DEFAULT_VIEWPORTS, isBoolean } from '../utilities/layout.js'
 import {
   CLICK_MESSAGE_TYPE,
   DOCUMENT_VALUES_MESSAGE_TYPE,
   FOCUS_MESSAGE_TYPE,
+  HOVER_MESSAGE_TYPE,
   REQUEST_DOCUMENT_VALUES_MESSAGE_TYPE,
   REVEAL_STATUS_MESSAGE_TYPE,
+  ROW_ACTION_MESSAGE_TYPE,
+  SELECT_MESSAGE_TYPE,
   SETTINGS_MESSAGE_TYPE,
+  STRUCTURE_MESSAGE_TYPE,
   THEME_MESSAGE_TYPE,
 } from '../utilities/messageTypes.js'
 import {
@@ -55,6 +71,19 @@ import {
   waitForStablePosition,
 } from '../utilities/pathResolution.js'
 import {
+  collapsibleOf,
+  editMainEl,
+  editMainWrapperEl,
+  isCollapsedCollapsible,
+  livePreviewWindowEl,
+  PAYLOAD_CLASS,
+  PAYLOAD_MID_BREAK_PX,
+  PAYLOAD_PROPERTY,
+  selectorOf,
+  toggleButtonOf,
+  toggleWrapOf,
+} from '../utilities/payloadAdmin.js'
+import {
   describeTarget,
   findTabsElement,
   labelOfTarget,
@@ -63,11 +92,30 @@ import {
   tabButtonsOf,
 } from '../utilities/revealPlan.js'
 import { createRevealTimer } from '../utilities/revealTimer.js'
+import {
+  buildOutline,
+  chainOf,
+  outlineSignature,
+  previewRowsOf,
+  rowIDPathOf,
+  rowPathOf,
+} from '../utilities/structure.js'
+import { useHost, useMaxWidth, useStored, watchDom } from './editor/dom.js'
+import editorClasses from './editor/Editor.module.css'
+import { editorStyles, HOST } from './editor/editorStyles.js'
+import { FocusIcon, InfoIcon, OutlineIcon } from './editor/icons.js'
+import { OutlinePanel } from './editor/OutlinePanel.js'
+import { PathBar } from './editor/PathBar.js'
+import { duplicateRow, insertRowBelow, isRowAction, moveRow, removeRow, splitRowPath } from './editor/rowActions.js'
+import { SplitHandle } from './editor/SplitHandle.js'
+import { ViewportControls } from './editor/ViewportControls.js'
 import classes from './LivePreviewInspectorListener.module.css'
 
 export type LivePreviewInspectorListenerProps = {
   /** Maximum wait (ms) for a just-expanded accordion to render its content before scrolling. Defaults to 350. */
   accordionAnimationMs?: number
+  /** The editor's parts beyond click-to-field. Every one is on by default. */
+  editor?: EditorFeatures
   /** Flash outline/background color. Defaults to the admin's accent (`--theme-success-500`). */
   flashColor?: string
   /** Flash animation duration in ms. Defaults to the shipped CSS (1200ms). */
@@ -99,23 +147,25 @@ export type LivePreviewInspectorListenerProps = {
   tabSwitchWaitMs?: number
 }
 
-/**
- * How to name the modifier key to an editor.
- *
- * Both spellings, because the hint is read on the machine it applies to and
- * neither name alone is recognisable on both: a Mac keyboard says `⌥`, a PC
- * keyboard says `Alt`. `'none'` is absent on purpose - it maps to no label, and
- * the hint then leaves the sentence out rather than promising a key that does
- * nothing.
- */
 /** Quiet time after the last form change before new values go to the preview. */
 const VALUES_PUSH_DEBOUNCE_MS = 200
 /** How long the hint says a click found no field. */
 const NOT_FOUND_NOTICE_MS = 3_000
+/** How long a new row may take to appear in the form state before it is not waited for. */
+const NEW_ROW_WAIT_MS = 2_000
+
+const FOCUS_MODE_KEY = 'payload-live-preview-inspector:focus-mode'
+const OUTLINE_KEY = 'payload-live-preview-inspector:outline'
 
 /** Payload's accent colour, resolved in the admin's current light/dark theme. */
 const accentColor = (): string =>
-  getComputedStyle(document.documentElement).getPropertyValue('--theme-success-500').trim()
+  getComputedStyle(document.documentElement).getPropertyValue(PAYLOAD_PROPERTY.accent).trim()
+
+/**
+ * How close to a tab bar or row header the page gets before it is opened -
+ * the last stretch of the motion, so opening doesn't wait for it to stop.
+ */
+const OPEN_WHEN_NEAR_PX = 120
 
 /**
  * A brief glow on a control the reveal is about to operate - the tab it
@@ -126,12 +176,6 @@ const accentColor = (): string =>
  * `className` as their state changes (a tab turning active), which would
  * wipe a class of ours on the very render the click causes.
  */
-/**
- * How close to a tab bar or row header the page gets before it is opened -
- * the last stretch of the motion, so opening doesn't wait for it to stop.
- */
-const OPEN_WHEN_NEAR_PX = 120
-
 const pulse = (el: Element | null | undefined): void => {
   const accent = accentColor() || '#1587ba'
   el?.animate(
@@ -159,6 +203,15 @@ const nextFrames = (count: number): Promise<void> =>
     tick(count)
   })
 
+/**
+ * How to name the modifier key to an editor.
+ *
+ * Both spellings, because the hint is read on the machine it applies to and
+ * neither name alone is recognisable on both: a Mac keyboard says `⌥`, a PC
+ * keyboard says `Alt`. `'none'` is absent on purpose - it maps to no label, and
+ * the hint then leaves the sentence out rather than promising a key that does
+ * nothing.
+ */
 const MODIFIER_LABELS: Record<string, string | undefined> = {
   alt: '⌥ (Alt)',
   ctrl: '⌃ (Ctrl)',
@@ -166,15 +219,59 @@ const MODIFIER_LABELS: Record<string, string | undefined> = {
   shift: '⇧ (Shift)',
 }
 
-export const LivePreviewInspectorListener: React.FC<LivePreviewInspectorListenerProps> = ({
+type RevealOptions = {
+  caret?: CaretHint
+  /**
+   * Put the cursor in the field, as clicking it would. Off for a whole row
+   * reached from the outline or the path bar: it is scrolled to and flashed,
+   * and the editor picks the field.
+   */
+  focus?: boolean
+  /** How the reveal is going - the preview's click mark listens. */
+  onStatus?: (status: RevealStatus, label?: string) => void
+}
+
+type Reveal = (path: string, options?: RevealOptions) => void
+
+/** Where a selection came from - which decides what else it moves. */
+type SelectionSource = 'form' | 'outline' | 'path' | 'preview' | 'toolbar'
+
+/**
+ * Everything on the admin's side: click-to-field and its reverse, and the
+ * editor around it - divider, outline, path bar, focus mode, screen widths and
+ * the preview's block toolbar.
+ *
+ * Mounted in the document controls by the plugin. Only for the document's own
+ * form: a document opened in a drawer on top of it has a form of its own and
+ * no live preview, and two of these would answer every click twice.
+ */
+export const LivePreviewInspectorListener: React.FC<LivePreviewInspectorListenerProps> = (props) => {
+  const editDepth = useEditDepth()
+  if (editDepth > 1) {
+    return null
+  }
+  return <Inspector {...props} />
+}
+
+const Inspector: React.FC<LivePreviewInspectorListenerProps> = ({
   accordionAnimationMs = DEFAULT_COLLAPSIBLE_ANIMATION_MS,
+  editor = {},
   flashColor,
   flashDurationMs,
   scrollBehavior = 'smooth',
   scrollOffset,
   tabSwitchWaitMs = DEFAULT_TAB_SWITCH_WAIT_MS,
 }) => {
-  const { iframeRef, isLivePreviewing, loadedURL, url } = useLivePreviewContext()
+  const { iframeRef, isLivePreviewing, loadedURL, previewWindowType, url } = useLivePreviewContext()
+  const features = {
+    blockToolbar: editor.blockToolbar !== false,
+    focusMode: editor.focusMode !== false,
+    outline: editor.outline !== false,
+    pathBar: editor.pathBar !== false,
+    split: editor.split !== false,
+    stacked: editor.stacked !== false,
+    viewports: editor.viewports === false ? [] : (editor.viewports ?? DEFAULT_VIEWPORTS),
+  }
 
   /*
    * What the preview says it does with a click, for the hint below.
@@ -187,48 +284,35 @@ export const LivePreviewInspectorListener: React.FC<LivePreviewInspectorListener
    * turned it off would be showing its editors an instruction that does
    * nothing.
    */
-  const [previewSettings, setPreviewSettings] = useState<
-    { interactionModifier: string } | undefined
-  >(undefined)
+  const [previewSettings, setPreviewSettings] = useState<{ interactionModifier: string } | undefined>(undefined)
   const activeURL = loadedURL || url
   const [notFoundNotice, setNotFoundNotice] = useState(false)
   // Where the current reveal is going, for the hint - named the way the form
   // names it.
   const [revealLabel, setRevealLabel] = useState<string | undefined>(undefined)
   const { i18n } = useTranslation()
-  const languageRef = useRef(i18n.language)
-  languageRef.current = i18n.language
+  const language = i18n.language
+  const languageRef = useRef(language)
+  languageRef.current = language
+  const strings = useMemo(() => stringsFor(language), [language])
+  const stringsRef = useRef(strings)
+  stringsRef.current = strings
+  const stacked = useMaxWidth(PAYLOAD_MID_BREAK_PX)
 
-  /*
-   * Where document values go once the preview has asked for them. The
-   * preview used to ask again after every render batch - i.e. every
-   * keystroke - and got the whole form serialised each time; now the admin
-   * sends a snapshot when the values actually changed, and only then.
-   */
-  const valuesChannelRef = useRef<{ lastSignature: string; post: (leaves: DocumentLeafValue[]) => void } | null>(
-    null,
-  )
-
-  // `useForm().getFields` is an imperative getter that reads the current form
-  // state on demand, unlike `useAllFormFields()`, which re-renders this
-  // component on every keystroke anywhere in the form. We only need the
-  // freshest state at click time, so a ref (rather than an effect dependency)
-  // is enough to always call the latest version without re-subscribing.
-  const { dispatchFields, getFields } = useForm()
-  // Subscribed only to learn *that* the form changed, for the values push
-  // below. This re-renders the listener on every change, which is cheap -
-  // it renders one line of text - and everything it reads goes through
-  // `getFields` at the time it is needed.
-  const [formFields] = useAllFormFields()
-  const getFieldsRef = useRef(getFields)
-  getFieldsRef.current = getFields
-  const dispatchFieldsRef = useRef(dispatchFields)
-  dispatchFieldsRef.current = dispatchFields
+  // `useForm()` is the form's API, read at the time it is needed; it does not
+  // re-render this component when a field changes (see `FormWatcher`).
+  const form = useForm()
+  const formRef = useRef(form)
+  formRef.current = form
+  const getFieldsRef = useRef(form.getFields)
+  getFieldsRef.current = form.getFields
+  const dispatchFieldsRef = useRef(form.dispatchFields)
+  dispatchFieldsRef.current = form.dispatchFields
 
   // The edited document's field config: it knows which tab holds a field and
   // which rows sit on the way to it, so a reveal can go straight there
   // instead of clicking through tabs to find out.
-  const { collectionSlug, globalSlug } = useDocumentInfo()
+  const { collectionSlug, globalSlug, hasSavePermission } = useDocumentInfo()
   const { config, getEntityConfig } = useConfig()
   const entityConfig = collectionSlug
     ? getEntityConfig({ collectionSlug })
@@ -242,19 +326,54 @@ export const LivePreviewInspectorListener: React.FC<LivePreviewInspectorListener
         fields: entityConfig.fields as unknown as SchemaField[],
       }
     : null
+  const readOnlyRef = useRef(false)
+  readOnlyRef.current = hasSavePermission === false || Boolean(form.disabled)
+
+  /* ---------------------------------------------------------------- state */
+
+  const [outline, setOutline] = useState<null | Outline>(null)
+  const outlineRef = useRef<null | Outline>(null)
+  const outlineSignatureRef = useRef('')
+  /** The row the editor is at, by row ids - what the preview frames and the path bar spells out. */
+  const [selection, setSelection] = useState<null | string>(null)
+  const selectionRef = useRef(selection)
+  selectionRef.current = selection
+  /** The row focus mode shows, by row ids; `null` shows everything. */
+  const [focusRoot, setFocusRoot] = useState<null | string>(null)
+  const [focusModeChoice, setFocusModeChoice] = useStored<boolean | null>(
+    FOCUS_MODE_KEY,
+    (value): value is boolean => isBoolean(value),
+    null,
+  )
+  const focusMode =
+    features.focusMode && (focusModeChoice ?? (editor.focusMode === 'on' || (stacked && isLivePreviewing)))
+  const focusModeRef = useRef(focusMode)
+  focusModeRef.current = focusMode
+  const [outlineOpen, setOutlineOpen] = useStored(OUTLINE_KEY, isBoolean, false)
+  /** A row the editor asked to add a block below, while they pick which. */
+  const [insertBelow, setInsertBelow] = useState<{ field: SchemaField; path: string } | null>(null)
+
+  /** The preview, once it has loaded and spoken: how to send it a message. */
+  const previewRef = useRef<{ post: (message: Record<string, unknown>) => void } | null>(null)
+  const postToPreview = useCallback((message: Record<string, unknown>) => previewRef.current?.post(message), [])
+
+  /*
+   * Where document values go once the preview has asked for them. The
+   * preview used to ask again after every render batch - i.e. every
+   * keystroke - and got the whole form serialised each time; now the admin
+   * sends a snapshot when the values actually changed, and only then.
+   */
+  const valuesChannelRef = useRef<{ lastSignature: string; post: (leaves: DocumentLeafValue[]) => void } | null>(
+    null,
+  )
+
+  /** Shared with the focus listeners below; see `suppressFocusEcho` in the reveal. */
+  const engineRef = useRef({ suppressFocusEcho: false })
+  const revealRef = useRef<Reveal>(() => {})
+
+  /* -------------------------------------------------------- reveal engine */
 
   useEffect(() => {
-    if (!activeURL) {
-      return
-    }
-
-    let expectedOrigin: string
-    try {
-      expectedOrigin = new URL(activeURL).origin
-    } catch {
-      return
-    }
-
     // One controller per reveal: a newer click aborts everything the older
     // one still has in flight - its waits, its scroll corrections and, most
     // importantly, a tab search that would otherwise keep clicking tabs (and
@@ -266,9 +385,7 @@ export const LivePreviewInspectorListener: React.FC<LivePreviewInspectorListener
     // send it straight back to the preview - scrolling it away from the very
     // element the user clicked (in a long rich text, back to its first
     // paragraph, since the field's own path is all a `focusin` can tell us).
-    let suppressFocusEcho = false
     let echoTimer: ReturnType<typeof setTimeout> | undefined
-
     let noticeTimer: ReturnType<typeof setTimeout> | undefined
     let labelTimer: ReturnType<typeof setTimeout> | undefined
     let healTimer: ReturnType<typeof setTimeout> | undefined
@@ -278,67 +395,16 @@ export const LivePreviewInspectorListener: React.FC<LivePreviewInspectorListener
       noticeTimer = setTimeout(() => setNotFoundNotice(false), NOT_FOUND_NOTICE_MS)
     }
 
-    const handleMessage = (event: MessageEvent) => {
-      if (event.origin !== expectedOrigin || event.source !== iframeRef.current?.contentWindow) {
-        return
-      }
-
-      const { data } = event
-      if (!data || typeof data !== 'object') {
-        return
-      }
-
-      if (data.type === SETTINGS_MESSAGE_TYPE) {
-        setPreviewSettings(
-          data.disableInteractions && typeof data.interactionModifier === 'string'
-            ? { interactionModifier: data.interactionModifier }
-            : undefined,
-        )
-        // A preview just loaded: give it the admin's colours.
-        ;(event.source as Window).postMessage({ type: THEME_MESSAGE_TYPE, accent: accentColor() }, expectedOrigin)
-        return
-      }
-
-      if (data.type === REQUEST_DOCUMENT_VALUES_MESSAGE_TYPE) {
-        // The iframe wants the current field values for value matching -
-        // reply with every string leaf, addressed by stable row ids, and
-        // keep it posted from now on.
-        const source = event.source as Window
-        const channel = {
-          lastSignature: '',
-          post: (leaves: DocumentLeafValue[]) =>
-            source.postMessage({ type: DOCUMENT_VALUES_MESSAGE_TYPE, leaves }, expectedOrigin),
-        }
-        const leaves = collectLeafValues(getFieldsRef.current())
-        channel.lastSignature = signatureOf(leaves)
-        channel.post(leaves)
-        valuesChannelRef.current = channel
-        return
-      }
-
-      if (data.type !== CLICK_MESSAGE_TYPE || typeof data.path !== 'string') {
-        return
-      }
-
-      // Older clients send no id and get no status.
-      const clickID: unknown = data.id
-      const sendStatus = (status: RevealStatus, label?: string) => {
-        if (typeof clickID === 'number') {
-          iframeRef.current?.contentWindow?.postMessage(
-            { id: clickID, type: REVEAL_STATUS_MESSAGE_TYPE, label, status },
-            expectedOrigin,
-          )
-        }
-      }
-
-      const caret = parseCaretHint(data.caret)
+    revealRef.current = (path, { caret, focus = true, onStatus } = {}) => {
+      const sendStatus = (status: RevealStatus, label?: string) => onStatus?.(status, label)
       const formState = getFieldsRef.current()
-      const resolvedPath = resolveRowIDs(data.path, formState)
+      const resolvedPath = resolveRowIDs(path, formState)
       const schema = schemaRef.current
 
       // Answered before anything moves - the preview marks the click the
       // moment it happens and names where it's going from this reply.
-      const target = resolvedPath && schema ? describeTarget(schema.fields, resolvedPath, formState, schema.blocksMap) : null
+      const target =
+        resolvedPath && schema ? describeTarget(schema.fields, resolvedPath, formState, schema.blocksMap) : null
       const label = target ? labelOfTarget(target, languageRef.current) : undefined
       sendStatus('started', label)
       clearTimeout(labelTimer)
@@ -347,7 +413,7 @@ export const LivePreviewInspectorListener: React.FC<LivePreviewInspectorListener
       if (!resolvedPath) {
         if (process.env.NODE_ENV !== 'production') {
           // eslint-disable-next-line no-console -- intentional dev-only diagnostic
-          console.warn(`[payload-live-preview-inspector] Could not resolve a row id in path "${data.path}"`)
+          console.warn(`[payload-live-preview-inspector] Could not resolve a row id in path "${path}"`)
         }
         sendStatus('not-found')
         showNotFound()
@@ -363,17 +429,17 @@ export const LivePreviewInspectorListener: React.FC<LivePreviewInspectorListener
       /** Sets `collapsed` on rows of one or more Array/Blocks fields - one dispatch per field, so none overwrites another. */
       const setRowsCollapsed = (rows: { index: number; path: string }[], collapsed: boolean) => {
         const byPath = new Map<string, Set<number>>()
-        for (const { index, path } of rows) {
-          byPath.set(path, (byPath.get(path) ?? new Set()).add(index))
+        for (const { index, path: rowsPath } of rows) {
+          byPath.set(rowsPath, (byPath.get(rowsPath) ?? new Set()).add(index))
         }
-        for (const [path, indices] of byPath) {
-          const formRows = getFieldsRef.current()[path]?.rows
+        for (const [rowsPath, indices] of byPath) {
+          const formRows = getFieldsRef.current()[rowsPath]?.rows
           if (formRows) {
             dispatchFieldsRef.current({
               type: 'SET_ROW_COLLAPSED',
-              path,
+              path: rowsPath,
               updatedRows: formRows.map((row, i) => (indices.has(i) ? { ...row, collapsed } : row)),
-            })
+            } as never)
           }
         }
       }
@@ -396,7 +462,7 @@ export const LivePreviewInspectorListener: React.FC<LivePreviewInspectorListener
           return
         }
         const allRendered = () => (findUnrenderedRows().length === 0 ? document.body : null)
-        const names = () => stuck.map(({ index, path }) => `"${path}.${index}"`).join(', ')
+        const names = () => stuck.map(({ index, path: rowsPath }) => `"${rowsPath}.${index}"`).join(', ')
 
         if (process.env.NODE_ENV !== 'production') {
           // eslint-disable-next-line no-console -- intentional dev-only diagnostic
@@ -448,8 +514,7 @@ export const LivePreviewInspectorListener: React.FC<LivePreviewInspectorListener
         // switch mounts the row before its lazy fields, an expansion mounts
         // nested rows still collapsed, a scroll mounts deferred fields).
         const progressBeyond = (depth: number) => () =>
-          checkExact() ??
-          (resolvedPathDepth(resolvedPath) > depth ? resolveFieldElement(resolvedPath) : null)
+          checkExact() ?? (resolvedPathDepth(resolvedPath) > depth ? resolveFieldElement(resolvedPath) : null)
 
         const totalDepth = resolvedPath.split('.').length
 
@@ -478,8 +543,8 @@ export const LivePreviewInspectorListener: React.FC<LivePreviewInspectorListener
               return !formState[step.path]?.rows?.[step.index]?.collapsed
             }
             if (step.kind === 'collapsible') {
-              const collapsible = document.getElementById(step.id)?.querySelector('.collapsible')
-              return Boolean(collapsible) && !collapsible?.classList.contains('collapsible--collapsed')
+              const collapsible = collapsibleOf(document.getElementById(step.id))
+              return Boolean(collapsible) && !isCollapsedCollapsible(collapsible)
             }
             const tabsEl = findTabsElement(step, schema.fields, formState, schema.blocksMap)
             return Boolean(tabsEl && tabButtonsOf(tabsEl)[step.index]?.classList.contains(TAB_BUTTON_ACTIVE_CLASS))
@@ -500,6 +565,11 @@ export const LivePreviewInspectorListener: React.FC<LivePreviewInspectorListener
           // and done mid-motion that cut the motion short with a jump. A
           // tab switches once the page is still.
           const bringIntoView = async (control: HTMLElement | null | undefined, { atRest = false } = {}) => {
+            // A control focus mode hides has no place on the page to travel
+            // to - it is operated where it is.
+            if (control && control.getClientRects().length === 0) {
+              return
+            }
             if (control && !isInOpeningView(control)) {
               // Never travel blind: what opened before has rendered by now
               // (this step's control was found in it), and once it has
@@ -513,10 +583,8 @@ export const LivePreviewInspectorListener: React.FC<LivePreviewInspectorListener
               await (atRest ? camera.arrived() : camera.near(OPEN_WHEN_NEAR_PX))
             }
           }
-          const rowHeaderOf = (path: string, index: number) =>
-            document
-              .getElementById(rowIDFromPath(`${path}.${index}`) ?? '')
-              ?.querySelector<HTMLElement>('.collapsible__toggle-wrap') ?? null
+          const rowHeaderOf = (rowsPath: string, index: number) =>
+            toggleWrapOf(collapsibleOf(document.getElementById(rowIDFromPath(`${rowsPath}.${index}`) ?? '')))
 
           planApplied = plan.complete
           let clicked = false
@@ -554,7 +622,7 @@ export const LivePreviewInspectorListener: React.FC<LivePreviewInspectorListener
               // pushed down in bursts as it fills - and come back where they
               // end up.
               const rowEl = document.getElementById(rowIDFromPath(`${step.path}.${step.index}`) ?? '')
-              curtains.push(drawCurtain(openingAreaOf(rowEl?.querySelector('.collapsible'))))
+              curtains.push(drawCurtain(openingAreaOf(collapsibleOf(rowEl))))
               for (const below of visibleRowsAfter(rowEl)) {
                 curtains.push(drawCurtain(below, { fade: true }))
               }
@@ -590,16 +658,16 @@ export const LivePreviewInspectorListener: React.FC<LivePreviewInspectorListener
                 planApplied = false
                 break
               }
-              const collapsible = collapsibleEl.querySelector<HTMLElement>('.collapsible')
-              if (collapsible?.classList.contains('collapsible--collapsed')) {
-                const toggleWrap = collapsible.querySelector<HTMLElement>(':scope > .collapsible__toggle-wrap')
+              const collapsible = collapsibleOf(collapsibleEl)
+              if (isCollapsedCollapsible(collapsible)) {
+                const toggleWrap = toggleWrapOf(collapsible)
                 await bringIntoView(toggleWrap)
                 if (signal.aborted) {
                   return 'not-found'
                 }
                 pulse(toggleWrap)
                 curtains.push(drawCurtain(openingAreaOf(collapsible)))
-                toggleWrap?.querySelector<HTMLButtonElement>(':scope > .collapsible__toggle')?.click()
+                toggleButtonOf(collapsible)?.click()
                 clicked = true
               }
               continue
@@ -640,7 +708,6 @@ export const LivePreviewInspectorListener: React.FC<LivePreviewInspectorListener
           if (clicked) {
             camera.hold()
           }
-
 
           // Whatever the plan changed renders now - wait for it to show,
           // i.e. for the target or at least a deeper part of its path than
@@ -802,28 +869,30 @@ export const LivePreviewInspectorListener: React.FC<LivePreviewInspectorListener
         }
         timer.phase('scroll')
 
-        // Cleared on a macrotask rather than right after the call: `focusin`
-        // itself is synchronous, but an editor settling the selection we just
-        // set (Lexical does) can move focus again in a microtask. Real user
-        // focus cannot land inside that window, so nothing legitimate is lost.
-        suppressFocusEcho = true
-        const caretEl = focusElement(el, caret)
-        echoTimer = setTimeout(() => {
-          suppressFocusEcho = false
-        })
+        if (focus) {
+          // Cleared on a macrotask rather than right after the call: `focusin`
+          // itself is synchronous, but an editor settling the selection we just
+          // set (Lexical does) can move focus again in a microtask. Real user
+          // focus cannot land inside that window, so nothing legitimate is lost.
+          engineRef.current.suppressFocusEcho = true
+          const caretEl = focusElement(el, caret, { inFields: el.id === rowIDFromPath(resolvedPath) })
+          echoTimer = setTimeout(() => {
+            engineRef.current.suppressFocusEcho = false
+          })
 
-        // The scroll above put the *field* at `scrollOffset`; in a long rich
-        // text the clicked position can still be far below the fold, so bring
-        // the caret itself into view - but only when it actually is off
-        // screen, since `scrollToElement` otherwise re-centers a field the
-        // user can already see.
-        if (caretEl) {
-          const { bottom, top } = caretEl.getBoundingClientRect()
-          if (top < 0 || bottom > window.innerHeight) {
-            camera.aim(caretEl)
-            await camera.arrived()
-            if (signal.aborted) {
-              return 'not-found'
+          // The scroll above put the *field* at `scrollOffset`; in a long rich
+          // text the clicked position can still be far below the fold, so bring
+          // the caret itself into view - but only when it actually is off
+          // screen, since `scrollToElement` otherwise re-centers a field the
+          // user can already see.
+          if (caretEl) {
+            const { bottom, top } = caretEl.getBoundingClientRect()
+            if (top < 0 || bottom > window.innerHeight) {
+              camera.aim(caretEl)
+              await camera.arrived()
+              if (signal.aborted) {
+                return 'not-found'
+              }
             }
           }
         }
@@ -858,23 +927,451 @@ export const LivePreviewInspectorListener: React.FC<LivePreviewInspectorListener
       })
     }
 
-    // Reverse direction: focusing a field in the admin form scrolls to and
-    // flashes the matching element in the preview, the same way a click
-    // there reveals the field here.
-    const sendFocus = (el: HTMLElement) => {
-      const path = pathFromFieldElement(el)
-      // A whole Array/Blocks field ("Add block", its own label) has no one
-      // place on the page to go to - better to stay put than to jump to
-      // its first row.
-      if (!path || getFieldsRef.current()[path]?.rows) {
+    return () => {
+      clearTimeout(echoTimer)
+      clearTimeout(noticeTimer)
+      clearTimeout(labelTimer)
+      clearTimeout(healTimer)
+      revealController?.abort()
+      revealRef.current = () => {}
+    }
+  }, [accordionAnimationMs, flashColor, flashDurationMs, scrollBehavior, scrollOffset, tabSwitchWaitMs])
+
+  /* ------------------------------------------------------------ selection */
+
+  /** The row focus mode shows, as the DOM applies it - ahead of React, see `select`. */
+  const isolationRef = useRef<null | string>(null)
+
+  /**
+   * Hides everything in the form but the row focus mode shows: the row itself
+   * or - still mounting behind rows a reveal is opening - the deepest row on
+   * the way to it that is there already.
+   */
+  const applyIsolation = useCallback(() => {
+    const root = editMainEl()
+    if (!root) {
+      return
+    }
+    const target = isolationRef.current
+    if (!target) {
+      isolate(root, null)
+      return
+    }
+    const formState = getFieldsRef.current()
+    const chain = chainOf(outlineRef.current?.byRowIDPath.get(target))
+    const rowEl = (rowIDPath: string) => {
+      const path = resolveRowIDs(rowIDPath, formState)
+      return path ? document.getElementById(rowIDFromPath(path) ?? '') : null
+    }
+    let el: HTMLElement | null = null
+    for (const node of [...chain].reverse()) {
+      el = rowEl(node.rowIDPath)
+      if (el) {
+        break
+      }
+    }
+    isolate(root, el, chain[0] ? rowEl(chain[0].rowIDPath) : null)
+  }, [])
+
+  /**
+   * The editor is at `rowIDPath` now. Where it came from decides what else
+   * follows: a choice in the preview, the outline or the path bar narrows
+   * focus mode to it; a field focused in the form only says where the editor
+   * is, and leaves what focus mode shows alone - narrowing it under their
+   * hands as they tab through a column would hide the field they tab to next.
+   */
+  const select = useCallback(
+    (rowIDPath: null | string, from: SelectionSource, { focusField = false, reveal = false } = {}) => {
+      setSelection(rowIDPath)
+      if (focusModeRef.current && from !== 'form') {
+        setFocusRoot(rowIDPath)
+        // At once, before the reveal below starts: it opens the way to the
+        // row, and what it opens should already be all there is to see.
+        isolationRef.current = rowIDPath
+        applyIsolation()
+      }
+      if (reveal && rowIDPath) {
+        revealRef.current(rowIDPath, { focus: focusField })
+      }
+      if (features.blockToolbar) {
+        postToPreview({ type: SELECT_MESSAGE_TYPE, path: rowIDPath })
+      }
+      if (rowIDPath && from !== 'preview' && from !== 'form') {
+        // Taken there in the preview too, the way focusing a field is.
+        postToPreview({ type: FOCUS_MESSAGE_TYPE, path: rowIDPath })
+      }
+    },
+    [applyIsolation, features.blockToolbar, postToPreview],
+  )
+  const selectRef = useRef(select)
+  selectRef.current = select
+
+  /* ------------------------------------------------------------- outline */
+
+  const pushStructure = useCallback(() => {
+    if (!features.blockToolbar || !outlineRef.current) {
+      return
+    }
+    postToPreview({
+      type: STRUCTURE_MESSAGE_TYPE,
+      rows: previewRowsOf(outlineRef.current),
+      strings: previewStringsOf(stringsRef.current),
+    })
+  }, [features.blockToolbar, postToPreview])
+
+  const needsOutline = features.outline || features.pathBar || features.focusMode || features.blockToolbar
+
+  const recomputeOutline = useCallback(() => {
+    const schema = schemaRef.current
+    if (!needsOutline || !schema) {
+      return
+    }
+    const next = buildOutline(schema.fields, getFieldsRef.current(), {
+      blocksMap: schema.blocksMap,
+      language: languageRef.current,
+      readOnly: readOnlyRef.current,
+    })
+    outlineRef.current = next
+    const signature = outlineSignature(next)
+    if (signature !== outlineSignatureRef.current) {
+      outlineSignatureRef.current = signature
+      setOutline(next)
+      pushStructure()
+    }
+  }, [needsOutline, pushStructure])
+
+  // Labels are in the admin's language: a new language is a new outline.
+  useEffect(() => {
+    outlineSignatureRef.current = ''
+    recomputeOutline()
+  }, [language, recomputeOutline])
+
+  // A row that went away takes the selection and focus mode to the row around it.
+  useEffect(() => {
+    if (!outline) {
+      return
+    }
+    const parentRowOf = (path: string): null | string => rowIDPathOf(path.split('.').slice(0, -1).join('.'))
+    const survivor = (path: null | string): null | string => {
+      for (let current = path; current; current = parentRowOf(current)) {
+        if (outline.byRowIDPath.has(current)) {
+          return current
+        }
+      }
+      return null
+    }
+    // Gone from the form, not merely not in the outline yet: a row just added
+    // is selected before the outline, rebuilt a moment later, has it.
+    const gone = (path: string) =>
+      !outline.byRowIDPath.has(path) && resolveRowIDs(path, getFieldsRef.current()) === null
+    if (selection && gone(selection)) {
+      setSelection(survivor(selection))
+    }
+    if (focusRoot && gone(focusRoot)) {
+      setFocusRoot(survivor(focusRoot))
+    }
+  }, [focusRoot, outline, selection])
+
+  /* ------------------------------------------------- the form, as it changes */
+
+  // Push new document values to the preview once the form has been still
+  // for a moment - and only when they actually differ from the last push
+  // (a change to a number or a checkbox leaves every string alone).
+  const formChangeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const onFormChange = useCallback(() => {
+    clearTimeout(formChangeTimer.current)
+    formChangeTimer.current = setTimeout(() => {
+      const channel = valuesChannelRef.current
+      if (channel) {
+        const leaves = collectLeafValues(getFieldsRef.current())
+        const signature = signatureOf(leaves)
+        if (signature !== channel.lastSignature) {
+          channel.lastSignature = signature
+          channel.post(leaves)
+        }
+      }
+      recomputeOutline()
+    }, VALUES_PUSH_DEBOUNCE_MS)
+  }, [recomputeOutline])
+  useEffect(() => () => clearTimeout(formChangeTimer.current), [])
+
+  /* ---------------------------------------------------------- row actions */
+
+  /** The ids of the rows in the field `path` is a row of, as they are now. */
+  const rowIDsAround = (path: string): Set<string> => {
+    const row = splitRowPath(path)
+    return new Set((row ? getFieldsRef.current()[row.fieldPath]?.rows : undefined)?.map((entry) => entry.id) ?? [])
+  }
+
+  /**
+   * The row-id path of the row a duplicate or an insert put at `path`, once the
+   * form state has it - a row whose id none of `before` had. The form applies
+   * the change on its next render, so until then the row at that index is the
+   * one that is about to move down, and selecting it would select the wrong
+   * block (and a "remove" right after would remove it).
+   */
+  const waitForNewRow = useCallback(async (path: string, before: Set<string>): Promise<null | string> => {
+    const row = splitRowPath(path)
+    if (!row) {
+      return null
+    }
+    const started = Date.now()
+    while (Date.now() - started < NEW_ROW_WAIT_MS) {
+      const id = getFieldsRef.current()[row.fieldPath]?.rows?.[row.index]?.id
+      if (id && !before.has(id)) {
+        return toRowIDPath(path, getFieldsRef.current())
+      }
+      await nextFrames(2)
+    }
+    return null
+  }, [])
+
+  const formAPI = (): RowFormAPI => formRef.current as unknown as RowFormAPI
+
+  /**
+   * Selects a row that was just added and puts the cursor in its first field -
+   * once it has one. Payload renders a new row's fields only after a round to
+   * the server, so revealing it at once found an empty row and focused
+   * nothing; and the block drawer, closing, hands focus back to wherever it
+   * came from, which would undo a focus set too early.
+   */
+  const selectNewRow = useCallback(async (rowIDPath: string) => {
+    selectRef.current(rowIDPath, 'toolbar')
+    const started = Date.now()
+    while (Date.now() - started < NEW_ROW_WAIT_MS * 2) {
+      const path = resolveRowIDs(rowIDPath, getFieldsRef.current())
+      const row = path ? document.getElementById(rowIDFromPath(path) ?? '') : null
+      if (!path) {
+        return
+      }
+      if (
+        row?.querySelector(
+          `:scope ${selectorOf(PAYLOAD_CLASS.renderFields)} :is(input, textarea, select, [contenteditable="true"])`,
+        )
+      ) {
+        break
+      }
+      await nextFrames(3)
+    }
+    revealRef.current(rowIDPath, { focus: true })
+  }, [])
+
+  const runRowAction = useCallback(
+    async (action: RowAction, rowIDPath: string) => {
+      const formState = getFieldsRef.current()
+      const path = resolveRowIDs(rowIDPath, formState)
+      const node = path ? outlineRef.current?.byPath.get(path) : undefined
+      if (!path || !node) {
+        return
+      }
+      const label = node.label
+
+      if (action === 'select' || action === 'edit') {
+        selectRef.current(rowIDPath, 'toolbar', { focusField: action === 'edit', reveal: true })
+        return
+      }
+      if (readOnlyRef.current) {
         return
       }
 
-      const rowIDPath = toRowIDPath(path, getFieldsRef.current())
-      iframeRef.current?.contentWindow?.postMessage(
-        { type: FOCUS_MESSAGE_TYPE, caret: caretHintFromSelection(el), path: rowIDPath },
-        expectedOrigin,
-      )
+      if ((action === 'up' || action === 'down') && node.abilities.move) {
+        const moved = moveRow(formAPI(), path, action === 'up' ? -1 : 1)
+        if (moved) {
+          // The same row, by its id - which is what selection follows.
+          selectRef.current(rowIDPath, 'toolbar')
+          toast.success(stringsRef.current.moved(label), {
+            action: { label: stringsRef.current.undo, onClick: moved.undo },
+          })
+        }
+        return
+      }
+
+      if (action === 'duplicate' && node.abilities.duplicate) {
+        const before = rowIDsAround(path)
+        const copy = duplicateRow(formAPI(), path)
+        if (copy) {
+          const copyID = await waitForNewRow(copy.path, before)
+          if (copyID) {
+            selectRef.current(copyID, 'toolbar', { reveal: true })
+          }
+          toast.success(stringsRef.current.duplicated(label), {
+            action: { label: stringsRef.current.undo, onClick: copy.undo },
+          })
+        }
+        return
+      }
+
+      if (action === 'remove' && node.abilities.remove) {
+        const removed = removeRow(formAPI(), path)
+        if (removed) {
+          selectRef.current(node.parent?.rowIDPath ?? null, 'toolbar')
+          toast.success(stringsRef.current.removed(label), {
+            action: { label: stringsRef.current.undo, onClick: removed.undo },
+            duration: 8_000,
+          })
+        }
+        return
+      }
+
+      if (action === 'insert' && node.abilities.insert) {
+        const schema = schemaRef.current
+        const target = schema ? describeTarget(schema.fields, path, formState, schema.blocksMap) : null
+        const field = target?.field
+        if (!field) {
+          return
+        }
+        if (field.type === 'blocks') {
+          // Which block is the editor's choice, made in Payload's own drawer.
+          setInsertBelow({ field, path })
+          return
+        }
+        const before = rowIDsAround(path)
+        const added = insertRowBelow(formAPI(), path)
+        if (added) {
+          const addedID = await waitForNewRow(added.path, before)
+          if (addedID) {
+            await selectNewRow(addedID)
+          }
+        }
+      }
+    },
+    [selectNewRow, waitForNewRow],
+  )
+  const runRowActionRef = useRef(runRowAction)
+  runRowActionRef.current = runRowAction
+
+  /* ------------------------------------------------------- preview channel */
+
+  useEffect(() => {
+    if (!activeURL) {
+      return
+    }
+
+    let expectedOrigin: string
+    try {
+      expectedOrigin = new URL(activeURL).origin
+    } catch {
+      return
+    }
+
+    const post = (message: Record<string, unknown>) =>
+      iframeRef.current?.contentWindow?.postMessage(message, expectedOrigin)
+    // From now on, not only once the preview has spoken: a focused field is
+    // sent along even to a preview whose first message was missed.
+    previewRef.current = { post }
+
+    const handleMessage = (event: MessageEvent) => {
+      if (event.origin !== expectedOrigin || event.source !== iframeRef.current?.contentWindow) {
+        return
+      }
+
+      const { data } = event
+      if (!data || typeof data !== 'object') {
+        return
+      }
+
+      if (data.type === SETTINGS_MESSAGE_TYPE) {
+        setPreviewSettings(
+          data.disableInteractions && typeof data.interactionModifier === 'string'
+            ? { interactionModifier: data.interactionModifier }
+            : undefined,
+        )
+        // A preview just loaded: give it the admin's colours, the rows its
+        // toolbar works on, and what is selected.
+        post({ type: THEME_MESSAGE_TYPE, accent: accentColor() })
+        pushStructure()
+        if (features.blockToolbar && selectionRef.current) {
+          post({ type: SELECT_MESSAGE_TYPE, path: selectionRef.current })
+        }
+        return
+      }
+
+      if (data.type === REQUEST_DOCUMENT_VALUES_MESSAGE_TYPE) {
+        // The iframe wants the current field values for value matching -
+        // reply with every string leaf, addressed by stable row ids, and
+        // keep it posted from now on.
+        const source = event.source as Window
+        const channel = {
+          lastSignature: '',
+          post: (leaves: DocumentLeafValue[]) =>
+            source.postMessage({ type: DOCUMENT_VALUES_MESSAGE_TYPE, leaves }, expectedOrigin),
+        }
+        const leaves = collectLeafValues(getFieldsRef.current())
+        channel.lastSignature = signatureOf(leaves)
+        channel.post(leaves)
+        valuesChannelRef.current = channel
+        // Asked until answered, so also the reliable moment for the rows.
+        pushStructure()
+        return
+      }
+
+      if (data.type === ROW_ACTION_MESSAGE_TYPE) {
+        if (features.blockToolbar && typeof data.path === 'string' && isRowAction(data.action)) {
+          void runRowActionRef.current(data.action, data.path)
+        }
+        return
+      }
+
+      if (data.type !== CLICK_MESSAGE_TYPE || typeof data.path !== 'string') {
+        return
+      }
+
+      // Older clients send no id and get no status.
+      const clickID: unknown = data.id
+      const onStatus = (status: RevealStatus, label?: string) => {
+        if (typeof clickID === 'number') {
+          post({ id: clickID, type: REVEAL_STATUS_MESSAGE_TYPE, label, status })
+        }
+      }
+
+      // The block the clicked field is in is where the editor is now - and,
+      // in focus mode, all the form shows.
+      const formState = getFieldsRef.current()
+      const resolvedPath = resolveRowIDs(data.path, formState)
+      const rowPath = resolvedPath ? rowPathOf(resolvedPath, formState) : null
+      if (rowPath) {
+        selectRef.current(toRowIDPath(rowPath, formState), 'preview')
+      }
+
+      revealRef.current(data.path, { caret: parseCaretHint(data.caret), onStatus })
+    }
+
+    window.addEventListener('message', handleMessage)
+
+    return () => {
+      window.removeEventListener('message', handleMessage)
+      previewRef.current = null
+      valuesChannelRef.current = null
+    }
+  }, [iframeRef, activeURL, features.blockToolbar, pushStructure])
+
+  /* --------------------------------------- the form, as the editor moves in it */
+
+  useEffect(() => {
+    // Reverse direction: focusing a field in the admin form scrolls to and
+    // flashes the matching element in the preview, the same way a click
+    // there reveals the field here. And wherever it is, that is where the
+    // editor is: the selection follows.
+    const onFieldFocus = (el: HTMLElement) => {
+      const path = pathFromFieldElement(el)
+      if (!path) {
+        return
+      }
+      const formState = getFieldsRef.current()
+      const rowPath = rowPathOf(path, formState)
+      const rowIDPath = rowPath ? toRowIDPath(rowPath, formState) : null
+      if (rowIDPath !== selectionRef.current) {
+        selectRef.current(rowIDPath, 'form')
+      }
+
+      // A whole Array/Blocks field ("Add block", its own label) has no one
+      // place on the page to go to - better to stay put than to jump to
+      // its first row.
+      if (formState[path]?.rows) {
+        return
+      }
+
+      postToPreview({ type: FOCUS_MESSAGE_TYPE, caret: caretHintFromSelection(el), path: toRowIDPath(path, formState) })
     }
 
     // A pointer places the caret only *after* moving focus, so a hint read
@@ -895,7 +1392,7 @@ export const LivePreviewInspectorListener: React.FC<LivePreviewInspectorListener
     }
 
     const handleFocusIn = (event: FocusEvent) => {
-      if (suppressFocusEcho || !(event.target instanceof HTMLElement)) {
+      if (engineRef.current.suppressFocusEcho || !(event.target instanceof HTMLElement)) {
         return
       }
       if (pointerActive) {
@@ -903,7 +1400,7 @@ export const LivePreviewInspectorListener: React.FC<LivePreviewInspectorListener
         return
       }
 
-      sendFocus(event.target)
+      onFieldFocus(event.target)
     }
 
     // Also the only signal for a caret moved *within* the focused field:
@@ -914,7 +1411,7 @@ export const LivePreviewInspectorListener: React.FC<LivePreviewInspectorListener
       pointerActive = false
       pendingPointerFocus = null
 
-      if (suppressFocusEcho) {
+      if (engineRef.current.suppressFocusEcho) {
         return
       }
 
@@ -930,86 +1427,304 @@ export const LivePreviewInspectorListener: React.FC<LivePreviewInspectorListener
           : null)
 
       if (el) {
-        sendFocus(el)
+        onFieldFocus(el)
       }
     }
 
-    window.addEventListener('message', handleMessage)
     document.addEventListener('focusin', handleFocusIn)
     document.addEventListener('pointerdown', handlePointerDown, { capture: true })
     document.addEventListener('pointerup', handlePointerUp, { capture: true })
     document.addEventListener('click', handleClick, { capture: true })
 
     return () => {
-      window.removeEventListener('message', handleMessage)
       document.removeEventListener('focusin', handleFocusIn)
       document.removeEventListener('pointerdown', handlePointerDown, { capture: true })
       document.removeEventListener('pointerup', handlePointerUp, { capture: true })
       document.removeEventListener('click', handleClick, { capture: true })
-      clearTimeout(echoTimer)
-      clearTimeout(noticeTimer)
-      clearTimeout(labelTimer)
-      clearTimeout(healTimer)
-      revealController?.abort()
-      valuesChannelRef.current = null
     }
-  }, [
-    iframeRef,
-    activeURL,
-    accordionAnimationMs,
-    flashColor,
-    flashDurationMs,
-    scrollBehavior,
-    scrollOffset,
-    tabSwitchWaitMs,
-  ])
+  }, [postToPreview])
 
-  // Push new document values to the preview once the form has been still
-  // for a moment - and only when they actually differ from the last push
-  // (a change to a number or a checkbox leaves every string alone).
+  /* ----------------------------------------------------------- focus mode */
+
+  // What focus mode shows, kept true as Payload renders: the row once it
+  // mounts, what the form adds beside it later.
+  const isolationTarget = features.focusMode && focusMode ? focusRoot : null
   useEffect(() => {
-    const timer = setTimeout(() => {
-      const channel = valuesChannelRef.current
-      if (!channel) {
+    isolationRef.current = isolationTarget
+    if (!features.focusMode) {
+      return
+    }
+    const stop = watchDom(document.body, applyIsolation)
+    return () => {
+      stop()
+      const root = editMainEl()
+      if (root) {
+        isolate(root, null)
+      }
+    }
+  }, [applyIsolation, features.focusMode, isolationTarget, outline])
+
+  const toggleFocusMode = () => {
+    const next = !focusMode
+    setFocusModeChoice(next)
+    setFocusRoot(next ? selection : null)
+    if (next && selection) {
+      revealRef.current(selection, { focus: false })
+    }
+  }
+
+  const toggleOutline = () => setOutlineOpen(!outlineOpen)
+
+  /* ------------------------------------------------------------- hosts */
+
+  const showSplit = features.split && isLivePreviewing && previewWindowType === 'iframe' && (!stacked || features.stacked)
+  const splitHost = useHost(
+    HOST.split,
+    () => {
+      const wrapper = editMainWrapperEl()
+      const preview = livePreviewWindowEl()
+      return wrapper && preview && preview.parentElement === wrapper ? { before: preview, parent: wrapper } : null
+    },
+    showSplit,
+  )
+  const outlineHost = useHost(
+    HOST.outline,
+    () => {
+      const wrapper = editMainWrapperEl()
+      return wrapper ? { parent: wrapper } : null
+    },
+    features.outline && outlineOpen,
+  )
+  // Where the editor is - or, in focus mode with the cursor outside every row,
+  // what focus mode shows.
+  const pathTarget = selection ?? (focusMode ? focusRoot : null)
+  const chain = useMemo(
+    () => chainOf(pathTarget ? outline?.byRowIDPath.get(pathTarget) : null),
+    [outline, pathTarget],
+  )
+  const showPathBar = features.pathBar && (chain.length > 0 || Boolean(focusMode && focusRoot))
+  const pathHost = useHost(
+    HOST.pathBar,
+    () => {
+      const main = editMainEl()
+      return main ? { parent: main } : null
+    },
+    showPathBar,
+  )
+
+  /* -------------------------------------------------- adding a block below */
+
+  const { closeModal, openModal } = useModal()
+  const drawerSlug = `payload-live-preview-inspector-insert-${collectionSlug ?? globalSlug ?? 'doc'}`
+  useEffect(() => {
+    if (!insertBelow) {
+      return
+    }
+    openModal(drawerSlug)
+    // The "+" was clicked in the preview, so the keyboard is still in its
+    // frame: typing would not reach the drawer's search, nor Escape close it.
+    // Brought over to the search once the drawer has opened.
+    let frame = 0
+    let tries = 0
+    //
+    // After the drawer's own dialog has taken focus, which it does a frame or
+    // two after opening: focused before that, the search lost it to the
+    // dialog straight away (measured on krc, 2 ms apart).
+    const focusSearch = () => {
+      const search = document.querySelector<HTMLInputElement>(`${selectorOf(PAYLOAD_CLASS.drawerOpen)} input`)
+      const dialogHasFocus = Boolean(search && document.activeElement?.contains(search))
+      if (search && (dialogHasFocus || tries > 30)) {
+        window.focus()
+        search.focus()
         return
       }
-      const leaves = collectLeafValues(getFieldsRef.current())
-      const signature = signatureOf(leaves)
-      if (signature !== channel.lastSignature) {
-        channel.lastSignature = signature
-        channel.post(leaves)
+      if (++tries < 120) {
+        frame = requestAnimationFrame(focusSearch)
       }
-    }, VALUES_PUSH_DEBOUNCE_MS)
+    }
+    frame = requestAnimationFrame(focusSearch)
+    return () => cancelAnimationFrame(frame)
+  }, [drawerSlug, insertBelow, openModal])
 
-    return () => clearTimeout(timer)
-  }, [formFields])
+  const insertDrawer = insertBelow
+    ? (() => {
+        const filter = (getFieldsRef.current()[splitRowPath(insertBelow.path)?.fieldPath ?? ''] as
+          | { blocksFilterOptions?: unknown }
+          | undefined)?.blocksFilterOptions
+        const all = (insertBelow.field.blockReferences ?? insertBelow.field.blocks ?? []) as (
+          | { slug: string }
+          | string
+        )[]
+        const allowed = Array.isArray(filter)
+          ? all.filter((block) => filter.includes(typeof block === 'string' ? block : block.slug))
+          : all
+        return (
+          <BlocksDrawer
+            addRow={async (_index, blockType) => {
+              const path = insertBelow.path
+              setInsertBelow(null)
+              closeModal(drawerSlug)
+              const before = rowIDsAround(path)
+              const added = insertRowBelow(formAPI(), path, blockType)
+              if (added) {
+                const addedID = await waitForNewRow(added.path, before)
+                if (addedID) {
+                  await selectNewRow(addedID)
+                }
+              }
+            }}
+            addRowIndex={(splitRowPath(insertBelow.path)?.index ?? 0) + 1}
+            blocks={allowed as never}
+            drawerSlug={drawerSlug}
+            labels={(insertBelow.field.labels ?? { plural: 'Blocks', singular: 'Block' }) as never}
+          />
+        )
+      })()
+    : null
 
-  if (!isLivePreviewing) {
-    return null
-  }
+  /* ----------------------------------------------------------------- render */
 
-  if (notFoundNotice) {
-    return (
-      <div className={classes.hint} role="status">
-        That element’s field isn’t in this form (a removed row, or a field only editable in a drawer)
-      </div>
-    )
-  }
+  const styles = useMemo(
+    () => editorStyles({ mobile: features.stacked, split: features.split }),
+    [features.stacked, features.split],
+  )
 
   const modifierLabel = MODIFIER_LABELS[previewSettings?.interactionModifier ?? '']
-
-  if (revealLabel) {
-    return (
-      <div className={`${classes.hint} ${classes.hintActive}`} role="status">
-        → {revealLabel}
+  const hint = !isLivePreviewing ? null : notFoundNotice ? (
+    <div className={`${editorClasses.hint} ${editorClasses.hintActive}`} role="status">
+      {strings.notFound}
+    </div>
+  ) : revealLabel ? (
+    <div className={`${editorClasses.hint} ${editorClasses.hintActive}`} role="status">
+      → {revealLabel}
+    </div>
+  ) : (
+    <>
+      <div className={editorClasses.hint}>
+        {strings.hint}
+        {modifierLabel ? strings.hintModifier(modifierLabel) : ''}
       </div>
-    )
-  }
+      {/*
+       * Where the sentence does not fit, it is still there to find: the only
+       * place an editor learns that the modifier gives them the page back.
+       */}
+      <span
+        aria-label={`${strings.hint}${modifierLabel ? strings.hintModifier(modifierLabel) : ''}`}
+        className={editorClasses.hintIcon}
+        data-payload-live-preview-inspector-hint-icon=""
+        role="img"
+        title={`${strings.hint}${modifierLabel ? strings.hintModifier(modifierLabel) : ''}`}
+      >
+        <InfoIcon />
+      </span>
+    </>
+  )
 
   return (
-    <div className={classes.hint}>
-      Click an element in the Live Preview to jump to its field
-      {modifierLabel ? ` — hold ${modifierLabel} to use the page instead` : ''}
+    <div className={editorClasses.toolbar} data-payload-live-preview-inspector-toolbar="">
+      <style>{styles}</style>
+      <FormWatcher onChange={onFormChange} />
+      {hint}
+      {(features.outline || features.focusMode) && (
+        <div className={editorClasses.group}>
+          {features.outline && (
+            <button
+              aria-label={outlineOpen ? strings.outlineHide : strings.outlineShow}
+              aria-pressed={outlineOpen}
+              className={editorClasses.button}
+              data-payload-live-preview-inspector-outline-toggle=""
+              onClick={toggleOutline}
+              title={outlineOpen ? strings.outlineHide : strings.outlineShow}
+              type="button"
+            >
+              <OutlineIcon />
+              <span className={editorClasses.buttonLabel}>{strings.outline}</span>
+            </button>
+          )}
+          {features.focusMode && (
+            <button
+              aria-label={focusMode ? strings.focusModeOff : strings.focusModeOn}
+              aria-pressed={focusMode}
+              className={`${editorClasses.button} ${editorClasses.toolbarFocus}`}
+              data-payload-live-preview-inspector-focus-toggle=""
+              onClick={toggleFocusMode}
+              title={focusMode ? strings.focusModeOff : strings.focusModeOn}
+              type="button"
+            >
+              <FocusIcon />
+              <span className={editorClasses.buttonLabel}>{strings.focusMode}</span>
+            </button>
+          )}
+        </div>
+      )}
+      {features.viewports.length > 0 && isLivePreviewing && previewWindowType === 'iframe' && !stacked && (
+        <ViewportControls language={language} strings={strings} viewports={features.viewports} />
+      )}
+      {splitHost &&
+        createPortal(
+          <SplitHandle
+            getWrapper={editMainWrapperEl}
+            outlineOpen={Boolean(outlineHost)}
+            stacked={stacked}
+            strings={strings}
+          />,
+          splitHost,
+        )}
+      {outlineHost &&
+        createPortal(
+          <OutlinePanel
+            activePath={selection}
+            focusRootPath={focusMode ? focusRoot : null}
+            onClose={toggleOutline}
+            onHover={(node) => {
+              if (features.blockToolbar) {
+                postToPreview({ type: HOVER_MESSAGE_TYPE, path: node?.rowIDPath ?? null })
+              }
+            }}
+            onSelect={(node: OutlineNode) => {
+              select(node.rowIDPath, 'outline', { reveal: true })
+              if (stacked) {
+                toggleOutline()
+              }
+            }}
+            outline={outline}
+            strings={strings}
+          />,
+          outlineHost,
+        )}
+      {pathHost &&
+        createPortal(
+          <PathBar
+            chain={chain}
+            focusMode={focusMode}
+            focusRootPath={focusMode ? focusRoot : null}
+            onSelect={(node) => {
+              if (!node) {
+                setFocusRoot(null)
+                return
+              }
+              select(node.rowIDPath, 'path', { reveal: true })
+            }}
+            onToggleFocus={features.focusMode ? toggleFocusMode : undefined}
+            strings={strings}
+          />,
+          pathHost,
+        )}
+      {insertDrawer}
     </div>
   )
+}
+
+/**
+ * The one part that re-renders on every change to the form - and renders
+ * nothing. `useAllFormFields()` re-renders whoever calls it on each keystroke
+ * anywhere in the form; here that costs nothing, where in the editor above it
+ * would re-render the outline, the path bar and the toolbar with it.
+ */
+const FormWatcher: React.FC<{ onChange: () => void }> = ({ onChange }) => {
+  const [fields] = useAllFormFields()
+  useEffect(() => {
+    onChange()
+  }, [fields, onChange])
+  return null
 }
