@@ -311,6 +311,23 @@ const MAX_IDENTIFYING_FIELDS = 8
  * matters for nesting: an outer tabs field contains the inner one's fields
  * too, and would otherwise pass for it.
  */
+/**
+ * The first `max` field elements in `content`, in document order - walked
+ * and stopped there, rather than collected: a tab's content can hold
+ * hundreds of fields, and a reveal waiting for a tab asks every frame.
+ */
+const firstFieldsIn = (content: Element, max: number): HTMLElement[] => {
+  const found: HTMLElement[] = []
+  const walker = content.ownerDocument.createTreeWalker(content, NodeFilter.SHOW_ELEMENT)
+  for (let node = walker.nextNode(); node && found.length < max; node = walker.nextNode()) {
+    const el = node as HTMLElement
+    if (el.id.startsWith(FIELD_ID_PREFIX) || el.hasAttribute(FIELD_PATH_ATTRIBUTE)) {
+      found.push(el)
+    }
+  }
+  return found
+}
+
 export const findTabsElement = (
   step: Extract<RevealStep, { kind: 'tab' }>,
   fields: SchemaField[],
@@ -324,12 +341,7 @@ export const findTabsElement = (
       continue
     }
 
-    const fieldEls = Array.from(
-      content.querySelectorAll<HTMLElement>(`[id^="${FIELD_ID_PREFIX}"], [${FIELD_PATH_ATTRIBUTE}]`),
-    ).slice(
-      0,
-      MAX_IDENTIFYING_FIELDS,
-    )
+    const fieldEls = firstFieldsIn(content, MAX_IDENTIFYING_FIELDS)
 
     for (const fieldEl of fieldEls) {
       const fieldPath = pathFromFieldElement(fieldEl)

@@ -98,7 +98,27 @@ export const resolveExactFieldElement = (path: string): HTMLElement | null => {
     return rowEl
   }
 
-  return document.querySelector<HTMLElement>(`[${FIELD_PATH_ATTRIBUTE}="${escapeAttributeValue(path)}"]`)
+  // Only Lexical fields carry the attribute, and only inside their own row:
+  // searched there, a row that is not rendered answers at once, where a
+  // search of the whole form - several a frame while a reveal waits for a
+  // field to mount - cost a scan of every element each time.
+  const scope = rowScopeOf(path)
+  return scope ? scope.querySelector<HTMLElement>(`[${FIELD_PATH_ATTRIBUTE}="${escapeAttributeValue(path)}"]`) : null
+}
+
+/**
+ * The innermost row `path` lies in, as rendered - the document for a path in
+ * no row, `null` when the row is not rendered (and nothing in it can be).
+ */
+const rowScopeOf = (path: string): Document | HTMLElement | null => {
+  const segments = path.split('.')
+  for (let end = segments.length - 2; end > 0; end--) {
+    if (/^\d+$/.test(segments[end])) {
+      const rowID = rowIDFromPath(segments.slice(0, end + 1).join('.'))
+      return rowID ? document.getElementById(rowID) : document
+    }
+  }
+  return document
 }
 
 /**
@@ -269,11 +289,33 @@ const collectTextRuns = (value: unknown, out: string[]): void => {
  */
 const STRUCTURAL_KEYS = new Set(['blockType', 'id'])
 
+/**
+ * An auth collection's secrets, in the form while someone types them - never
+ * page content, and not to be posted to the page, whatever its origin.
+ */
+const SECRET_KEYS = new Set(['apiKey', 'confirm-password', 'password'])
+
+/**
+ * A rich-text value's text runs, by value: Payload keeps the same object for
+ * a field nobody changed, so typing in one field walks that field's tree and
+ * no other.
+ */
+const textRunsCache = new WeakMap<object, string[]>()
+const textRunsOf = (value: object): string[] => {
+  let runs = textRunsCache.get(value)
+  if (!runs) {
+    runs = []
+    collectTextRuns(value, runs)
+    textRunsCache.set(value, runs)
+  }
+  return runs
+}
+
 export const collectLeafValues = (formState: MinimalFormState): DocumentLeafValue[] => {
   const leaves: DocumentLeafValue[] = []
 
   for (const [path, field] of Object.entries(formState)) {
-    if (STRUCTURAL_KEYS.has(path.slice(path.lastIndexOf('.') + 1))) {
+    if (STRUCTURAL_KEYS.has(path.slice(path.lastIndexOf('.') + 1)) || SECRET_KEYS.has(path)) {
       continue
     }
 
@@ -287,8 +329,7 @@ export const collectLeafValues = (formState: MinimalFormState): DocumentLeafValu
     }
 
     if (value !== null && typeof value === 'object') {
-      const runs: string[] = []
-      collectTextRuns(value, runs)
+      const runs = textRunsOf(value)
       if (runs.length === 0) {
         continue
       }

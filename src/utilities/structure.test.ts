@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import type { MinimalFormState } from './pathResolution.js'
 import type { BlocksMap, SchemaField } from './revealPlan.js'
+import type { FieldPermissions } from './structure.js'
 
 import {
   buildOutline,
@@ -209,6 +210,29 @@ describe('buildOutline', () => {
     const nodes = flattenOutline(buildOutline(locked, state, {}))
     expect(nodes.map((node) => node.path)).toEqual(['links.0', 'links.1', 'sections.0', 'sections.0.items.0', 'sections.0.items.1'])
     expect(nodes.every((node) => Object.values(node.abilities).every((allowed) => !allowed))).toBe(true)
+  })
+
+  it('allows only what the field permissions allow', () => {
+    const permitted = (permissions: FieldPermissions) => (path: string) =>
+      buildOutline(fields, formState, { blocksMap, permissions }).byPath.get(path)?.abilities
+
+    // Everything, said once.
+    expect(permitted(true)('layout.0')?.duplicate).toBe(true)
+    // Layout may change, the section's rows inside it may not.
+    const noRows: FieldPermissions = {
+      layout: {
+        blocks: { section: { fields: { anchor: true, rows: { read: true } } } },
+        update: true,
+      },
+      meta: true,
+      title: true,
+    }
+    expect(permitted(noRows)('layout.0')?.duplicate).toBe(true)
+    expect(permitted(noRows)('layout.0.rows.0')).toEqual({ duplicate: false, insert: false, move: false, remove: false })
+    // A field the user has no permission for at all is not there for them.
+    expect(permitted({ layout: true, title: true })('meta.links.0')?.remove).toBe(false)
+    // A named tab is a level of its own.
+    expect(permitted({ layout: true, meta: { fields: { links: true } }, title: true })('meta.links.0')?.remove).toBe(true)
   })
 
   it('allows nothing on a read-only form', () => {

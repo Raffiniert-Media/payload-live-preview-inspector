@@ -21,12 +21,19 @@ import type { EditorFeatures } from '../utilities/features.js'
 import type { RevealStatus } from '../utilities/messageTypes.js'
 import type { DocumentLeafValue } from '../utilities/pathResolution.js'
 import type { BlocksMap, SchemaField } from '../utilities/revealPlan.js'
-import type { Outline, OutlineNode } from '../utilities/structure.js'
+import type { FieldPermissions, Outline, OutlineNode } from '../utilities/structure.js'
 import type { RowAction, RowFormAPI } from './editor/rowActions.js'
 
 import { createCamera } from '../utilities/camera.js'
 import { caretHintFromSelection, parseCaretHint } from '../utilities/caret.js'
-import { drawCurtain, openingAreaOf, tabContentOf, visibleRowsAfter } from '../utilities/curtain.js'
+import {
+  drawCurtain,
+  holdScrollRoom,
+  openingAreaOf,
+  releaseKeptRooms,
+  tabContentOf,
+  visibleRowsAfter,
+} from '../utilities/curtain.js'
 import { previewStringsOf, stringsFor } from '../utilities/i18n.js'
 import { HOST_ATTRIBUTE, isolate } from '../utilities/isolate.js'
 import { DEFAULT_VIEWPORTS, isBoolean } from '../utilities/layout.js'
@@ -149,8 +156,10 @@ export type LivePreviewInspectorListenerProps = {
   tabSwitchWaitMs?: number
 }
 
+/** Quiet time after the last form change before the outline - and the path bar, and the preview's toolbar - catch up. */
+const OUTLINE_DEBOUNCE_MS = 200
 /** Quiet time after the last form change before new values go to the preview. */
-const VALUES_PUSH_DEBOUNCE_MS = 200
+const VALUES_PUSH_DEBOUNCE_MS = 600
 /** How long the hint says a click found no field. */
 const NOT_FOUND_NOTICE_MS = 3_000
 /** How long a new row may take to appear in the form state before it is not waited for. */
@@ -350,7 +359,7 @@ const Inspector: React.FC<LivePreviewInspectorListenerProps> = ({
   // The edited document's field config: it knows which tab holds a field and
   // which rows sit on the way to it, so a reveal can go straight there
   // instead of clicking through tabs to find out.
-  const { collectionSlug, globalSlug, hasSavePermission } = useDocumentInfo()
+  const { collectionSlug, docPermissions, globalSlug, hasSavePermission } = useDocumentInfo()
   const { config, getEntityConfig } = useConfig()
   const entityConfig = collectionSlug
     ? getEntityConfig({ collectionSlug })
@@ -366,6 +375,9 @@ const Inspector: React.FC<LivePreviewInspectorListenerProps> = ({
     : null
   const hasSavePermissionRef = useRef(hasSavePermission)
   hasSavePermissionRef.current = hasSavePermission
+  // What the user may change, field by field - the outline offers no more.
+  const fieldPermissionsRef = useRef<FieldPermissions | undefined>(undefined)
+  fieldPermissionsRef.current = docPermissions?.fields as FieldPermissions | undefined
   /**
    * Whether the form takes changes - asked when it matters, not remembered
    * from the last render: Payload flips `disabled` on the form's own object
@@ -541,6 +553,7 @@ const Inspector: React.FC<LivePreviewInspectorListenerProps> = ({
       }
 
       revealController?.abort()
+      releaseKeptRooms()
       const controller = new AbortController()
       revealController = controller
       const { signal } = controller
@@ -624,6 +637,9 @@ const Inspector: React.FC<LivePreviewInspectorListenerProps> = ({
           curtain.lift()
         }
       }
+      // Tab areas held at the height the scroll position needs while a tab
+      // switch renders (see `holdScrollRoom`) - let go once the reveal ends.
+      const rooms: { release: () => void }[] = []
 
       const revealField = async (): Promise<'ancestor' | 'exact' | 'not-found'> => {
         // The path's actual form field (a stega path pointing inside e.g. a
@@ -820,6 +836,7 @@ const Inspector: React.FC<LivePreviewInspectorListenerProps> = ({
               }
               glow(button)
               hideWhileRendering(tabContentOf(tabsEl))
+              rooms.push(holdScrollRoom(tabContentOf(tabsEl)))
               button.click()
               clicked = true
             }
@@ -1053,6 +1070,9 @@ const Inspector: React.FC<LivePreviewInspectorListenerProps> = ({
         })
         .then((outcome) => {
           liftCurtains()
+          for (const room of rooms.splice(0)) {
+            room.release()
+          }
           // Lifted by now unless the reveal failed or a newer one took it over.
           unveilRef.current(veil)
           timer.end(signal.aborted ? 'aborted' : outcome)
@@ -1082,6 +1102,7 @@ const Inspector: React.FC<LivePreviewInspectorListenerProps> = ({
       clearTimeout(healTimer)
       revealController?.abort()
       revealRef.current = () => {}
+      releaseKeptRooms()
     }
   }, [accordionAnimationMs, flashColor, flashDurationMs, scrollBehavior, scrollOffset, tabSwitchWaitMs])
 
@@ -1089,6 +1110,8 @@ const Inspector: React.FC<LivePreviewInspectorListenerProps> = ({
 
   /** The row focus mode shows, as the DOM applies it - ahead of React, see `select`. */
   const isolationRef = useRef<null | string>(null)
+  /** Whether anything is set aside right now - see `applyIsolation`. */
+  const isolatedRef = useRef(false)
 
   /**
    * Hides everything in the form but the row focus mode shows: the row itself
@@ -1102,9 +1125,15 @@ const Inspector: React.FC<LivePreviewInspectorListenerProps> = ({
     }
     const target = isolationRef.current
     if (!target) {
-      isolate(root, null)
+      // Nothing set aside, nothing to look for: this runs on every frame the
+      // form changes in, focus mode on or off.
+      if (isolatedRef.current) {
+        isolate(root, null)
+        isolatedRef.current = false
+      }
       return
     }
+    isolatedRef.current = true
     const formState = getFieldsRef.current()
     const chain = chainOf(outlineRef.current?.byRowIDPath.get(target))
     const rowEl = (rowIDPath: string) => {
@@ -1215,6 +1244,7 @@ const Inspector: React.FC<LivePreviewInspectorListenerProps> = ({
     const next = buildOutline(schema.fields, getFieldsRef.current(), {
       blocksMap: schema.blocksMap,
       language: languageRef.current,
+      permissions: fieldPermissionsRef.current,
       readOnly: isReadOnly(),
     })
     outlineRef.current = next
@@ -1264,9 +1294,15 @@ const Inspector: React.FC<LivePreviewInspectorListenerProps> = ({
   // for a moment - and only when they actually differ from the last push
   // (a change to a number or a checkbox leaves every string alone).
   const formChangeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const valuesTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const onFormChange = useCallback(() => {
     clearTimeout(formChangeTimer.current)
-    formChangeTimer.current = setTimeout(() => {
+    formChangeTimer.current = setTimeout(recomputeOutline, OUTLINE_DEBOUNCE_MS)
+    // The values wait for a real pause: every post has the preview check its
+    // tags against all of them, and typing pauses far more often than it
+    // stops.
+    clearTimeout(valuesTimer.current)
+    valuesTimer.current = setTimeout(() => {
       const channel = valuesChannelRef.current
       if (channel) {
         const leaves = collectLeafValues(getFieldsRef.current())
@@ -1276,10 +1312,15 @@ const Inspector: React.FC<LivePreviewInspectorListenerProps> = ({
           channel.post(leaves)
         }
       }
-      recomputeOutline()
     }, VALUES_PUSH_DEBOUNCE_MS)
   }, [recomputeOutline])
-  useEffect(() => () => clearTimeout(formChangeTimer.current), [])
+  useEffect(
+    () => () => {
+      clearTimeout(formChangeTimer.current)
+      clearTimeout(valuesTimer.current)
+    },
+    [],
+  )
 
   /* ---------------------------------------------------------- row actions */
 
@@ -1363,6 +1404,7 @@ const Inspector: React.FC<LivePreviewInspectorListenerProps> = ({
           ? buildOutline(schema.fields, formState, {
               blocksMap: schema.blocksMap,
               language: languageRef.current,
+              permissions: fieldPermissionsRef.current,
               readOnly: isReadOnly(),
             }).byPath.get(path)
           : undefined
@@ -1694,7 +1736,6 @@ const Inspector: React.FC<LivePreviewInspectorListenerProps> = ({
   // mounts, what the form adds beside it later.
   const isolationTarget = features.focusMode && focusMode ? focusRoot : null
   useEffect(() => {
-    isolationRef.current = isolationTarget
     if (!features.focusMode) {
       return
     }
@@ -1705,6 +1746,16 @@ const Inspector: React.FC<LivePreviewInspectorListenerProps> = ({
       if (root) {
         isolate(root, null)
       }
+      isolatedRef.current = false
+    }
+  }, [applyIsolation, features.focusMode])
+  // A new target, or rows added and moved around it: applied from where it
+  // is - not cleared and redone, which had every outline change take focus
+  // mode apart and put it back.
+  useEffect(() => {
+    isolationRef.current = isolationTarget
+    if (features.focusMode) {
+      applyIsolation()
     }
   }, [applyIsolation, features.focusMode, isolationTarget, outline])
 

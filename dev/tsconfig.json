@@ -19,16 +19,16 @@
       "@payload-config": [
         "./payload.config.ts"
       ],
-      "@raffiniert-media-ag/payload-live-preview-inspector": [
+      "@raffiniert-media-ag/payload-visual-editor": [
         "../src/index.ts"
       ],
-      "@raffiniert-media-ag/payload-live-preview-inspector/client": [
+      "@raffiniert-media-ag/payload-visual-editor/client": [
         "../src/exports/client.ts"
       ],
-      "@raffiniert-media-ag/payload-live-preview-inspector/listener": [
+      "@raffiniert-media-ag/payload-visual-editor/listener": [
         "../src/exports/listener.ts"
       ],
-      "@raffiniert-media-ag/payload-live-preview-inspector/path": [
+      "@raffiniert-media-ag/payload-visual-editor/path": [
         "../src/exports/path.ts"
       ]
     },

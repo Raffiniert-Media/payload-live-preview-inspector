@@ -42,8 +42,9 @@ export type EditorFeatures = {
    */
   stacked?: boolean
   /**
-   * Screen widths to lay the preview out at, as buttons in the document
-   * controls; `false` for none. The preview is zoomed to fit the panel.
+   * Screen widths to lay the preview out at, as buttons in Payload's bar
+   * above the preview; `false` for none. The preview is zoomed to fit the
+   * panel.
    * @default phone 390, tablet 768, desktop 1440
    */
   viewports?: false | Viewport[]

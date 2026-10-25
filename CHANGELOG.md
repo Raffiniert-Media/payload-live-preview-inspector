@@ -1,6 +1,28 @@
 # Changelog
 
-## 1.14.0
+## 2.0.0
+
+### Renamed: `@raffiniert-media-ag/payload-visual-editor`
+
+The package grew from click-to-field into an editor and is renamed with it.
+What breaks, and what to do:
+
+- **The package name.** Install `@raffiniert-media-ag/payload-visual-editor`
+  and change the imports. The export names of 1.x keep working beside the new
+  ones: `payloadLivePreviewInspector` = `payloadVisualEditor`,
+  `LivePreviewInspectorClient` = `VisualEditorClient`.
+- **The import map.** The admin component is registered under the new
+  package path; regenerate it (`payload generate:importmap`).
+- **`targetOrigin` defaults to the page's own origin.** The preview half used
+  to take the origin of whatever framed it on its word - so a page that framed
+  a public site could receive the paths and text of what was clicked there.
+  It now talks only to its own origin unless `targetOrigin` names the admin's,
+  and does not start at all in a frame the browser says is another origin.
+  Sites where Payload and the frontend are one app need nothing; a split
+  setup passes `targetOrigin`.
+
+Data attributes, CSS custom properties, the console prefix and the choices
+remembered in the browser keep their names.
 
 ### From click-to-field to an editor around the form
 
@@ -125,6 +147,35 @@ version the peer range admits (3.84.1) as well.
   colour; paths in CSS selectors have line breaks escaped too (a path with one
   threw).
 - The click mark's layer is removed with the component.
+- The outline - and with it the block toolbar - reads the user's field
+  permissions (`docPermissions`): rows of a field they may not update offer
+  nothing. Payload enforced it on save; now the buttons say so first.
+- An auth collection's `password`, `confirm-password` and `apiKey` are never
+  sent to the preview for value matching.
+
+### Lighter while typing
+
+- The document's values go to the preview 600 ms after typing pauses, not
+  200 ms after every change (the outline still catches up after 200 ms), a
+  rich-text value nobody changed is not walked again, and the preview checks
+  what re-rendered against new values at once and the rest of the page once
+  typing stops - the walk over every text node used to run on every pause.
+- The editor's watchers share one observer of the admin instead of one each,
+  and Payload's landmark elements are kept rather than searched for on every
+  frame the form changes in.
+- A reveal waiting for a field searches only that field's row, and a row that
+  is not rendered answers at once; it used to search the whole form several
+  times a frame.
+- Focus mode is applied where it stands when the outline changes, instead of
+  being taken apart and put back; with focus mode off it does nothing at all.
+
+### Smoother reveals
+
+- A tab switch no longer jerks the page: Payload renders the new tab's fields
+  a few frames after the switch, and in between the page could be shorter
+  than the place it was scrolled to - pulled back 21 px and pushed down 20 px
+  again, measured. The tab's area holds the height the scroll position needs
+  until the reveal ends.
 
 ## 1.13.0
 

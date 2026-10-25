@@ -7,7 +7,13 @@
  * page and block components; import from `/client` only where you actually
  * mount the component.
  */
-export { LivePreviewInspectorClient } from '../components/LivePreviewInspectorClient.js'
+export {
+  LivePreviewInspectorClient,
+  /** The same component under the package's name since 2.0. */
+  LivePreviewInspectorClient as VisualEditorClient,
+  type LivePreviewInspectorClientProps,
+  type LivePreviewInspectorClientProps as VisualEditorClientProps,
+} from '../components/LivePreviewInspectorClient.js'
 export { LIVE_PREVIEW_HOVER_CLASS_NAME } from '../utilities/hoverClassName.js'
 export {
   inspectable,

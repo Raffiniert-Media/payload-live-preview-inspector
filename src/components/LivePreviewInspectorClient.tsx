@@ -122,9 +122,10 @@ export type LivePreviewInspectorClientProps = {
   stega?: boolean
   /**
    * Origin of the Payload admin panel embedding this page (e.g.
-   * `'https://cms.example.com'`), used as the `postMessage` target origin.
-   * When omitted, the origin is derived from `window.location.ancestorOrigins`
-   * or `document.referrer`, falling back to `'*'` if neither resolves.
+   * `'https://cms.example.com'`) - the only origin this page then listens to
+   * and posts to. Defaults to the page's own origin, which is right whenever
+   * Payload and the site are one app; set it when the admin runs elsewhere.
+   * `'*'` trusts any page that frames this one - avoid it.
    */
   targetOrigin?: string
   /**
@@ -184,25 +185,35 @@ const isSamePageFragment = (link: HTMLAnchorElement): boolean =>
   link.search === window.location.search &&
   link.host === window.location.host
 
-const resolveTargetOrigin = (): string => {
+/**
+ * The admin's origin - the one origin this page listens to and posts to - or
+ * `null` where it is not inside that admin, and stays out of the page's way.
+ *
+ * `targetOrigin` when given, else the page's own: Payload's admin and the
+ * site it previews are one app at one origin unless someone split them, and
+ * then they say which. Before 2.0 the origin of whatever framed the page was
+ * taken on its word - so a page that framed a public site could receive the
+ * paths and text of what a visitor clicked there.
+ *
+ * Where the browser names the framing origin (`ancestorOrigins`) and it is
+ * another one, nothing starts at all; where it does not, every message still
+ * goes to the admin's origin only, and the browser drops it anywhere else.
+ */
+const adminOriginOf = (targetOrigin: string | undefined): null | string => {
+  if (window.self === window.top) {
+    return null
+  }
+  const admin = targetOrigin ?? window.location.origin
+  if (admin === '*') {
+    return admin
+  }
+  let framedBy: string | undefined
   try {
-    const [ancestorOrigin] = window.location.ancestorOrigins ?? []
-    if (ancestorOrigin) {
-      return ancestorOrigin
-    }
+    framedBy = window.location.ancestorOrigins?.[0]
   } catch {
-    // ancestorOrigins is not available in all browsers (e.g. Firefox)
+    // Not in every browser.
   }
-
-  if (document.referrer) {
-    try {
-      return new URL(document.referrer).origin
-    } catch {
-      // fall through
-    }
-  }
-
-  return '*'
+  return framedBy && framedBy !== admin ? null : admin
 }
 
 const isPreviewRow = (value: unknown): value is PreviewRow =>
@@ -233,12 +244,12 @@ const PreviewInspector: React.FC<LivePreviewInspectorClientProps> = ({
   const taggerRef = useRef<AutoTagger | null>(null)
 
   useEffect(() => {
-    if (window.self === window.top) {
-      // Not embedded in an iframe (e.g. viewed directly outside live preview) - no-op.
+    // Not in the admin's live preview - viewed on its own, or framed by
+    // another site: nothing to do here.
+    const resolvedOrigin = adminOriginOf(targetOrigin)
+    if (!resolvedOrigin) {
       return
     }
-
-    const resolvedOrigin = targetOrigin ?? resolveTargetOrigin()
     let hovered: HTMLElement | null = null
     let hoverFrame = 0
 
@@ -546,11 +557,10 @@ const PreviewInspector: React.FC<LivePreviewInspectorClientProps> = ({
   // flashes the matching element here, the same way a click there scrolls
   // the admin form.
   useEffect(() => {
-    if (window.self === window.top) {
+    const resolvedOrigin = adminOriginOf(targetOrigin)
+    if (!resolvedOrigin) {
       return
     }
-
-    const resolvedOrigin = targetOrigin ?? resolveTargetOrigin()
 
     const onMessage = (event: MessageEvent) => {
       if (event.source !== window.parent) {
@@ -611,11 +621,11 @@ const PreviewInspector: React.FC<LivePreviewInspectorClientProps> = ({
   // preview renders, then infer block containers from the tagged leaves -
   // incrementally, see `createAutoTagger`.
   useEffect(() => {
-    if (window.self === window.top || (!stega && !valueMatching)) {
+    const resolvedOrigin = adminOriginOf(targetOrigin)
+    if (!resolvedOrigin || (!stega && !valueMatching)) {
       return
     }
 
-    const resolvedOrigin = targetOrigin ?? resolveTargetOrigin()
     const tagger = createAutoTagger(document, { stega, valueMatching })
     taggerRef.current = tagger
 

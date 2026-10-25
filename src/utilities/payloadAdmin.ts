@@ -132,29 +132,53 @@ export const toggleButtonOf = (collapsible: Element | null | undefined): HTMLBut
   toggleWrapOf(collapsible)?.querySelector<HTMLButtonElement>(`:scope > ${selectorOf(PAYLOAD_CLASS.collapsibleToggle)}`) ??
   null
 
+/**
+ * Payload's landmark elements, kept while they are on the page: the editor
+ * asks for them on every frame the form changes in, and a search that has to
+ * pass the whole form - the preview comes after it - each time adds up.
+ * Asked again once the element left the page or lost the class.
+ */
+const landmarks = new WeakMap<Document, Map<string, HTMLElement>>()
+const landmark = (name: (typeof PAYLOAD_CLASS)[keyof typeof PAYLOAD_CLASS], doc: Document): HTMLElement | null => {
+  let known = landmarks.get(doc)
+  if (!known) {
+    known = new Map()
+    landmarks.set(doc, known)
+  }
+  const kept = known.get(name)
+  if (kept?.isConnected && kept.classList.contains(name)) {
+    return kept
+  }
+  const found = doc.querySelector<HTMLElement>(selectorOf(name))
+  if (found) {
+    known.set(name, found)
+  } else {
+    known.delete(name)
+  }
+  return found
+}
+
 /** The edit view, when one is on the page. */
-export const editViewEl = (doc: Document = document): HTMLElement | null =>
-  doc.querySelector<HTMLElement>(selectorOf(PAYLOAD_CLASS.editView))
+export const editViewEl = (doc: Document = document): HTMLElement | null => landmark(PAYLOAD_CLASS.editView, doc)
 
 /** The form's column. */
-export const editMainEl = (doc: Document = document): HTMLElement | null =>
-  doc.querySelector<HTMLElement>(selectorOf(PAYLOAD_CLASS.editMain))
+export const editMainEl = (doc: Document = document): HTMLElement | null => landmark(PAYLOAD_CLASS.editMain, doc)
 
 /** The flex row holding the form's column and the live preview. */
 export const editMainWrapperEl = (doc: Document = document): HTMLElement | null =>
-  doc.querySelector<HTMLElement>(selectorOf(PAYLOAD_CLASS.editMainWrapper))
+  landmark(PAYLOAD_CLASS.editMainWrapper, doc)
 
 /** The live preview panel, when it is the inline one (not a popup). */
 export const livePreviewWindowEl = (doc: Document = document): HTMLElement | null =>
-  doc.querySelector<HTMLElement>(selectorOf(PAYLOAD_CLASS.livePreviewWindow))
+  landmark(PAYLOAD_CLASS.livePreviewWindow, doc)
 
 /** The bar above the preview with Payload's own controls. */
 export const livePreviewToolbarEl = (doc: Document = document): HTMLElement | null =>
-  doc.querySelector<HTMLElement>(selectorOf(PAYLOAD_CLASS.livePreviewToolbar))
+  landmark(PAYLOAD_CLASS.livePreviewToolbar, doc)
 
 /** The area inside the live preview panel the device frame sits in. */
 export const livePreviewMainEl = (doc: Document = document): HTMLElement | null =>
-  doc.querySelector<HTMLElement>(selectorOf(PAYLOAD_CLASS.livePreviewWindowMain))
+  landmark(PAYLOAD_CLASS.livePreviewWindowMain, doc)
 
 /** A Payload custom property's value on the root, in px - `fallback` when it is not set or not a length. */
 export const payloadPropertyPx = (name: string, fallback: number, doc: Document = document): number => {

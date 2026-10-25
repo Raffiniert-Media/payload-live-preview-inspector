@@ -1,6 +1,6 @@
 {
-  "name": "@raffiniert-media-ag/payload-live-preview-inspector",
-  "version": "1.14.0",
+  "name": "@raffiniert-media-ag/payload-visual-editor",
+  "version": "2.0.0",
   "homepage": "https://raffiniert.biz",
   "description": "A visual editor around Payload's form: click in the Live Preview to reach any field, a resizable split, an outline, focus mode, a block toolbar in the preview, screen widths and a phone layout.",
   "keywords": [
@@ -15,6 +15,7 @@
     "storyblok",
     "developer-tools",
     "visual-editing",
+    "visual-editor",
     "click-to-scroll",
     "cms"
   ],
@@ -25,10 +26,10 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Raffiniert-Media/payload-live-preview-inspector.git"
+    "url": "git+https://github.com/Raffiniert-Media/payload-visual-editor.git"
   },
   "bugs": {
-    "url": "https://github.com/Raffiniert-Media/payload-live-preview-inspector/issues"
+    "url": "https://github.com/Raffiniert-Media/payload-visual-editor/issues"
   },
   "type": "module",
   "sideEffects": [

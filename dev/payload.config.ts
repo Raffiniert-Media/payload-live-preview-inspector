@@ -1,6 +1,6 @@
 import { sqliteAdapter } from '@payloadcms/db-sqlite'
 import { lexicalEditor } from '@payloadcms/richtext-lexical'
-import { payloadLivePreviewInspector } from '@raffiniert-media-ag/payload-live-preview-inspector'
+import { payloadVisualEditor } from '@raffiniert-media-ag/payload-visual-editor'
 import path from 'path'
 import { buildConfig } from 'payload'
 import sharp from 'sharp'
@@ -154,7 +154,7 @@ export default buildConfig({
     await seed(payload)
   },
   plugins: [
-    payloadLivePreviewInspector({
+    payloadVisualEditor({
       collections: {
         pages: true,
         posts: true,

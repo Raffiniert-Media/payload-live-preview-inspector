@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { AutoTagger } from './autoTagger.js'
 
@@ -79,17 +79,44 @@ describe('createAutoTagger', () => {
     expect(autoAttr(heading)).toBeNull()
   })
 
-  it('re-matches against new document values', () => {
-    document.body.innerHTML = '<h2 id="heading">Typed heading</h2>'
+  it('matches what re-rendered with a new value as soon as the value arrives', async () => {
+    document.body.innerHTML = '<h2 id="heading">Old heading</h2>'
     tagger = createAutoTagger(document, { stega: false, valueMatching: true })
-    tagger.setLeaves([{ path: 'a', value: 'Typed headin' }])
+    tagger.setLeaves([{ path: 'a', value: 'Old heading' }])
+    tagger.flush()
+    expect(pathAttr(document.getElementById('heading'))).toBe('a')
+
+    // The preview shows the new text before the admin sends it as a value.
+    document.getElementById('heading')!.firstChild!.nodeValue = 'New heading'
+    await settle()
     tagger.flush()
     expect(pathAttr(document.getElementById('heading'))).toBeNull()
 
-    tagger.setLeaves([{ path: 'a', value: 'Typed heading' }])
+    tagger.setLeaves([{ path: 'a', value: 'New heading' }])
     tagger.flush()
-
     expect(pathAttr(document.getElementById('heading'))).toBe('a')
+  })
+
+  it('matches text that was on the page all along once the values stop changing', () => {
+    vi.useFakeTimers()
+    try {
+      document.body.innerHTML = '<h2 id="heading">Typed heading</h2>'
+      tagger = createAutoTagger(document, { stega: false, valueMatching: true })
+      tagger.setLeaves([{ path: 'a', value: 'Typed headin' }])
+      tagger.flush()
+      expect(pathAttr(document.getElementById('heading'))).toBeNull()
+
+      // Not on every pause in the typing: a walk over every text node.
+      tagger.setLeaves([{ path: 'a', value: 'Typed heading' }])
+      tagger.flush()
+      expect(pathAttr(document.getElementById('heading'))).toBeNull()
+
+      vi.advanceTimersByTime(1500)
+      tagger.flush()
+      expect(pathAttr(document.getElementById('heading'))).toBe('a')
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('never touches explicit pathOf() tags', async () => {

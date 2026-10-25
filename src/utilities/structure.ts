@@ -72,8 +72,52 @@ export type OutlineOptions = {
   blocksMap?: BlocksMap
   /** The admin's language, for labels configured per language. */
   language?: string
+  /**
+   * Payload's field permissions for the document (`docPermissions.fields`):
+   * rows of a field the user may not update offer nothing. Left out, every
+   * field counts as allowed - Payload checks on save either way.
+   */
+  permissions?: FieldPermissions
   /** The whole form is read-only: nothing may be moved, added or removed. */
   readOnly?: boolean
+}
+
+/**
+ * Payload's sanitized field permissions, as far as the outline reads them:
+ * `true` allows everything below it, a field missing from an object is not
+ * allowed at all.
+ */
+export type FieldPermissions = { [name: string]: FieldPermission } | true
+type FieldPermission =
+  | {
+      blocks?: { [slug: string]: { fields?: FieldPermissions } | true } | true
+      create?: boolean
+      fields?: FieldPermissions
+      read?: boolean
+      update?: boolean
+    }
+  | true
+
+/** No permissions given: everything allowed, as before permissions were read. */
+const permissionOf = (permissions: FieldPermissions | undefined, name: string): FieldPermission | undefined =>
+  permissions === undefined || permissions === true ? true : permissions[name]
+
+const mayUpdate = (permission: FieldPermission | undefined): boolean =>
+  permission === true || permission?.update === true
+
+/**
+ * What the fields inside a field - a group's, an array row's, the rows of a
+ * block - may do. Lenient where Payload leaves a part out of an allowed field.
+ */
+const permissionsWithin = (permission: FieldPermission | undefined, blockSlug?: string): FieldPermissions => {
+  if (permission === true) {
+    return true
+  }
+  if (blockSlug !== undefined && permission?.blocks !== undefined) {
+    const block = permission.blocks === true ? true : permission.blocks[blockSlug]
+    return block === true ? true : (block?.fields ?? {})
+  }
+  return permission?.fields ?? (permission?.update === true ? true : {})
 }
 
 /** Longest summary, in characters. */
@@ -131,6 +175,8 @@ type Ctx = {
   formState: MinimalFormState
   invalid: string[]
   language: string
+  /** `undefined` when the caller passed none: everything allowed. */
+  permissions: FieldPermissions | undefined
   readOnly: boolean
 }
 
@@ -239,9 +285,10 @@ const rowsOf = (
   parent: null | OutlineNode,
   depth: number,
   outline: Outline,
+  permission: FieldPermission | undefined,
 ): OutlineNode[] => {
   const rows = ctx.formState[fieldPath]?.rows ?? []
-  const locked = ctx.readOnly || field.admin?.readOnly === true
+  const locked = ctx.readOnly || field.admin?.readOnly === true || !mayUpdate(permission)
   const count = rows.length
 
   return rows.map((row, index) => {
@@ -275,7 +322,8 @@ const rowsOf = (
 
     outline.byPath.set(path, node)
     outline.byRowIDPath.set(rowIDPath, node)
-    collect(fields, path, rowIDPath, locked ? lockedCtx(ctx) : ctx, node, depth + 1, outline)
+    const inside = { ...ctx, permissions: ctx.permissions && permissionsWithin(permission, block?.slug) }
+    collect(fields, path, rowIDPath, locked ? lockedCtx(inside) : inside, node, depth + 1, outline)
 
     node.summary =
       (typeof blockName === 'string' && blockName.trim() ? shorten(blockName) : undefined) ??
@@ -309,7 +357,7 @@ const collect = (
           tab.fields,
           tab.name ? join(path, tab.name) : path,
           tab.name ? join(idPath, tab.name) : idPath,
-          ctx,
+          tab.name && ctx.permissions ? { ...ctx, permissions: permissionsWithin(permissionOf(ctx.permissions, tab.name)) } : ctx,
           parent,
           depth,
           outline,
@@ -330,15 +378,17 @@ const collect = (
       continue
     }
 
+    const permission = permissionOf(ctx.permissions, field.name)
     if (field.type === 'group' && field.fields) {
-      collect(field.fields, fieldPath, fieldIDPath, within(field, ctx), parent, depth, outline)
+      const inside = ctx.permissions ? { ...ctx, permissions: permissionsWithin(permission) } : ctx
+      collect(field.fields, fieldPath, fieldIDPath, within(field, inside), parent, depth, outline)
       continue
     }
     if (field.type !== 'array' && field.type !== 'blocks') {
       continue
     }
 
-    const nodes = rowsOf(field, fieldPath, fieldIDPath, ctx, parent, depth, outline)
+    const nodes = rowsOf(field, fieldPath, fieldIDPath, ctx, parent, depth, outline, permission)
     if (parent) {
       parent.children.push(...nodes)
     } else {
@@ -357,11 +407,11 @@ const collect = (
 export const buildOutline = (
   fields: SchemaField[],
   formState: MinimalFormState,
-  { blocksMap = {}, language = 'en', readOnly = false }: OutlineOptions = {},
+  { blocksMap = {}, language = 'en', permissions, readOnly = false }: OutlineOptions = {},
 ): Outline => {
   const outline: Outline = { byPath: new Map(), byRowIDPath: new Map(), groups: [] }
   const invalid = Object.entries(formState).flatMap(([path, entry]) => (entry?.valid === false ? [path] : []))
-  collect(fields, '', '', { blocksMap, formState, invalid, language, readOnly }, null, 0, outline)
+  collect(fields, '', '', { blocksMap, formState, invalid, language, permissions, readOnly }, null, 0, outline)
   return outline
 }
 

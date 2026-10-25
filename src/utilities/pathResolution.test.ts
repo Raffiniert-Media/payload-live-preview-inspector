@@ -381,6 +381,26 @@ describe('toRowIDPath', () => {
 })
 
 describe('collectLeafValues', () => {
+  it('leaves out what an auth collection is typing in secret', () => {
+    const formState = {
+      name: { value: 'Editor' },
+      apiKey: { value: '7f3c-secret-key' },
+      'confirm-password': { value: 'hunter2hunter2' },
+      email: { value: 'editor@example.com' },
+      password: { value: 'hunter2hunter2' },
+    }
+    expect(collectLeafValues(formState).map((leaf) => leaf.path).sort()).toEqual(['email', 'name'])
+  })
+
+  it('reads a rich-text value it has seen again from what it read the first time', () => {
+    const body = { root: { children: [{ type: 'paragraph', children: [{ type: 'text', text: 'First words' }] }] } }
+    const first = collectLeafValues({ body: { value: body } })
+    // The same object: what it held then is what counts, a change makes a new one.
+    ;(body.root.children[0].children[0] as { text: string }).text = 'Changed in place'
+    expect(collectLeafValues({ body: { value: body } })).toEqual(first)
+    expect(collectLeafValues({ body: { value: structuredClone(body) } })).toEqual([{ path: 'body', value: 'Changed in place' }])
+  })
+
   it('collects string leaves with row indexes translated to stable row ids', () => {
     const formState = {
       layout: { rows: [{ id: 'a' }, { id: 'b' }] },

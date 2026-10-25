@@ -620,6 +620,37 @@ test('holding the modifier operates the page and reveals nothing', async ({ page
   await expect(page.locator('#field-title')).not.toHaveClass(/flash/)
 })
 
+test('a page that frames the preview from another origin gets nothing from it', async ({ baseURL, page }) => {
+  await login(page)
+  await page.goto('/admin/collections/pages')
+  const id = await page.locator('.table tbody tr:first-child a').first().getAttribute('href').then((href) => href!.split('/').pop())
+
+  // Someone else's page, framing the site's preview: it listens for whatever
+  // the preview sends it. Another origin - 127.0.0.1 is not localhost - and a
+  // real response from it, which Chrome lets frame a local server (a page
+  // made up by the test runner counts as public, and is refused).
+  const foreign = new URL(baseURL!)
+  foreign.hostname = '127.0.0.1'
+  await page.goto(new URL('/admin/login', foreign).href)
+  await page.evaluate((src) => {
+    const w = window as unknown as { received: unknown[] }
+    w.received = []
+    addEventListener('message', (event) => w.received.push((event.data as { type?: string } | null)?.type))
+    document.body.innerHTML = `<iframe src="${src}" style="width:1200px;height:800px"></iframe>`
+  }, `${baseURL}/preview/pages/${id}`)
+  const frame = page.frameLocator('iframe')
+  const title = frame.locator('h1[data-payload-live-preview-path="title"]')
+  await expect(title).toBeVisible()
+  // Time for the settings and the request for values the preview sends its
+  // admin as it starts - and then a click on a tagged element.
+  await page.waitForTimeout(1500)
+  await title.click()
+  await page.waitForTimeout(500)
+
+  // No settings, no request for values, no click with its path and text.
+  expect(await page.evaluate(() => (window as unknown as { received: unknown[] }).received)).toEqual([])
+})
+
 test('a click the inspector cannot answer is left to the page', async ({ page }) => {
   await login(page)
 
@@ -1194,6 +1225,10 @@ test('complex page: focusing a field glides the preview to its element, clear of
   const intro = frame.locator('p[data-payload-live-preview-path="intro"]')
   await expect(intro).toBeVisible()
   const preview = page.frame({ url: /\/preview\/pages\// })!
+  if (process.env.CPU_THROTTLE) {
+    const cdp = await page.context().newCDPSession(page)
+    await cdp.send('Emulation.setCPUThrottlingRate', { rate: Number(process.env.CPU_THROTTLE) })
+  }
 
   // Start from the bottom of the preview, and record its scroll position on
   // every frame from here on.
@@ -1211,6 +1246,17 @@ test('complex page: focusing a field glides the preview to its element, clear of
   await page.locator('.tabs-field__tab-button', { hasText: 'Content' }).click()
   await page.locator('#field-intro').click()
   await expect(intro).toHaveClass(/focused/)
+  // Read once the glide has run out: "focused" is set as it starts, and the
+  // steps taken mid-glide are the big ones - read then, they looked like a
+  // correction (the 101 px this test used to fail on now and then).
+  await expect
+    .poll(() =>
+      preview.evaluate(() => {
+        const scrolls = (window as unknown as { __scrolls: number[] }).__scrolls
+        return scrolls.length > 10 && scrolls.slice(-10).every((y) => y === scrolls[scrolls.length - 1])
+      }),
+    )
+    .toBe(true)
 
   const { headerBottom, scrolls, top } = await preview.evaluate(() => ({
     headerBottom: document.querySelector('header')!.getBoundingClientRect().bottom,

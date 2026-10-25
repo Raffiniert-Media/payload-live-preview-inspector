@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { beforeEach, describe, expect, it } from 'vitest'
 
-import { missingLandmarks } from './payloadAdmin.js'
+import { editMainEl, missingLandmarks } from './payloadAdmin.js'
 
 /** Payload's edit view with the inline live preview open, as far as the editor cares. */
 const editView = `
@@ -39,5 +39,26 @@ describe('missingLandmarks', () => {
       'live-preview-toolbar',
       'live-preview-toolbar-controls',
     ])
+  })
+})
+
+describe('landmark lookups', () => {
+  beforeEach(() => {
+    document.body.innerHTML = editView
+  })
+
+  it('keep the element while it is on the page, and look again once it is not', () => {
+    const first = editMainEl()
+    expect(first).toBe(document.querySelector('.collection-edit__main'))
+
+    // Payload remounts the form: a new element, the old one gone.
+    const replacement = document.createElement('div')
+    replacement.className = 'collection-edit__main'
+    first!.replaceWith(replacement)
+    expect(editMainEl()).toBe(replacement)
+
+    // A class Payload takes away is a landmark gone.
+    replacement.className = 'something-else'
+    expect(editMainEl()).toBeNull()
   })
 })

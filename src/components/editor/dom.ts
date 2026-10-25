@@ -5,29 +5,53 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { HOST_ATTRIBUTE } from '../../utilities/isolate.js'
 import { readStored, writeStored } from '../../utilities/layout.js'
 
+type Watch = { callbacks: Set<() => void>; frame: number; observer: MutationObserver }
+
+/** One observer per root for everything the editor watches - see `watchDom`. */
+const watches = new Map<Node, Watch>()
+
+/** Every watcher on the root, once, on the next frame - however many changes come before it. */
+const runSoon = (watch: Watch) => {
+  if (!watch.frame) {
+    watch.frame = requestAnimationFrame(() => {
+      watch.frame = 0
+      for (const callback of Array.from(watch.callbacks)) {
+        callback()
+      }
+    })
+  }
+}
+
+const startWatching = (root: Node): Watch => {
+  const watch: Watch = { callbacks: new Set(), frame: 0, observer: new MutationObserver(() => runSoon(watch)) }
+  watch.observer.observe(root, { childList: true, subtree: true })
+  watches.set(root, watch)
+  return watch
+}
+
 /**
  * Calls `callback` once now and again after every change to the tree under
  * `root` - at most once a frame, however many nodes a render touched.
+ *
+ * All of the editor's watchers on a root share one observer and one frame:
+ * each of them on its own had the browser record every change to the whole
+ * admin once per watcher.
  *
  * The editor's elements live inside markup Payload renders and re-renders:
  * a remounted form takes them with it, a tab switch replaces what focus mode
  * hid. Watching for that is what keeps them where they belong.
  */
 export const watchDom = (root: Node, callback: () => void): (() => void) => {
-  let frame = 0
-  const observer = new MutationObserver(() => {
-    if (!frame) {
-      frame = requestAnimationFrame(() => {
-        frame = 0
-        callback()
-      })
-    }
-  })
-  observer.observe(root, { childList: true, subtree: true })
+  const watch = watches.get(root) ?? startWatching(root)
+  watch.callbacks.add(callback)
   callback()
   return () => {
-    observer.disconnect()
-    cancelAnimationFrame(frame)
+    watch.callbacks.delete(callback)
+    if (watch.callbacks.size === 0) {
+      watch.observer.disconnect()
+      cancelAnimationFrame(watch.frame)
+      watches.delete(root)
+    }
   }
 }
 

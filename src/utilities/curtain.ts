@@ -78,3 +78,53 @@ export const visibleRowsAfter = (row: Element | null | undefined): HTMLElement[]
   }
   return rows
 }
+
+/** Areas still holding room after their reveal ended - see `holdScrollRoom`. */
+const keptRooms = new Set<HTMLElement>()
+
+/**
+ * Keeps a tab's area from making the page shorter than the view needs while
+ * the tab switches.
+ *
+ * Payload swaps a tab's content and renders the new fields a few frames
+ * later. In between the page can be shorter than the place it is scrolled
+ * to, and the browser pulls the scroll position back - only for the content
+ * to arrive and the reveal to scroll down again: a jerk up and down while the
+ * page was meant to rest (measured: 21 px back and 20 forth, a tab switched
+ * from 145 px down). Held at the height the current scroll position needs -
+ * no more, so a short tab gains nothing once its fields are there.
+ *
+ * Released when the reveal ends; an area whose own content still falls short
+ * keeps the hold (letting go would pull the page back under the field just
+ * revealed) until the next reveal starts.
+ */
+export const holdScrollRoom = (area: HTMLElement | null | undefined): { release: () => void } => {
+  const view = area?.ownerDocument.defaultView
+  if (!area || !view) {
+    return { release: () => {} }
+  }
+  const page = area.ownerDocument.documentElement
+  const needed = Math.ceil(view.scrollY + view.innerHeight - (page.scrollHeight - area.getBoundingClientRect().height))
+  if (needed <= 0) {
+    return { release: () => {} }
+  }
+  area.style.minHeight = `${needed}px`
+  keptRooms.delete(area)
+  return {
+    release: () => {
+      if (area.getBoundingClientRect().height > needed + 0.5) {
+        area.style.removeProperty('min-height')
+      } else {
+        keptRooms.add(area)
+      }
+    },
+  }
+}
+
+/** Lets go of every hold a finished reveal had to keep - a new one starts, or the editor goes. */
+export const releaseKeptRooms = (): void => {
+  for (const area of keptRooms) {
+    area.style.removeProperty('min-height')
+  }
+  keptRooms.clear()
+}

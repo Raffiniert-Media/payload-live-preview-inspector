@@ -33,8 +33,8 @@ if (typeof document !== 'undefined' && !(window as unknown as Record<string, unk
 // The component comes from /client; the data helpers from the pure /path
 // subpath, so importing them elsewhere never drags component code into a
 // page bundle.
-import { LivePreviewInspectorClient } from '@raffiniert-media-ag/payload-live-preview-inspector/client'
-import { inspectable, pathOf } from '@raffiniert-media-ag/payload-live-preview-inspector/path'
+import { VisualEditorClient } from '@raffiniert-media-ag/payload-visual-editor/client'
+import { inspectable, pathOf } from '@raffiniert-media-ag/payload-visual-editor/path'
 
 import type { Post } from '../../../../../payload-types.js'
 
@@ -78,7 +78,7 @@ export const PreviewClient = ({ initialData }: Props) => {
 
   return (
     <main data-hydrated={hydrated || undefined} style={{ fontFamily: 'sans-serif', margin: '0 auto', maxWidth: 640, padding: '2rem' }}>
-      <LivePreviewInspectorClient />
+      <VisualEditorClient />
       <aside
         style={{
           background: '#fafafa',
@@ -144,7 +144,7 @@ export const PreviewClient = ({ initialData }: Props) => {
       {/* Exercises `disableLinks` against a client-side-routed link (like
           Next.js' <Link>, which navigates via history.pushState in its own
           onClick regardless of preventDefault) without depending on Next's
-          own types for it - see LivePreviewInspectorClient's `disableLinks`
+          own types for it - see VisualEditorClient's `disableLinks`
           doc comment for why this needs the capture phase. */}
       <a
         data-testid="live-preview-test-link"

@@ -32,6 +32,21 @@ const whenIdle = (callback: () => void): IdleHandle => {
   return { cancel: () => clearTimeout(id) }
 }
 
+/** How long after the last change of values the whole page is matched against them. */
+const PAGE_WALK_DELAY_MS = 1500
+
+const sameIndex = (a: ValueIndex, b: ValueIndex): boolean => {
+  if (a.size !== b.size) {
+    return false
+  }
+  for (const [value, path] of a) {
+    if (b.get(value) !== path || !b.has(value)) {
+      return false
+    }
+  }
+  return true
+}
+
 /**
  * Keeps the automatic tags (stega, value matching, inferred containers) in
  * step with the preview's DOM - incrementally.
@@ -60,6 +75,14 @@ export const createAutoTagger = (
   const dirtySubtrees = new Set<Element>()
   const dirtyElements = new Set<Element>()
   let idle: IdleHandle | undefined
+  // What re-rendered since the values last changed - judged against the old
+  // values then, and the first place the new ones belong: the element the
+  // editor is typing into, shown with its new text before the text arrives
+  // here as a value.
+  const sinceValues = { elements: new Set<Element>(), subtrees: new Set<Element>() }
+  // The whole-page pass for the values, put off: see \`setLeaves\`.
+  let pageWalkPending = false
+  let pageWalkTimer: ReturnType<typeof setTimeout> | undefined
 
   const flush = () => {
     idle?.cancel()
@@ -88,7 +111,24 @@ export const createAutoTagger = (
       for (const el of Array.from(doc.querySelectorAll(`[${LIVE_PREVIEW_AUTO_ATTRIBUTE}="match"]`))) {
         retagElement(el, { index, stega })
       }
-      // ...and elements that matched nothing before may match a new value.
+      // ...and what re-rendered meanwhile may match a new one.
+      for (const el of sinceValues.elements) {
+        if (el.isConnected) {
+          retagElement(el, { index, stega })
+        }
+      }
+      for (const root of sinceValues.subtrees) {
+        if (root.isConnected && index) {
+          applyValueIndex(root, index)
+        }
+      }
+      sinceValues.elements.clear()
+      sinceValues.subtrees.clear()
+      changed = true
+    }
+
+    if (pageWalkPending) {
+      pageWalkPending = false
       if (index) {
         applyValueIndex(doc, index)
       }
@@ -99,6 +139,7 @@ export const createAutoTagger = (
       if (!root.isConnected) {
         continue
       }
+      sinceValues.subtrees.add(root)
       if (stega) {
         scanStega(root)
       }
@@ -112,6 +153,7 @@ export const createAutoTagger = (
     for (const el of dirtyElements) {
       if (el.isConnected) {
         retagElement(el, { index, stega })
+        sinceValues.elements.add(el)
         changed = true
       }
     }
@@ -167,14 +209,35 @@ export const createAutoTagger = (
       observer.disconnect()
       idle?.cancel()
       idle = undefined
+      clearTimeout(pageWalkTimer)
     },
     flush,
     setLeaves: (leaves) => {
       if (!valueMatching) {
         return
       }
-      index = buildValueIndex(leaves)
+      const next = buildValueIndex(leaves)
+      if (index && sameIndex(index, next)) {
+        // The same values - a save, a field that names nothing: nothing to do.
+        return
+      }
+      const first = !index
+      index = next
       rematch = true
+      // The whole page against the new values - for text that was there all
+      // along and only now equals a value - first thing for the first values,
+      // and otherwise once the editor stops typing: the elements a change
+      // re-rendered are judged at once, above, and the walk over every text
+      // node on the page is what each typing pause used to cost.
+      clearTimeout(pageWalkTimer)
+      if (first) {
+        pageWalkPending = true
+      } else {
+        pageWalkTimer = setTimeout(() => {
+          pageWalkPending = true
+          schedule()
+        }, PAGE_WALK_DELAY_MS)
+      }
       schedule()
     },
   }
