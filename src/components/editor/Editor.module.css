@@ -539,3 +539,238 @@
     display: none;
   }
 }
+
+/* ---- Page mode: the title in the bar with the save buttons ---- */
+
+.pageTitle {
+  align-items: center;
+  display: flex;
+  flex: 0 1 auto;
+  gap: 2px;
+  margin-right: calc(var(--base) / 2);
+  min-width: 0;
+}
+
+.pageBack {
+  align-items: center;
+  border-radius: var(--style-radius-s, 4px);
+  color: var(--theme-elevation-600);
+  display: inline-flex;
+  flex: 0 0 auto;
+  height: 28px;
+  justify-content: center;
+  width: 28px;
+}
+
+.pageBack:hover {
+  background: var(--theme-elevation-100);
+  color: var(--theme-text);
+}
+
+.pageBack:focus-visible {
+  outline: 2px solid var(--theme-success-500);
+}
+
+.pageTitleText {
+  font-weight: 600;
+  max-width: 32ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---- The button at the bottom right, and its menu ---- */
+
+.dock {
+  bottom: calc(var(--base) * 0.8 + env(safe-area-inset-bottom, 0px));
+  display: grid;
+  gap: calc(var(--base) / 2);
+  justify-items: end;
+  position: fixed;
+  right: calc(var(--base) * 0.8 + env(safe-area-inset-right, 0px));
+  /* Under Payload's drawers (--z-modal) and toasts, over the page. */
+  z-index: calc(var(--z-modal, 30) - 1);
+}
+
+.dockRow {
+  align-items: center;
+  display: flex;
+  gap: calc(var(--base) * 0.4);
+}
+
+.dockButton {
+  align-items: center;
+  background: var(--theme-elevation-800);
+  border: 0;
+  border-radius: 999px;
+  box-shadow: 0 6px 20px rgb(0 0 0 / 25%);
+  color: var(--theme-elevation-0, var(--theme-bg));
+  cursor: pointer;
+  display: inline-flex;
+  flex: 0 0 auto;
+  height: 48px;
+  justify-content: center;
+  padding: 0;
+  width: 48px;
+}
+
+.dockButton svg {
+  height: 20px;
+  width: 20px;
+}
+
+.dockButton:hover {
+  background: var(--theme-elevation-900, var(--theme-text));
+}
+
+.dockButton:focus-visible {
+  outline: 2px solid var(--theme-success-500);
+  outline-offset: 2px;
+}
+
+.dockHint {
+  background: var(--theme-elevation-800);
+  border-radius: 999px;
+  box-shadow: 0 6px 20px rgb(0 0 0 / 20%);
+  color: var(--theme-elevation-0, var(--theme-bg));
+  font-size: 13px;
+  line-height: 1.3;
+  max-width: calc(100vw - 110px);
+  padding: 8px 14px;
+}
+
+.dockMenu {
+  background: var(--theme-elevation-0, var(--theme-bg));
+  border: 1px solid var(--theme-elevation-150);
+  border-radius: var(--style-radius-m, 8px);
+  box-shadow: 0 12px 32px rgb(0 0 0 / 25%);
+  display: grid;
+  max-height: calc(100dvh - 120px);
+  overflow-y: auto;
+  padding: 6px;
+  width: min(300px, calc(100vw - 32px));
+}
+
+.dockItem {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: var(--style-radius-s, 4px);
+  box-sizing: border-box;
+  color: var(--theme-text);
+  cursor: pointer;
+  display: flex;
+  font: inherit;
+  font-size: 14px;
+  gap: 10px;
+  padding: 10px;
+  text-align: left;
+  text-decoration: none;
+  width: 100%;
+}
+
+.dockItem:hover {
+  background: var(--theme-elevation-50);
+}
+
+.dockItem:focus-visible {
+  outline: 2px solid var(--theme-success-500);
+  outline-offset: -2px;
+}
+
+.dockItemIcon {
+  color: var(--theme-elevation-600);
+  display: inline-flex;
+  flex: 0 0 auto;
+}
+
+.dockItemText {
+  display: grid;
+  flex: 1 1 auto;
+  gap: 2px;
+  min-width: 0;
+}
+
+.dockItemLabel {
+  font-weight: 500;
+}
+
+.dockItemHelp {
+  color: var(--theme-elevation-500);
+  font-size: 12px;
+  line-height: 1.3;
+}
+
+.dockSwitch {
+  background: var(--theme-elevation-200);
+  border-radius: 999px;
+  flex: 0 0 auto;
+  height: 18px;
+  position: relative;
+  transition: background-color 120ms ease-out;
+  width: 32px;
+}
+
+.dockSwitch::after {
+  background: var(--theme-elevation-0, #fff);
+  border-radius: 50%;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 20%);
+  content: '';
+  height: 14px;
+  left: 2px;
+  position: absolute;
+  top: 2px;
+  transition: translate 120ms ease-out;
+  width: 14px;
+}
+
+.dockItem[aria-checked='true'] .dockSwitch {
+  background: var(--theme-success-500);
+}
+
+.dockItem[aria-checked='true'] .dockSwitch::after {
+  translate: 14px 0;
+}
+
+.dockSeparator {
+  border-top: 1px solid var(--theme-elevation-100);
+  margin: 4px 6px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dockSwitch,
+  .dockSwitch::after {
+    transition: none;
+  }
+}
+
+.pathBarClose {
+  margin-left: auto;
+}
+
+/* ---- "Replace" on an upload field's file ---- */
+
+.replaceButton {
+  align-items: center;
+  background: var(--theme-elevation-50);
+  border: 1px solid var(--theme-elevation-150);
+  border-radius: var(--style-radius-s, 4px);
+  color: var(--theme-text);
+  cursor: pointer;
+  display: inline-flex;
+  font: inherit;
+  font-size: 13px;
+  height: calc(var(--base) * 1.4);
+  margin-right: calc(var(--base) / 4);
+  padding: 0 calc(var(--base) / 2);
+  white-space: nowrap;
+}
+
+.replaceButton:hover {
+  background: var(--theme-elevation-100);
+}
+
+.replaceButton:focus-visible {
+  outline: 2px solid var(--theme-success-500);
+  outline-offset: 1px;
+}

@@ -196,7 +196,11 @@ export interface Post {
 export interface Page {
   id: number;
   title?: string | null;
+  /**
+   * The sentence or two at the very top of the page, under its title. Keep it short: it is the first thing a visitor reads, and a paragraph here pushes everything else down the page. It also stands in for the page in search results when no description is set.
+   */
   intro?: string | null;
+  image?: (number | null) | Media;
   sections?:
     | (
         | {
@@ -337,6 +341,7 @@ export interface User {
   resetPasswordExpiration?: string | null;
   salt?: string | null;
   hash?: string | null;
+  resetPasswordRequestedAt?: string | null;
   loginAttempts?: number | null;
   lockUntil?: string | null;
   sessions?:
@@ -458,6 +463,7 @@ export interface PostsSelect<T extends boolean = true> {
 export interface PagesSelect<T extends boolean = true> {
   title?: T;
   intro?: T;
+  image?: T;
   sections?:
     | T
     | {
@@ -584,6 +590,7 @@ export interface UsersSelect<T extends boolean = true> {
   resetPasswordExpiration?: T;
   salt?: T;
   hash?: T;
+  resetPasswordRequestedAt?: T;
   loginAttempts?: T;
   lockUntil?: T;
   sessions?:

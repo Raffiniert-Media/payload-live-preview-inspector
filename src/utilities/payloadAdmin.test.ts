@@ -34,8 +34,9 @@ import {
 
 const require = createRequire(import.meta.url)
 
-const packageRoot = (name: string): string => {
-  let dir = path.dirname(require.resolve(name))
+/** `entry` for a package without a main export - `@payloadcms/next` has only subpaths. */
+const packageRoot = (name: string, entry: string = name): string => {
+  let dir = path.dirname(require.resolve(entry))
   while (
     !fs.existsSync(path.join(dir, 'package.json')) ||
     !fs.readFileSync(path.join(dir, 'package.json'), 'utf8').includes(`"name": "${name}"`)
@@ -55,12 +56,16 @@ const filesUnder = (dir: string, extension: string): string[] =>
   )
 
 const root = packageRoot('@payloadcms/ui')
-const dist = path.join(root, 'dist')
-const css = filesUnder(dist, '.css')
-  .concat(filesUnder(dist, '.scss'))
+/*
+ * `@payloadcms/next` too: it renders the edit view's frame - the document's
+ * title bar among it - around what `@payloadcms/ui` draws inside.
+ */
+const dists = [root, packageRoot('@payloadcms/next', '@payloadcms/next/views')].map((dir) => path.join(dir, 'dist'))
+const css = dists
+  .flatMap((dist) => filesUnder(dist, '.css').concat(filesUnder(dist, '.scss')))
   .map((file) => fs.readFileSync(file, 'utf8'))
   .join('\n')
-const scripts = filesUnder(dist, '.js').map((file) => fs.readFileSync(file, 'utf8'))
+const scripts = dists.flatMap((dist) => filesUnder(dist, '.js')).map((file) => fs.readFileSync(file, 'utf8'))
 
 const escape = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 const asWord = (name: string): RegExp => new RegExp(`(^|[^\\w-])${escape(name)}(?![\\w-])`)
@@ -85,7 +90,10 @@ const usesClass = (name: string): boolean => {
 
 describe(`the Payload admin this plugin reads (@payloadcms/ui ${JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version})`, () => {
   it.each(Object.entries(PAYLOAD_CLASS))('still has the class %s (%s)', (_key, name) => {
-    expect(usesClass(name), `".${name}" is gone from @payloadcms/ui - update PAYLOAD_CLASS in payloadAdmin.ts`).toBe(true)
+    expect(
+      usesClass(name),
+      `".${name}" is gone from @payloadcms/ui and @payloadcms/next - update PAYLOAD_CLASS in payloadAdmin.ts`,
+    ).toBe(true)
   })
 
   it.each(Object.entries(PAYLOAD_PROPERTY))('still sets the custom property %s (%s)', (_key, name) => {

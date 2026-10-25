@@ -121,9 +121,13 @@ payloadVisualEditor({
   collections: { pages: true },
   editor: {
     blockToolbar: true,
-    focusMode: true, // true: offered, starts off on a wide screen; 'on': starts on; false: gone
+    compactDescriptions: true,
+    editUploadInLibrary: false, // Payload's pencil on a file: off unless asked for
+    focusMode: true, // true or 'on': offered, starts on; 'off': offered, starts off; false: gone
     outline: true,
+    pageMode: true, // the same three choices as focusMode
     pathBar: true,
+    replaceUpload: true,
     split: true,
     stacked: true,
     viewports: [
@@ -135,14 +139,18 @@ payloadVisualEditor({
 })
 ```
 
+- **Page mode (`pageMode`).** While the live preview is open, the page is where the editor works. Payload's header and the document's title bar fold into the bar with the save buttons, which carries the title and the way back to the list; Payload's size, zoom and breakpoint controls make way for the screen widths. On a narrow screen the preview fills it, and the form comes up from below for what was tapped - only that block, with the path bar and a close button on top; closed again, the page is all there is. Starts on, and the editor turns it off and on in the button at the bottom right, remembered per browser.
+- **The button at the bottom right.** The editor's switches - page mode, focus mode, the outline - named, each with a line on what it does, and the way to the document's versions where it keeps them. Payload's colours, under Payload's drawers and toasts. On a phone, before anything was tapped, it also opens the form, and says once that a tap edits.
 - **Divider (`split`).** Drag the line between form and preview, or use the arrow keys; double-click (or Enter) restores Payload's split. While dragging only a line moves, with both widths on it; the panes are resized once, on release. Remembered per browser; neither side gets narrower than 320 px.
 - **Outline (`outline`).** Every Array and Blocks row of the document as a tree beside the form, named the way the form names it (`Section 3`) and recognisable by what it holds (its block name, or its first words), with rows that fail validation marked. Built from the field config and the form state, so a row closed three levels down is in it. A click goes there in the form and selects it in the preview; hovering marks it in the preview. Filter, and the keyboard of an ARIA tree.
 - **Path bar (`pathBar`).** Above the form: where the selected block sits (`All fields › Section 3 › Row 1 › Column 2 › Text 1`), every crumb a way back up, with the outline and focus switches beside it.
-- **Focus mode (`focusMode`).** The form shows only the selected block, right under the bar, without the frames and indents of the rows around it. Nothing is hidden in the form state or saved; "All fields" shows everything again. On a narrow screen it starts on.
+- **Focus mode (`focusMode`).** The form shows only the selected block, right under the bar, without the frames and indents of the rows around it. Nothing is hidden in the form state or saved; "All fields" shows everything again. Starts on; the switch is in the path bar and in the button at the bottom right.
 - **Block toolbar (`blockToolbar`).** In the preview, the selected block is framed with its name and buttons to step out to the block around it, move it up or down, duplicate it, add one below (Payload's own block drawer) and remove it. What a row allows comes from the admin: `minRows`, `maxRows`, `isSortable`, read-only fields and the user's field permissions. Moves, duplicates and removals show a toast with **Undo**.
 - **Screen widths (`viewports`).** Phone, tablet and desktop buttons in Payload's bar above the preview lay the page out at that width, zoomed to fit the panel and refitted as the divider moves, through Payload's own preview size and zoom. Clicking the chosen one again returns to the panel's own width.
 - **Narrow screens (`stacked`).** At and below Payload's 1024 px break the preview sits above the form, with a divider between them (touch included), instead of the form disappearing. The outline opens as a sheet.
-- **The bar above the preview** carries the screen widths and the hint about what a click does. Where the preview is dragged narrow, it gives up, in this order, the hint's sentence (an icon carries it), Payload's width and height fields, and Payload's breakpoint menu, so nothing overlaps.
+- **The bar above the preview** carries the screen widths and the hint about what a click does - as a sentence until the editor has clicked their way to a field once, then as an icon. Where the preview is dragged narrow, it gives up, in this order, the hint's sentence, Payload's width and height fields, and Payload's breakpoint menu, so nothing overlaps.
+- **Replacing a file (`replaceUpload`, `editUploadInLibrary`).** An upload field with a file gets **Replace**: Payload's library opens, and the file chosen there takes the old one's place - one step, where Payload's own way is to remove the file and then choose. Payload's pencil beside it is off: it opens the file's own document, and a change there - alt text, focal point - changes the file wherever it is used, which on a page reads as "edit this image here". `editUploadInLibrary: true` brings it back. Single-file fields; a gallery keeps Payload's list.
+- **Descriptions (`compactDescriptions`).** A field's description is one line until the editor is in that field, then whole: a form whose every field explains itself in two to four lines reads as a wall.
 
 Everything the editor says is in German or English, by the admin's language.
 

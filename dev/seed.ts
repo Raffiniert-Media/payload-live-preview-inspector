@@ -126,13 +126,37 @@ export const seed = async (payload: Payload) => {
     }
   }
 
+  // Two files to choose between: the page has the first, "Replace" puts in the second.
+  const media = []
+  for (const [name, png] of SEED_IMAGES) {
+    const { docs } = await payload.find({ collection: 'media', limit: 1, where: { filename: { equals: name } } })
+    const data = Buffer.from(png, 'base64')
+    media.push(
+      docs[0] ??
+        (await payload.create({
+          collection: 'media',
+          data: {},
+          file: { name, data, mimetype: 'image/png', size: data.length },
+        })),
+    )
+  }
+
   const { docs: pages } = await payload.find({ collection: 'pages', limit: 1 })
-  const expected = seedPage()
+  const expected = { ...seedPage(), image: media[0].id }
 
   if (pages.length === 0) {
     await payload.create({ collection: 'pages', data: expected })
-  } else if (pages[0].sections?.length !== expected.sections.length) {
+  } else if (
+    pages[0].sections?.length !== expected.sections.length ||
+    (typeof pages[0].image === 'object' ? pages[0].image?.id : pages[0].image) !== media[0].id
+  ) {
     // A dev database from before the fixture grew - bring it up to date.
     await payload.update({ id: pages[0].id, collection: 'pages', data: expected })
   }
 }
+
+/** One pixel each, red and blue - all an upload field needs to show a file. The page starts with the first. */
+const SEED_IMAGES: [string, string][] = [
+  ['seed-red.png', 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg=='],
+  ['seed-blue.png', 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPj/HwADBwIAMCbHYQAAAABJRU5ErkJggg=='],
+]

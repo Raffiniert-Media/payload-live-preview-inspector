@@ -2,6 +2,7 @@
 
 import {
   BlocksDrawer,
+  Link,
   toast,
   useAllFormFields,
   useConfig,
@@ -12,7 +13,7 @@ import {
   useModal,
   useTranslation,
 } from '@payloadcms/ui'
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 
 import type { CaretHint } from '../utilities/caret.js'
@@ -34,7 +35,7 @@ import {
   tabContentOf,
   visibleRowsAfter,
 } from '../utilities/curtain.js'
-import { previewStringsOf, stringsFor } from '../utilities/i18n.js'
+import { previewStringsOf, stringsFor, translateLabel } from '../utilities/i18n.js'
 import { HOST_ATTRIBUTE, isolate } from '../utilities/isolate.js'
 import { DEFAULT_VIEWPORTS, isBoolean } from '../utilities/layout.js'
 import {
@@ -79,6 +80,7 @@ import {
 } from '../utilities/pathResolution.js'
 import {
   collapsibleOf,
+  docControlsContentEl,
   editMainEl,
   editMainWrapperEl,
   isCollapsedCollapsible,
@@ -110,14 +112,18 @@ import {
   rowPathOf,
 } from '../utilities/structure.js'
 import { Contained } from './Contained.js'
+import { Dock, type DockAction, type DockSwitch } from './editor/Dock.js'
 import { useHost, useMaxWidth, useStored, watchDom } from './editor/dom.js'
 import editorClasses from './editor/Editor.module.css'
-import { editorStyles, HOST } from './editor/editorStyles.js'
+import { editorStyles, HOST, PAGE_ATTRIBUTE, PANEL_ATTRIBUTE } from './editor/editorStyles.js'
+import { BackIcon, FocusIcon, FormIcon, OutlineIcon, PageIcon, VersionsIcon } from './editor/icons.js'
 import { OutlinePanel } from './editor/OutlinePanel.js'
+import { PageTitle } from './editor/PageTitle.js'
 import { PathBar } from './editor/PathBar.js'
 import { PreviewTools } from './editor/PreviewTools.js'
 import { duplicateRow, insertRowBelow, isRowAction, moveRow, removeRow, splitRowPath } from './editor/rowActions.js'
 import { SplitHandle } from './editor/SplitHandle.js'
+import { ReplaceButton, ReplaceDrawer, type UploadTarget } from './editor/UploadReplace.js'
 import classes from './LivePreviewInspectorListener.module.css'
 
 export type LivePreviewInspectorListenerProps = {
@@ -167,6 +173,11 @@ const NEW_ROW_WAIT_MS = 2_000
 
 const FOCUS_MODE_KEY = 'payload-live-preview-inspector:focus-mode'
 const OUTLINE_KEY = 'payload-live-preview-inspector:outline'
+const PAGE_MODE_KEY = 'payload-live-preview-inspector:page-mode'
+/** The editor has clicked their way from the preview to a field once: the hint has done its job. */
+const HINT_KNOWN_KEY = 'payload-live-preview-inspector:hint-known'
+/** After the form came up under a tapped element: time for the preview to take its new, lower height. */
+const PANEL_SETTLE_MS = 250
 
 /** Payload's accent colour, resolved in the admin's current light/dark theme. */
 const accentColor = (): string =>
@@ -312,9 +323,13 @@ const Inspector: React.FC<LivePreviewInspectorListenerProps> = ({
   const { iframeRef, isLivePreviewing, loadedURL, previewWindowType, url } = useLivePreviewContext()
   const features = {
     blockToolbar: editor.blockToolbar !== false,
+    compactDescriptions: editor.compactDescriptions !== false,
+    editUploadInLibrary: editor.editUploadInLibrary === true,
     focusMode: editor.focusMode !== false,
     outline: editor.outline !== false,
+    pageMode: editor.pageMode !== false,
     pathBar: editor.pathBar !== false,
+    replaceUpload: editor.replaceUpload !== false,
     split: editor.split !== false,
     stacked: editor.stacked !== false,
     viewports: editor.viewports === false ? [] : (editor.viewports ?? DEFAULT_VIEWPORTS),
@@ -359,7 +374,7 @@ const Inspector: React.FC<LivePreviewInspectorListenerProps> = ({
   // The edited document's field config: it knows which tab holds a field and
   // which rows sit on the way to it, so a reveal can go straight there
   // instead of clicking through tabs to find out.
-  const { collectionSlug, docPermissions, globalSlug, hasSavePermission } = useDocumentInfo()
+  const { id: docID, collectionSlug, docPermissions, globalSlug, hasSavePermission } = useDocumentInfo()
   const { config, getEntityConfig } = useConfig()
   const entityConfig = collectionSlug
     ? getEntityConfig({ collectionSlug })
@@ -405,10 +420,78 @@ const Inspector: React.FC<LivePreviewInspectorListenerProps> = ({
     null,
   )
   const focusMode =
-    features.focusMode && (focusModeChoice ?? (editor.focusMode === 'on' || (stacked && isLivePreviewing)))
+    features.focusMode && (focusModeChoice ?? (editor.focusMode !== 'off' || (stacked && isLivePreviewing)))
   const focusModeRef = useRef(focusMode)
   focusModeRef.current = focusMode
   const [outlineOpen, setOutlineOpen] = useStored(OUTLINE_KEY, isBoolean, false)
+
+  /*
+   * Page mode (see `EditorFeatures.pageMode`): on while the inline preview is
+   * open, unless the editor turned it off. Its layout hangs on an attribute
+   * of the root element, set here.
+   */
+  const [pageModeChoice, setPageModeChoice] = useStored<boolean | null>(
+    PAGE_MODE_KEY,
+    (value): value is boolean => isBoolean(value),
+    null,
+  )
+  const previewOpen = isLivePreviewing && previewWindowType === 'iframe'
+  const pageMode = features.pageMode && previewOpen && (pageModeChoice ?? editor.pageMode !== 'off')
+  const pageModeRef = useRef(pageMode)
+  pageModeRef.current = pageMode
+  const stackedRef = useRef(stacked)
+  stackedRef.current = stacked
+  useLayoutEffect(() => {
+    const root = document.documentElement
+    if (pageMode) {
+      root.setAttribute(PAGE_ATTRIBUTE, '')
+    } else {
+      root.removeAttribute(PAGE_ATTRIBUTE)
+    }
+    return () => root.removeAttribute(PAGE_ATTRIBUTE)
+  }, [pageMode])
+  /**
+   * Page mode on a narrow screen: whether the form is up. The attribute is set
+   * at once, with the state only following - a tap opens it and starts a
+   * reveal in the same moment, and the reveal has to find the form there.
+   */
+  const [panelOpen, setPanelOpenState] = useState(false)
+  const setPanelOpen = useCallback((open: boolean) => {
+    if (open) {
+      document.documentElement.setAttribute(PANEL_ATTRIBUTE, '')
+    } else {
+      document.documentElement.removeAttribute(PANEL_ATTRIBUTE)
+    }
+    setPanelOpenState(open)
+  }, [])
+  useEffect(() => () => document.documentElement.removeAttribute(PANEL_ATTRIBUTE), [])
+  /** Brings the form up if it is a sheet that is down; whether it did. */
+  const raisePanel = useCallback((): boolean => {
+    if (!pageModeRef.current || !stackedRef.current || document.documentElement.hasAttribute(PANEL_ATTRIBUTE)) {
+      return false
+    }
+    setPanelOpen(true)
+    return true
+  }, [setPanelOpen])
+  const raisePanelRef = useRef(raisePanel)
+  raisePanelRef.current = raisePanel
+  /** Once the form is up under a tapped element: the preview, now shorter, keeps it in view. */
+  const settleTimerRef = useRef(0)
+  const keepInPreviewOnceSettled = useCallback((path: string) => {
+    window.clearTimeout(settleTimerRef.current)
+    settleTimerRef.current = window.setTimeout(
+      () => previewRef.current?.post({ type: FOCUS_MESSAGE_TYPE, path }),
+      PANEL_SETTLE_MS,
+    )
+  }, [])
+  useEffect(() => () => window.clearTimeout(settleTimerRef.current), [])
+  const keepInPreviewOnceSettledRef = useRef(keepInPreviewOnceSettled)
+  keepInPreviewOnceSettledRef.current = keepInPreviewOnceSettled
+  const [hintKnown, setHintKnown] = useStored(HINT_KNOWN_KEY, isBoolean, false)
+  const hintKnownRef = useRef(hintKnown)
+  hintKnownRef.current = hintKnown
+  const setHintKnownRef = useRef(setHintKnown)
+  setHintKnownRef.current = setHintKnown
   /** A row the editor asked to add a block below, while they pick which. */
   const [insertBelow, setInsertBelow] = useState<{ field: SchemaField; path: string } | null>(null)
 
@@ -1194,6 +1277,10 @@ const Inspector: React.FC<LivePreviewInspectorListenerProps> = ({
    */
   const select = useCallback(
     (rowIDPath: null | string, from: SelectionSource, { focusField = false, reveal = false } = {}) => {
+      if (rowIDPath && from !== 'form' && from !== 'preview' && raisePanel()) {
+        // The preview just got shorter: the row is taken into what is left of it below.
+        keepInPreviewOnceSettled(rowIDPath)
+      }
       const narrows = focusModeRef.current && from !== 'form'
       const veil =
         reveal && rowIDPath ? beginTravel(rowIDPath, narrows ? rowIDPath : isolationRef.current) : undefined
@@ -1216,7 +1303,7 @@ const Inspector: React.FC<LivePreviewInspectorListenerProps> = ({
         postToPreview({ type: FOCUS_MESSAGE_TYPE, path: rowIDPath })
       }
     },
-    [applyIsolation, beginTravel, features.blockToolbar, postToPreview],
+    [applyIsolation, beginTravel, features.blockToolbar, keepInPreviewOnceSettled, postToPreview, raisePanel],
   )
   const selectRef = useRef(select)
   selectRef.current = select
@@ -1373,11 +1460,27 @@ const Inspector: React.FC<LivePreviewInspectorListenerProps> = ({
   const selectNewRow = useCallback(async (rowIDPath: string) => {
     selectRef.current(rowIDPath, 'toolbar')
     const started = Date.now()
+    let opened = false
     while (Date.now() - started < NEW_ROW_WAIT_MS * 2) {
       const path = resolveRowIDs(rowIDPath, getFieldsRef.current())
       const row = path ? document.getElementById(rowIDFromPath(path) ?? '') : null
       if (!path) {
         return
+      }
+      /*
+       * Opened at once if it came closed. Measured with focus mode on (also in
+       * 2.0.0) and in page mode: the new row arrived closed and still loading,
+       * and its fields came only when the reveal below opened it - after this
+       * loop had waited its four seconds for them, the cursor then landing in
+       * the row's name. Opening it is the change that brings them.
+       */
+      const collapsible = opened ? null : collapsibleOf(row)
+      if (collapsible && isCollapsedCollapsible(collapsible)) {
+        const toggle = toggleButtonOf(collapsible)
+        if (toggle) {
+          toggle.click()
+          opened = true
+        }
       }
       if (
         row?.querySelector(
@@ -1603,6 +1706,16 @@ const Inspector: React.FC<LivePreviewInspectorListenerProps> = ({
         }
       }
 
+      if (!hintKnownRef.current) {
+        setHintKnownRef.current(true)
+      }
+      // Page mode on a phone: the form comes up for what was tapped - before
+      // anything below measures it - and the preview, now shorter, keeps the
+      // tapped element in what is left of it.
+      if (raisePanelRef.current()) {
+        keepInPreviewOnceSettledRef.current(data.path)
+      }
+
       // The block the clicked field is in is where the editor is now - and,
       // in focus mode, all the form shows.
       const formState = getFieldsRef.current()
@@ -1780,6 +1893,14 @@ const Inspector: React.FC<LivePreviewInspectorListenerProps> = ({
 
   const toggleOutline = () => setOutlineOpen(!outlineOpen)
 
+  const togglePageMode = () => setPageModeChoice(!pageMode)
+
+  /** Page mode on a phone: the form goes down, and with it the selection - the page is all there is again. */
+  const closePanel = () => {
+    setPanelOpen(false)
+    select(null, 'path')
+  }
+
   /* ------------------------------------------------------------- hosts */
 
   const showSplit = features.split && isLivePreviewing && previewWindowType === 'iframe' && (!stacked || features.stacked)
@@ -1839,6 +1960,15 @@ const Inspector: React.FC<LivePreviewInspectorListenerProps> = ({
     return () => clearTimeout(timer)
   }, [isLivePreviewing, previewWindowType])
 
+  const pageTitleHost = useHost(
+    HOST.pageTitle,
+    () => {
+      const content = docControlsContentEl()
+      return content ? { parent: content } : null
+    },
+    pageMode,
+  )
+
   const previewToolsHost = useHost(
     HOST.previewTools,
     () => {
@@ -1858,6 +1988,82 @@ const Inspector: React.FC<LivePreviewInspectorListenerProps> = ({
       revealRef.current(selection, { focus: false, veil })
     }
   }
+
+  /* ------------------------------------------------- replacing an upload */
+
+  // Every single-file upload field with a file, and the place on its card
+  // the button goes. Kept as Payload renders and re-renders the cards.
+  const [uploadTargets, setUploadTargets] = useState<UploadTarget[]>([])
+  /** The field whose file is being replaced, by row ids - the drawer is open for it. */
+  const [replacing, setReplacing] = useState<{ path: string; relationTo: string | string[] } | null>(null)
+  useEffect(() => {
+    if (!features.replaceUpload) {
+      return
+    }
+    const hosts = new Map<Element, HTMLElement>()
+    const stop = watchDom(document.body, () => {
+      const main = editMainEl()
+      const schema = schemaRef.current
+      const formState = getFieldsRef.current()
+      const next: UploadTarget[] = []
+      const seen = new Set<Element>()
+      for (const actions of Array.from(
+        main?.querySelectorAll(selectorOf(PAYLOAD_CLASS.uploadDetailsActions)) ?? [],
+      )) {
+        const path = pathFromFieldElement(actions as HTMLElement)
+        const field = path && schema ? describeTarget(schema.fields, path, formState, schema.blocksMap)?.field : null
+        const relationTo = (field as { relationTo?: string | string[] } | null | undefined)?.relationTo
+        if (!path || field?.type !== 'upload' || (field as { hasMany?: boolean }).hasMany || !relationTo) {
+          continue
+        }
+        let host = hosts.get(actions)
+        if (!host) {
+          host = document.createElement('span')
+          host.setAttribute(HOST_ATTRIBUTE, HOST.uploadReplace)
+          host.style.display = 'contents'
+          hosts.set(actions, host)
+        }
+        if (actions.firstElementChild !== host) {
+          actions.prepend(host)
+        }
+        seen.add(actions)
+        next.push({ host, path, relationTo })
+      }
+      for (const [actions, host] of hosts) {
+        if (!seen.has(actions)) {
+          host.remove()
+          hosts.delete(actions)
+        }
+      }
+      setUploadTargets((previous) =>
+        previous.length === next.length &&
+        previous.every((target, index) => target.host === next[index].host && target.path === next[index].path)
+          ? previous
+          : next,
+      )
+    })
+    return () => {
+      stop()
+      hosts.forEach((host) => host.remove())
+      setUploadTargets([])
+    }
+  }, [features.replaceUpload])
+
+  const replaceDrawer = replacing ? (
+    <ReplaceDrawer
+      onClose={() => setReplacing(null)}
+      onSelect={(value) => {
+        const path = resolveRowIDs(replacing.path, getFieldsRef.current())
+        setReplacing(null)
+        if (!path || isReadOnly()) {
+          return
+        }
+        dispatchFieldsRef.current({ type: 'UPDATE', path, value })
+        formRef.current.setModified(true)
+      }}
+      relationTo={replacing.relationTo}
+    />
+  ) : null
 
   /* -------------------------------------------------- adding a block below */
 
@@ -1931,10 +2137,91 @@ const Inspector: React.FC<LivePreviewInspectorListenerProps> = ({
 
   /* ----------------------------------------------------------------- render */
 
+  const offersViewports = features.viewports.length > 0
   const styles = useMemo(
-    () => editorStyles({ mobile: features.stacked, split: features.split }),
-    [features.stacked, features.split],
+    () =>
+      editorStyles({
+        compactDescriptions: features.compactDescriptions,
+        editUploadInLibrary: features.editUploadInLibrary,
+        mobile: features.stacked,
+        pageMode: features.pageMode,
+        split: features.split,
+        viewports: offersViewports,
+      }),
+    [
+      features.compactDescriptions,
+      features.editUploadInLibrary,
+      features.pageMode,
+      features.stacked,
+      features.split,
+      offersViewports,
+    ],
   )
+
+  /*
+   * Where Payload's header and title bar would have taken the editor - the
+   * list, the document's versions - for page mode, which folds them away.
+   */
+  const adminBase = config.routes?.admin && config.routes.admin !== '/' ? config.routes.admin : ''
+  const back = collectionSlug
+    ? {
+        href: `${adminBase}/collections/${collectionSlug}`,
+        label:
+          translateLabel((entityConfig as { labels?: { plural?: unknown } } | undefined)?.labels?.plural, language) ??
+          collectionSlug,
+      }
+    : undefined
+  const versionsHref = (entityConfig as { versions?: unknown } | undefined)?.versions
+    ? collectionSlug
+      ? docID !== undefined && docID !== null
+        ? `${adminBase}/collections/${collectionSlug}/${docID}/versions`
+        : undefined
+      : globalSlug
+        ? `${adminBase}/globals/${globalSlug}/versions`
+        : undefined
+    : undefined
+  // The form as a sheet over the page: page mode on a phone.
+  const sheet = pageMode && stacked && features.stacked
+  const dockSwitches: DockSwitch[] = [
+    {
+      name: 'page-mode',
+      checked: pageMode,
+      help: strings.pageModeHelp,
+      icon: <PageIcon />,
+      label: strings.pageMode,
+      onChange: togglePageMode,
+    },
+    ...(features.focusMode
+      ? [
+          {
+            name: 'focus-mode',
+            checked: focusMode,
+            help: strings.focusModeHelp,
+            icon: <FocusIcon />,
+            label: strings.focusModeName,
+            onChange: toggleFocusMode,
+          },
+        ]
+      : []),
+    ...(features.outline
+      ? [
+          {
+            name: 'outline',
+            checked: outlineOpen,
+            help: strings.outlineHelp,
+            icon: <OutlineIcon />,
+            label: strings.outline,
+            onChange: toggleOutline,
+          },
+        ]
+      : []),
+  ]
+  const dockActions: DockAction[] = [
+    ...(sheet && !panelOpen
+      ? [{ name: 'open-form', icon: <FormIcon />, label: strings.openForm, onSelect: () => setPanelOpen(true) }]
+      : []),
+    ...(versionsHref ? [{ name: 'versions', href: versionsHref, icon: <VersionsIcon />, label: strings.versions }] : []),
+  ]
 
   const modifier = previewSettings?.interactionModifier ?? ''
   const modifierLabel = Object.hasOwn(MODIFIER_LABELS, modifier) ? MODIFIER_LABELS[modifier] : undefined
@@ -1949,10 +2236,32 @@ const Inspector: React.FC<LivePreviewInspectorListenerProps> = ({
     <div className={editorClasses.root} data-payload-live-preview-inspector-toolbar="">
       <style>{styles}</style>
       <FormWatcher onChange={onFormChange} />
+      {/* Page mode on a phone: the way back, where Payload's header had it. */}
+      {sheet && back && (
+        <Link
+          aria-label={strings.back(back.label)}
+          className={editorClasses.pageBack}
+          data-payload-live-preview-inspector-back-narrow=""
+          href={back.href}
+          title={strings.back(back.label)}
+        >
+          <BackIcon />
+        </Link>
+      )}
+      {pageTitleHost && createPortal(<PageTitle back={back} strings={strings} />, pageTitleHost)}
+      {features.pageMode && previewOpen && (
+        <Dock
+          actions={dockActions}
+          hint={sheet && !panelOpen && !hintKnown ? strings.tapHint : undefined}
+          strings={strings}
+          switches={dockSwitches}
+        />
+      )}
       {previewToolsHost &&
         createPortal(
           <PreviewTools
             hint={hintSentence}
+            hintKnown={pageMode && hintKnown}
             language={language}
             status={status}
             strings={strings}
@@ -1998,6 +2307,7 @@ const Inspector: React.FC<LivePreviewInspectorListenerProps> = ({
             chain={chain}
             focusMode={focusMode}
             focusRootPath={focusMode ? focusRoot : null}
+            onClose={sheet && panelOpen ? closePanel : undefined}
             onSelect={(node) => {
               if (!node) {
                 if (focusMode && focusRoot) {
@@ -2015,6 +2325,22 @@ const Inspector: React.FC<LivePreviewInspectorListenerProps> = ({
           />,
           pathHost,
         )}
+      {uploadTargets.map((target) =>
+        createPortal(
+          <ReplaceButton
+            onClick={() =>
+              setReplacing({
+                path: toRowIDPath(target.path, getFieldsRef.current()),
+                relationTo: target.relationTo,
+              })
+            }
+            strings={strings}
+          />,
+          target.host,
+          target.path,
+        ),
+      )}
+      {replaceDrawer}
       {insertDrawer}
     </div>
   )

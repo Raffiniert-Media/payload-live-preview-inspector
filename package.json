@@ -1,6 +1,6 @@
 {
   "name": "@raffiniert-media-ag/payload-visual-editor",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "homepage": "https://raffiniert.biz",
   "description": "A visual editor around Payload's form: click in the Live Preview to reach any field, a resizable split, an outline, focus mode, a block toolbar in the preview, screen widths and a phone layout.",
   "keywords": [

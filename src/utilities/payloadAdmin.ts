@@ -19,14 +19,30 @@
 export const PAYLOAD_CLASS = {
   /** The animated content box of a row or collapsible. */
   animatedContent: 'rah-static',
+  /** The admin's top bar: the menu button, the breadcrumbs, the account. */
+  appHeader: 'app-header',
   collapsible: 'collapsible',
   collapsibleCollapsed: 'collapsible--collapsed',
   collapsibleToggle: 'collapsible__toggle',
   collapsibleToggleWrap: 'collapsible__toggle-wrap',
   /** The sticky bar with the save buttons, above form and preview. */
   docControls: 'doc-controls',
+  /** In that bar, on the left: the document's status and dates. */
+  docControlsContent: 'doc-controls__content',
+  /** In that bar, on the right: the live preview's switch and the save buttons. */
+  docControlsControls: 'doc-controls__controls',
+  /** In that bar, among the status: one of the dates (last modified, created). */
+  docControlsValueWrap: 'doc-controls__value-wrap',
+  /** The document's title and its views (edit, versions, API), above the bar. Rendered by `@payloadcms/next`. */
+  docHeader: 'doc-header',
   /** A drawer while it is open - the block drawer among them. */
   drawerOpen: 'drawer--is-open',
+  /** A field's description, under or beside its input. */
+  fieldDescription: 'field-description',
+  /** Every field's outermost element. */
+  fieldType: 'field-type',
+  /** Inside it, around the input - and, for text fields, the description. */
+  fieldTypeWrap: 'field-type__wrap',
   /** The edit view - collections and globals both. */
   editView: 'collection-edit',
   editViewLivePreviewing: 'collection-edit--is-live-previewing',
@@ -42,6 +58,8 @@ export const PAYLOAD_CLASS = {
   /** Payload's controls in that bar, as one element. */
   livePreviewToolbarControls: 'live-preview-toolbar-controls',
   livePreviewToolbarSize: 'live-preview-toolbar-controls__device-size',
+  /** In that bar: the zoom menu. */
+  livePreviewToolbarZoom: 'live-preview-toolbar-controls__zoom',
   livePreviewWindow: 'live-preview-window',
   livePreviewWindowMain: 'live-preview-window__main',
   /** The container a row renders its fields into. */
@@ -52,6 +70,10 @@ export const PAYLOAD_CLASS = {
   tabsField: 'tabs-field',
   tabsTabs: 'tabs-field__tabs',
   tabsTabsWrap: 'tabs-field__tabs-wrap',
+  /** On an upload field's file card: the buttons - edit, remove. */
+  uploadDetailsActions: 'upload-relationship-details__actions',
+  /** That card's pencil, which edits the file's own document. */
+  uploadDetailsEdit: 'upload-relationship-details__edit',
 } as const
 
 /** `.name` for a class above. */
@@ -171,6 +193,10 @@ export const editMainWrapperEl = (doc: Document = document): HTMLElement | null 
 /** The live preview panel, when it is the inline one (not a popup). */
 export const livePreviewWindowEl = (doc: Document = document): HTMLElement | null =>
   landmark(PAYLOAD_CLASS.livePreviewWindow, doc)
+
+/** The left part of the bar with the save buttons - the document's status and dates. */
+export const docControlsContentEl = (doc: Document = document): HTMLElement | null =>
+  landmark(PAYLOAD_CLASS.docControlsContent, doc)
 
 /** The bar above the preview with Payload's own controls. */
 export const livePreviewToolbarEl = (doc: Document = document): HTMLElement | null =>

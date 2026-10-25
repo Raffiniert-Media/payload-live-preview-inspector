@@ -86,3 +86,43 @@ export const InfoIcon: React.FC<IconProps> = (props) => (
     <path d="M8 7.5V11M8 5h.01" />
   </Svg>
 )
+
+/** The editor's button at the bottom right: three sliders. */
+export const SlidersIcon: React.FC<IconProps> = (props) => (
+  <Svg {...props}>
+    <path d="M2.5 4h6M11.5 4h2M2.5 8h2M7.5 8h6M2.5 12h7M12.5 12h1" />
+    <circle cx="10" cy="4" r="1.5" />
+    <circle cx="6" cy="8" r="1.5" />
+    <circle cx="11" cy="12" r="1.5" />
+  </Svg>
+)
+
+/** Page mode: a page, its frame folded away. */
+export const PageIcon: React.FC<IconProps> = (props) => (
+  <Svg {...props}>
+    <rect height="12" rx="1.5" width="12" x="2" y="2" />
+    <path d="M2 5.5h12" />
+  </Svg>
+)
+
+export const VersionsIcon: React.FC<IconProps> = (props) => (
+  <Svg {...props}>
+    <circle cx="8" cy="8" r="6" />
+    <path d="M8 4.5V8l2.5 1.5" />
+  </Svg>
+)
+
+/** The whole form, every field. */
+export const FormIcon: React.FC<IconProps> = (props) => (
+  <Svg {...props}>
+    <rect height="3" rx="1" width="11" x="2.5" y="2.5" />
+    <rect height="3" rx="1" width="11" x="2.5" y="7" />
+    <path d="M2.5 12.5h6" />
+  </Svg>
+)
+
+export const BackIcon: React.FC<IconProps> = (props) => (
+  <Svg {...props}>
+    <path d="M10 4L6 8l4 4" />
+  </Svg>
+)

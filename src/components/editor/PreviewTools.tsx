@@ -7,46 +7,22 @@ import type { Viewport } from '../../utilities/layout.js'
 
 import { PAYLOAD_CLASS } from '../../utilities/payloadAdmin.js'
 import classes from './Editor.module.css'
-import {
-  BAR_FOLDS,
-  type BarFold,
-  FOLDED_ATTRIBUTE,
-  HINT_ICON_ATTRIBUTE,
-  HINT_SENTENCE_ATTRIBUTE,
-} from './editorStyles.js'
+import { BAR_FOLDS, FOLDED_ATTRIBUTE, HINT_ICON_ATTRIBUTE, HINT_SENTENCE_ATTRIBUTE } from './editorStyles.js'
+import { foldToFit } from './foldToFit.js'
 import { InfoIcon } from './icons.js'
 import { ViewportControls } from './ViewportControls.js'
 
 type Props = {
   /** The sentence about clicking in the preview - with the modifier, when the preview reported one. */
   hint: string
+  /** Only the hint's icon: the editor has clicked their way to a field before, and knows. */
+  hintKnown?: boolean
   language: string
   /** What is happening right now: where a click is going, or that it found nothing. */
   status?: { text: string; tone: 'active' | 'notice' }
   strings: EditorStrings
   /** Screen widths to offer; none on a narrow screen, where the preview is the phone. */
   viewports: Viewport[]
-}
-
-/**
- * Folds the bar until everything in it fits: the first of `folds`' prefixes -
- * none folded, the first, the first two, ... - at which the bar does not
- * overflow, or all of them when none does. Every part of the bar keeps its
- * own width (see the editor stylesheet), so too little room shows as overflow
- * rather than as one control drawn over another.
- */
-export const foldToFit = (bar: HTMLElement, folds: readonly BarFold[]): void => {
-  for (let count = 0; count <= folds.length; count++) {
-    const value = folds.slice(0, count).join(' ')
-    if (value) {
-      bar.setAttribute(FOLDED_ATTRIBUTE, value)
-    } else {
-      bar.removeAttribute(FOLDED_ATTRIBUTE)
-    }
-    if (bar.scrollWidth <= bar.clientWidth) {
-      return
-    }
-  }
 }
 
 /**
@@ -60,7 +36,7 @@ export const foldToFit = (bar: HTMLElement, folds: readonly BarFold[]): void => 
  * alike, measured rather than guessed at: the sentence, and Payload's labels,
  * are as long as the admin's language makes them.
  */
-export const PreviewTools: React.FC<Props> = ({ hint, language, status, strings, viewports }) => {
+export const PreviewTools: React.FC<Props> = ({ hint, hintKnown = false, language, status, strings, viewports }) => {
   const rootRef = useRef<HTMLDivElement>(null)
   const offersViewports = viewports.length > 0
 
@@ -71,7 +47,8 @@ export const PreviewTools: React.FC<Props> = ({ hint, language, status, strings,
     }
     // Payload's breakpoint menu only goes where the screen widths stand in for it.
     const folds = offersViewports ? BAR_FOLDS : BAR_FOLDS.filter((fold) => fold !== 'breakpoint')
-    const fit = () => foldToFit(bar, folds)
+    // A known hint is folded from the start - and stays so however wide the bar.
+    const fit = () => foldToFit(bar, folds, hintKnown ? 1 : 0)
     fit()
     // The bar's width (divider, window), and what Payload's controls hold: a
     // breakpoint's label changes with the breakpoint.
@@ -85,7 +62,7 @@ export const PreviewTools: React.FC<Props> = ({ hint, language, status, strings,
       observer.disconnect()
       bar.removeAttribute(FOLDED_ATTRIBUTE)
     }
-  }, [hint, offersViewports])
+  }, [hint, hintKnown, offersViewports])
 
   return (
     <div className={classes.previewTools} data-payload-live-preview-inspector-preview-tools="" ref={rootRef}>

@@ -1297,9 +1297,15 @@ const forgetEditorChoices = (page: Page) =>
     }
   })
 
-const openEditor = async (page: Page) => {
+/** `choices`: editor settings as if remembered from an earlier visit - `{ 'page-mode': false }` for the classic layout. */
+const openEditor = async (page: Page, choices: Record<string, unknown> = {}) => {
   await login(page)
   await forgetEditorChoices(page)
+  await page.evaluate((entries) => {
+    for (const [key, value] of Object.entries(entries)) {
+      localStorage.setItem(`payload-live-preview-inspector:${key}`, JSON.stringify(value))
+    }
+  }, choices)
   const frame = await openLivePreview(page, 'pages')
   await expect(page.locator(EDITOR)).toBeAttached()
   return frame
@@ -1363,7 +1369,8 @@ test('editor: focus mode shows only the block clicked in the preview, and “All
   page,
 }) => {
   const frame = await openEditor(page)
-  await page.click('[data-payload-live-preview-inspector-focus-toggle]')
+  // On from the start: the switch is there to turn it off.
+  await expect(page.locator('[data-payload-live-preview-inspector-focus-toggle]')).toHaveAttribute('aria-pressed', 'true')
   await firstSection(frame).click()
 
   await expect(page.locator('#field-sections__0__heading')).toBeVisible({ timeout: 10_000 })
@@ -1503,7 +1510,8 @@ test('editor: the bar above a narrow preview folds what matters least, and nothi
   page,
 }) => {
   await page.setViewportSize({ height: 900, width: 2200 })
-  await openEditor(page)
+  // Classic: page mode leaves Payload's sizes out altogether (see the page mode test).
+  await openEditor(page, { 'page-mode': false })
   await page.click('[data-viewport=desktop]')
   const sentence = page.locator('[data-payload-live-preview-inspector-hint-sentence]')
   const size = page.locator('.live-preview-toolbar-controls__device-size')
@@ -1546,7 +1554,8 @@ test('editor: on a narrow screen the preview sits above the form, and a tap show
   const context = await browser.newContext({ hasTouch: true, isMobile: true, viewport: { height: 844, width: 390 } })
   const page = await context.newPage()
   try {
-    const frame = await openEditor(page)
+    // Classic; page mode on a phone is the test after this one.
+    const frame = await openEditor(page, { 'page-mode': false })
     const preview = (await page.locator('.live-preview-window').boundingBox())!
     const form = (await page.locator('.collection-edit__main').boundingBox())!
     expect(preview.width).toBe(390)
@@ -1572,6 +1581,135 @@ test('editor: on a narrow screen the preview sits above the form, and a tap show
     // Focus mode is on by default here.
     await expect(page.locator('#field-sections__0__heading')).toBeVisible({ timeout: 10_000 })
     await expect(page.locator('#sections-row-1')).toBeHidden()
+  } finally {
+    await context.close()
+  }
+})
+
+test('editor: “Replace” puts another file into an upload field in one step, without the pencil beside it', async ({
+  page,
+}) => {
+  await openEditor(page)
+  const field = page.locator('#field-image')
+  await expect(field).toContainText('seed-red.png', { timeout: 30_000 })
+  // No pencil: on a page it reads as "edit this image here", and it edits the
+  // file everywhere it is used.
+  await expect(field.locator('.upload-relationship-details__edit')).toBeHidden()
+
+  await field.locator('[data-payload-live-preview-inspector-replace]').click()
+  const drawer = page.locator('.drawer--is-open')
+  await expect(drawer).toBeVisible()
+  await drawer.getByText('seed-blue.png', { exact: true }).click()
+
+  await expect(drawer).toBeHidden()
+  await expect(field).toContainText('seed-blue.png')
+  await expect(field).not.toContainText('seed-red.png')
+  // A change like any other: the document has something to save.
+  await expect(page.locator('#action-save')).toBeEnabled()
+})
+
+test('editor: a field’s description is one line until the editor is in that field', async ({ page }) => {
+  await page.setViewportSize({ height: 900, width: 1280 })
+  await openEditor(page)
+  const description = page.locator('.field-description-intro')
+  const title = page.locator('.field-description-title')
+  const height = async () => (await description.boundingBox())!.height
+  await expect(description).toBeVisible({ timeout: 30_000 })
+
+  const folded = await height()
+  expect(folded).toBeLessThan(24)
+  await page.locator('#field-intro').focus()
+  await expect.poll(height).toBeGreaterThan(folded * 2)
+  // Only this field's: the title has no description to open, and focus in
+  // the intro opens nothing elsewhere.
+  await expect(title).toHaveCount(0)
+
+  await page.locator('#field-title').focus()
+  await expect.poll(height).toBeLessThan(24)
+})
+
+const DOCK = '[data-payload-live-preview-inspector-dock]'
+const dockItem = (name: string) => `[data-payload-live-preview-inspector-dock-item=${name}]`
+
+test('page mode: Payload’s header folds into the bar with the save buttons, and the button at the bottom right turns it off', async ({
+  page,
+}) => {
+  const frame = await openEditor(page)
+
+  // Payload's header and the document's title bar are gone; the title, and
+  // the way back to the list, are in the bar that is left.
+  await expect(page.locator('.app-header')).toBeHidden()
+  await expect(page.locator('.doc-header')).toBeHidden()
+  await expect(page.locator('.doc-controls')).toBeInViewport()
+  const title = page.locator('[data-payload-live-preview-inspector-page-title]')
+  await expect(title).toContainText('A complex page')
+  await expect(title.locator('a')).toHaveAttribute('href', '/admin/collections/pages')
+  // The screen widths do what Payload's sizes and zoom did.
+  await expect(page.locator('.live-preview-toolbar-controls__device-size')).toBeHidden()
+  await expect(page.locator('.live-preview-toolbar-controls__zoom')).toBeHidden()
+
+  // The sentence about clicking says it until the editor has clicked.
+  const sentence = page.locator('[data-payload-live-preview-inspector-hint-sentence]')
+  await expect(sentence).toBeVisible()
+  await firstSection(frame).click()
+  await expect(page.locator(PATH_BAR)).toContainText('Feature 1')
+  await expect(sentence).toBeHidden()
+  await expect(page.locator('[data-payload-live-preview-inspector-hint-icon]')).toBeVisible()
+
+  // The switches, named, with what each one does.
+  await page.click('[data-payload-live-preview-inspector-dock-button]')
+  await expect(page.locator(dockItem('page-mode'))).toHaveAttribute('aria-checked', 'true')
+  await expect(page.locator(dockItem('focus-mode'))).toHaveAttribute('aria-checked', 'true')
+  await expect(page.locator(dockItem('outline'))).toHaveAttribute('aria-checked', 'false')
+  // This collection keeps no versions, so there is no way to them either.
+  await expect(page.locator(dockItem('versions'))).toHaveCount(0)
+
+  // Off: Payload's layout is back, and stays so on the next visit.
+  await page.click(dockItem('page-mode'))
+  await expect(page.locator('.app-header')).toBeVisible()
+  await expect(page.locator('.doc-header')).toBeVisible()
+  await expect(title).toHaveCount(0)
+  await page.keyboard.press('Escape')
+  await expect(page.locator(`${DOCK} [role=group]`)).toHaveCount(0)
+  await page.reload()
+  await expect(page.locator('.doc-header')).toBeVisible({ timeout: 30_000 })
+  await expect(page.locator(EDITOR)).toBeAttached()
+  await expect(page.locator('html[data-payload-live-preview-inspector-page]')).toHaveCount(0)
+})
+
+test('page mode on a phone: the page fills the screen, a tap brings up just that block, and the form goes down again', async ({
+  browser,
+}) => {
+  const context = await browser.newContext({ hasTouch: true, isMobile: true, viewport: { height: 844, width: 390 } })
+  const page = await context.newPage()
+  try {
+    const frame = await openEditor(page)
+    const previewHeight = async () => (await page.locator('.live-preview-window').boundingBox())!.height
+    const form = page.locator('.collection-edit__main')
+
+    // The page, under one bar, and nothing else: 299 px of preview in the
+    // classic layout on this screen, nearly all of it here.
+    await expect.poll(previewHeight).toBeGreaterThan(844 * 0.85)
+    await expect(form).toBeHidden()
+    await expect(page.locator('.app-header')).toBeHidden()
+    await expect(page.locator('#live-preview-toggler')).toBeInViewport()
+    await expect(page.locator(`${DOCK} [role=note]`)).toBeVisible()
+
+    // A tap: the form comes up with that block, the page above it.
+    await firstSection(frame).tap()
+    await expect(page.locator('#field-sections__0__heading')).toBeVisible({ timeout: 10_000 })
+    await expect(page.locator('#sections-row-1')).toBeHidden()
+    await expect.poll(previewHeight).toBeLessThan(844 * 0.7)
+    await expect(page.locator(PATH_BAR)).toContainText('Feature 1')
+    // The path bar has the switches now; the button would sit on the page.
+    await expect(page.locator(DOCK)).toBeHidden()
+    await expect(page.locator(`${DOCK} [role=note]`)).toHaveCount(0)
+
+    // Down again: the page is all there is.
+    await page.click('[data-payload-live-preview-inspector-close-form]')
+    await expect(form).toBeHidden()
+    await expect.poll(previewHeight).toBeGreaterThan(844 * 0.85)
+    await expect(page.locator(DOCK)).toBeVisible()
   } finally {
     await context.close()
   }

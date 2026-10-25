@@ -6,7 +6,7 @@ import type { EditorStrings } from '../../utilities/i18n.js'
 import type { OutlineNode } from '../../utilities/structure.js'
 
 import classes from './Editor.module.css'
-import { ChevronIcon, FocusIcon, OutlineIcon } from './icons.js'
+import { ChevronIcon, CloseIcon, FocusIcon, OutlineIcon } from './icons.js'
 
 type Props = {
   /** The rows from the outermost down to the selected one. */
@@ -15,6 +15,8 @@ type Props = {
   focusMode: boolean
   /** The row focus mode shows. */
   focusRootPath: null | string
+  /** Puts the form away - page mode on a narrow screen, where the form is a sheet over the page. */
+  onClose?: () => void
   /** A crumb: `null` is "all fields". */
   onSelect: (node: null | OutlineNode) => void
   /** Focus mode's switch; absent when the site turned focus mode off. */
@@ -46,6 +48,7 @@ export const PathBar: React.FC<Props> = ({
   chain,
   focusMode,
   focusRootPath,
+  onClose,
   onSelect,
   onToggleFocus,
   onToggleOutline,
@@ -131,6 +134,18 @@ export const PathBar: React.FC<Props> = ({
             </li>
           ))}
         </ol>
+      )}
+      {onClose && (
+        <button
+          aria-label={strings.closeForm}
+          className={`${classes.button} ${classes.pathBarClose}`}
+          data-payload-live-preview-inspector-close-form=""
+          onClick={onClose}
+          title={strings.closeForm}
+          type="button"
+        >
+          <CloseIcon />
+        </button>
       )}
     </nav>
   )

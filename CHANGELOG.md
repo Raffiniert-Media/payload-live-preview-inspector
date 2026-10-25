@@ -1,5 +1,45 @@
 # Changelog
 
+## 2.1.0
+
+### Page mode: the page is where the editor works
+
+While the live preview is open, Payload's frame steps back (`editor.pageMode`,
+on by default, switched per browser):
+
+- **On a wide screen** Payload's header and the document's title bar fold into
+  the bar with the save buttons, which carries the title and the way back to
+  the list - 180 px of chrome above the work became 56. Payload's size, zoom
+  and breakpoint controls make way for the screen widths.
+- **On a phone** the preview fills the screen under that one bar - measured on
+  a customer site at 390 × 844: 299 px of preview before, 800 now. A tap
+  brings the form up from below with only that block, the page keeping the
+  upper part; the path bar's close button puts it away again.
+- **A button at the bottom right** holds the editor's switches - page mode,
+  focus mode, the outline - named, each with a line on what it does, and the
+  way to the document's versions. Payload's colours and nothing of its own.
+
+### Defaults that changed
+
+- **Focus mode starts on**, on every screen; the switch stays. `focusMode:
+  true` now means "offered, starting on" - `'off'` offers it starting off.
+- **The hint above the preview** is a sentence until the editor has clicked
+  their way to a field once, then its icon.
+- **Payload's pencil on an upload's file is off** (`editUploadInLibrary`). It
+  edits the file's own document - a change there changes it on every page
+  that uses it - which on a page reads as "edit this image here".
+
+### Smaller
+
+- **Replace** on an upload field with a file (`replaceUpload`): another one
+  from Payload's library in one step, instead of remove-then-choose.
+- **Field descriptions are one line** until the field is in use
+  (`compactDescriptions`).
+- **A block added below gets its cursor** with focus mode on. It came closed
+  and still loading, and its fields only arrived when the reveal opened it
+  four seconds later - the cursor then landing in the block's name. Also in
+  2.0.0, where focus mode started off on a wide screen and nobody met it.
+
 ## 2.0.0
 
 ### Renamed: `@raffiniert-media-ag/payload-visual-editor`

@@ -20,7 +20,17 @@ export const Pages: CollectionConfig = {
         {
           fields: [
             { name: 'title', type: 'text' },
-            { name: 'intro', type: 'textarea' },
+            {
+              name: 'intro',
+              type: 'textarea',
+              // Long on purpose: one line of it until the field is in use.
+              admin: {
+                description:
+                  'The sentence or two at the very top of the page, under its title. Keep it short: it is the first thing a visitor reads, and a paragraph here pushes everything else down the page. It also stands in for the page in search results when no description is set.',
+              },
+            },
+            // An upload with a file: exercises "Replace" and the pencil it stands beside.
+            { name: 'image', type: 'upload', relationTo: 'media' },
           ],
           label: 'Content',
         },

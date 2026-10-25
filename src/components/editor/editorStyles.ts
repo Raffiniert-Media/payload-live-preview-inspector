@@ -32,6 +32,10 @@ export const EDITOR_PROPERTY = {
 /** `HOST_ATTRIBUTE` values - which of the editor's elements a host carries. */
 export const HOST = {
   outline: 'outline',
+  /** Page mode's title, first in the bar with the save buttons. */
+  pageTitle: 'page-title',
+  /** "Replace" on an upload field's file card. */
+  uploadReplace: 'upload-replace',
   /** The editor's bar above the form: outline, focus mode, the path. */
   pathBar: 'path-bar',
   /** The editor's part of Payload's bar above the preview: screen widths, the hint. */
@@ -53,6 +57,16 @@ export const FOLDED_ATTRIBUTE = 'data-payload-live-preview-inspector-folded'
 export const HINT_SENTENCE_ATTRIBUTE = 'data-payload-live-preview-inspector-hint-sentence'
 export const HINT_ICON_ATTRIBUTE = 'data-payload-live-preview-inspector-hint-icon'
 
+/**
+ * On the root element while page mode is on (see `EditorFeatures.pageMode`).
+ * An attribute rather than a rule rendered with the state: set the moment the
+ * editor switches, not a render later - a reveal that starts on the same tap
+ * measures the layout page mode makes.
+ */
+export const PAGE_ATTRIBUTE = 'data-payload-live-preview-inspector-page'
+/** On the root element, page mode on a narrow screen: the form is up, under the preview. */
+export const PANEL_ATTRIBUTE = 'data-payload-live-preview-inspector-panel'
+
 const c = (name: (typeof PAYLOAD_CLASS)[keyof typeof PAYLOAD_CLASS]) => `.${name}`
 const host = (name: (typeof HOST)[keyof typeof HOST]) => `[${HOST_ATTRIBUTE}="${name}"]`
 
@@ -60,8 +74,122 @@ const previewing = c(PAYLOAD_CLASS.editViewLivePreviewing)
 const bar = c(PAYLOAD_CLASS.livePreviewToolbar)
 const folded = (part: BarFold) => `${bar}[${FOLDED_ATTRIBUTE}~="${part}"]`
 const controls = `var(${PAYLOAD_PROPERTY.docControlsHeight}, 56px)`
+const page = `html[${PAGE_ATTRIBUTE}]`
+const pagePanel = `html[${PAGE_ATTRIBUTE}][${PANEL_ATTRIBUTE}]`
+const pageNoPanel = `html[${PAGE_ATTRIBUTE}]:not([${PANEL_ATTRIBUTE}])`
 
-export const editorStyles = ({ mobile, split }: { mobile: boolean; split: boolean }): string => `
+/**
+ * Page mode: the page is where the editor works, and Payload's frame steps
+ * back - see `EditorFeatures.pageMode`.
+ *
+ * Payload's header and the document's title bar go; the bar with the save
+ * buttons, which already sticks to the top, is the top, and carries the title
+ * (`PageTitle`) where the dates were. Payload's own size, zoom and breakpoint
+ * controls go where the screen widths are there to do that.
+ *
+ * On a narrow screen the preview fills the screen under that bar, and the
+ * form is not there until something is tapped. Then it comes up from below,
+ * the preview keeping the upper part - the stacked layout, with the divider
+ * as the sheet's top edge.
+ */
+const pageModeStyles = ({ viewports }: { viewports: boolean }): string => `
+${page} ${c(PAYLOAD_CLASS.appHeader)},
+${page} ${c(PAYLOAD_CLASS.docHeader)} {
+  display: none !important;
+}
+
+/* The dates make room for the title; the status and Payload's autosave note stay. */
+${page} ${c(PAYLOAD_CLASS.docControlsValueWrap)} {
+  display: none;
+}
+
+${
+  viewports
+    ? `
+${page} ${c(PAYLOAD_CLASS.livePreviewToolbarSize)},
+${page} ${c(PAYLOAD_CLASS.livePreviewToolbarZoom)},
+${page} ${c(PAYLOAD_CLASS.livePreviewToolbarBreakpoint)} {
+  display: none !important;
+}`
+    : ''
+}
+
+@media (min-width: ${PAYLOAD_MID_BREAK_PX + 1}px) {
+  ${page} [data-payload-live-preview-inspector-back-narrow] {
+    display: none;
+  }
+}
+
+@media (max-width: ${PAYLOAD_MID_BREAK_PX}px) {
+  /*
+   * Payload sticks only the buttons on a narrow screen and lets the status
+   * above them scroll away. Here there is no status, so nothing scrolls away.
+   */
+  ${page} ${c(PAYLOAD_CLASS.docControls)} {
+    top: 0;
+  }
+  ${page} ${c(PAYLOAD_CLASS.docControlsContent)},
+  ${page} ${c(PAYLOAD_CLASS.livePreviewToolbar)} {
+    display: none;
+  }
+  ${pageNoPanel} ${c(PAYLOAD_CLASS.editMain)},
+  ${pageNoPanel} ${host(HOST.split)} {
+    display: none;
+  }
+  ${pageNoPanel} ${previewing} ${c(PAYLOAD_CLASS.livePreviewWindow)} {
+    box-shadow: none;
+    height: calc(100dvh - ${controls});
+  }
+  /* The sheet's top edge. */
+  ${pagePanel} ${host(HOST.split)} [data-payload-live-preview-inspector-split] {
+    border-bottom: 0;
+    border-radius: 12px 12px 0 0;
+    box-shadow: 0 -6px 18px rgb(0 0 0 / 18%);
+  }
+  /* Up with the form, the path bar has the same switches - and the page is busy. */
+  ${pagePanel} [data-payload-live-preview-inspector-dock] {
+    display: none;
+  }
+}
+`
+
+/**
+ * Descriptions one line long in the form, whole in the field the editor is in
+ * - see `EditorFeatures.compactDescriptions`. Only a field's own description:
+ * Payload puts it beside the input, or inside the input's wrapper, so a group
+ * with a focused field inside does not open every description it holds.
+ */
+const compactDescriptionStyles = (): string => `
+${c(PAYLOAD_CLASS.editMain)} ${c(PAYLOAD_CLASS.fieldDescription)} {
+  -webkit-box-orient: vertical;
+  display: -webkit-box;
+  -webkit-line-clamp: 1;
+  overflow: hidden;
+}
+
+${c(PAYLOAD_CLASS.editMain)} ${c(PAYLOAD_CLASS.fieldType)}:focus-within > ${c(PAYLOAD_CLASS.fieldDescription)},
+${c(PAYLOAD_CLASS.editMain)} ${c(PAYLOAD_CLASS.fieldType)}:focus-within > ${c(PAYLOAD_CLASS.fieldTypeWrap)} > ${c(PAYLOAD_CLASS.fieldDescription)} {
+  display: block;
+  -webkit-line-clamp: unset;
+  overflow: visible;
+}
+`
+
+export const editorStyles = ({
+  compactDescriptions,
+  editUploadInLibrary,
+  mobile,
+  pageMode,
+  split,
+  viewports,
+}: {
+  compactDescriptions: boolean
+  editUploadInLibrary: boolean
+  mobile: boolean
+  pageMode: boolean
+  split: boolean
+  viewports: boolean
+}): string => `
 [${HIDDEN_ATTRIBUTE}] { display: none !important; }
 
 /*
@@ -197,4 +325,10 @@ ${
   ${host(HOST.split)} { display: none; }
 }`
 }
+
+${pageMode ? pageModeStyles({ viewports }) : ''}
+
+${editUploadInLibrary ? '' : `${c(PAYLOAD_CLASS.uploadDetailsEdit)} { display: none !important; }`}
+
+${compactDescriptions ? compactDescriptionStyles() : ''}
 `
