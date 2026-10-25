@@ -39,10 +39,26 @@ export const HOST = {
   split: 'split',
 } as const
 
+/**
+ * What Payload's preview bar gives up while it is too narrow for everything,
+ * in this order: the hint's sentence for its icon, Payload's width and height
+ * fields, then Payload's breakpoint menu - that last one only beside the
+ * editor's screen widths, which do what it does.
+ */
+export const BAR_FOLDS = ['hint', 'size', 'breakpoint'] as const
+export type BarFold = (typeof BAR_FOLDS)[number]
+
+/** On Payload's preview bar: the folds in effect, space-separated. */
+export const FOLDED_ATTRIBUTE = 'data-payload-live-preview-inspector-folded'
+export const HINT_SENTENCE_ATTRIBUTE = 'data-payload-live-preview-inspector-hint-sentence'
+export const HINT_ICON_ATTRIBUTE = 'data-payload-live-preview-inspector-hint-icon'
+
 const c = (name: (typeof PAYLOAD_CLASS)[keyof typeof PAYLOAD_CLASS]) => `.${name}`
 const host = (name: (typeof HOST)[keyof typeof HOST]) => `[${HOST_ATTRIBUTE}="${name}"]`
 
 const previewing = c(PAYLOAD_CLASS.editViewLivePreviewing)
+const bar = c(PAYLOAD_CLASS.livePreviewToolbar)
+const folded = (part: BarFold) => `${bar}[${FOLDED_ATTRIBUTE}~="${part}"]`
 const controls = `var(${PAYLOAD_PROPERTY.docControlsHeight}, 56px)`
 
 export const editorStyles = ({ mobile, split }: { mobile: boolean; split: boolean }): string => `
@@ -91,21 +107,36 @@ ${host(HOST.pathBar)} {
 }
 
 /*
- * In Payload's preview bar, on the left, taking the room Payload's centred
- * controls leave - which pushes those to the right. A container, so the hint
- * can tell whether its sentence fits.
+ * In Payload's preview bar, on the left, taking the room Payload's controls
+ * leave - which pushes those to the right. Never narrower than what it holds:
+ * when the bar is short of room it overflows rather than sliding under
+ * Payload's controls, and the preview tools see the overflow and folds.
  */
 ${host(HOST.previewTools)} {
   align-self: stretch;
-  container-type: inline-size;
   display: flex;
   flex: 1 1 auto;
-  min-width: 0;
 }
 
 /* Payload's controls, pushed to the right by ours, off the edge. */
-${c(PAYLOAD_CLASS.livePreviewToolbar)}:has(> ${host(HOST.previewTools)}) {
+${bar}:has(> ${host(HOST.previewTools)}) {
+  justify-content: flex-start;
   padding-right: calc(var(--base) / 2);
+}
+
+/*
+ * What the bar gives up while it is too narrow - see BAR_FOLDS. The hint
+ * is the sentence until it folds to its icon.
+ */
+${host(HOST.previewTools)} [${HINT_ICON_ATTRIBUTE}],
+${folded('hint')} [${HINT_SENTENCE_ATTRIBUTE}],
+${folded('size')} ${c(PAYLOAD_CLASS.livePreviewToolbarSize)},
+${folded('breakpoint')} ${c(PAYLOAD_CLASS.livePreviewToolbarBreakpoint)} {
+  display: none;
+}
+
+${folded('hint')} [${HINT_ICON_ATTRIBUTE}] {
+  display: inline-flex;
 }
 
 ${

@@ -130,6 +130,11 @@ export const pageTopInset = (doc: Document, x: number, own: Element): number => 
 /** How often the page's bars are measured again while the toolbar shows. */
 const INSET_EVERY_MS = 250
 
+/** Frames without anything moving before the toolbar stops following every frame. */
+const STILL_FRAMES = 30
+/** How often a toolbar at rest looks again. */
+const RESTING_CHECK_MS = 200
+
 const ICONS: Record<Exclude<BlockToolbarAction, 'edit'>, string> = {
   down: '<path d="M8 3v10M4 9l4 4 4-4"/>',
   duplicate: '<rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/><path d="M10.5 5.5V3.5a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2"/>',
@@ -165,6 +170,10 @@ export const createBlockToolbar = (
   let selected: null | string = null
   let hovered: null | string = null
   let frame = 0
+  // Following at rest - see `follow`.
+  let lastPlaced = ''
+  let stillFor = 0
+  let resting = 0
 
   const layer = doc.createElement('div')
   layer.className = classes.layer
@@ -200,6 +209,13 @@ export const createBlockToolbar = (
     box.style.height = `${rect.height}px`
   }
 
+  /*
+   * Every frame while anything moves - a scroll, a row opening - and, once
+   * nothing has for a while, a look a few times a second that changes
+   * nothing unless something did: a toolbar re-placed every frame on a page
+   * at rest kept the editor's machine from ever idling. What moves a row
+   * without an event (an image loading above it, a carousel) is still caught.
+   */
   const follow = () => {
     frame = 0
     const view = doc.defaultView
@@ -207,40 +223,82 @@ export const createBlockToolbar = (
       return
     }
     const selectedRect = selected ? rowRectOf(doc, selected) : null
-    place(selection, selectedRect)
-    place(hover, hovered && hovered !== selected ? rowRectOf(doc, hovered) : null)
+    const hoverRect = hovered && hovered !== selected ? rowRectOf(doc, hovered) : null
+    const placed = [selectedRect, hoverRect]
+      .map((rect) => (rect ? `${rect.left},${rect.top},${rect.width},${rect.height}` : '-'))
+      .concat(String(view.innerWidth), String(view.innerHeight))
+      .join('|')
+    const wasResting = stillFor >= STILL_FRAMES
+    stillFor = placed === lastPlaced ? stillFor + 1 : 0
+    lastPlaced = placed
 
-    const showToolbar = Boolean(selectedRect && selected && rows.has(selected) && strings)
-    if (showToolbar) {
-      toolbar.style.removeProperty('display')
-    } else {
-      toolbar.style.display = 'none'
-    }
-    if (showToolbar && selectedRect) {
-      const now = Date.now()
-      if (now - insetMeasuredAt > INSET_EVERY_MS) {
-        insetMeasuredAt = now
-        inset = pageTopInset(doc, Math.max(0, Math.min(view.innerWidth - 1, selectedRect.left + 8)), layer)
+    if (!wasResting || stillFor === 0) {
+      place(selection, selectedRect)
+      place(hover, hoverRect)
+
+      const showToolbar = Boolean(selectedRect && selected && rows.has(selected) && strings)
+      if (showToolbar) {
+        toolbar.style.removeProperty('display')
+      } else {
+        toolbar.style.display = 'none'
       }
-      const { left, top } = toolbarPosition(
-        selectedRect,
-        { height: toolbar.offsetHeight, width: toolbar.offsetWidth },
-        { height: view.innerHeight, width: view.innerWidth },
-        inset,
-      )
-      toolbar.style.transform = `translate(${Math.round(left)}px, ${Math.round(top)}px)`
+      if (showToolbar && selectedRect) {
+        const now = Date.now()
+        if (now - insetMeasuredAt > INSET_EVERY_MS) {
+          insetMeasuredAt = now
+          inset = pageTopInset(doc, Math.max(0, Math.min(view.innerWidth - 1, selectedRect.left + 8)), layer)
+        }
+        const { left, top } = toolbarPosition(
+          selectedRect,
+          { height: toolbar.offsetHeight, width: toolbar.offsetWidth },
+          { height: view.innerHeight, width: view.innerWidth },
+          inset,
+        )
+        toolbar.style.transform = `translate(${Math.round(left)}px, ${Math.round(top)}px)`
+      }
     }
-    if (selected || hovered) {
+
+    if (!selected && !hovered) {
+      return
+    }
+    if (stillFor < STILL_FRAMES) {
+      frame = view.requestAnimationFrame(follow)
+    } else {
+      resting = view.setTimeout(() => {
+        resting = 0
+        frame = view.requestAnimationFrame(follow)
+      }, RESTING_CHECK_MS)
+    }
+  }
+
+  /** Back to following every frame. */
+  const wake = () => {
+    const view = doc.defaultView ?? window
+    stillFor = 0
+    if (resting) {
+      view.clearTimeout(resting)
+      resting = 0
+    }
+    if (!frame) {
       frame = view.requestAnimationFrame(follow)
     }
   }
 
   const schedule = () => {
     attach()
-    if (!frame) {
-      frame = (doc.defaultView ?? window).requestAnimationFrame(follow)
+    wake()
+  }
+
+  // A scroll or a resized window moves every row at once - and from rest, it
+  // should not wait for the next look.
+  const view = doc.defaultView ?? window
+  const onViewChange = () => {
+    if (selected || hovered) {
+      wake()
     }
   }
+  view.addEventListener('scroll', onViewChange, { capture: true, passive: true })
+  view.addEventListener('resize', onViewChange, { passive: true })
 
   const button = (action: BlockToolbarAction, title: string, enabled: boolean, content: string) => {
     const el = doc.createElement('button')
@@ -312,8 +370,12 @@ export const createBlockToolbar = (
 
   const api: BlockToolbar = {
     destroy: () => {
-      ;(doc.defaultView ?? window).cancelAnimationFrame(frame)
+      view.cancelAnimationFrame(frame)
+      view.clearTimeout(resting)
       frame = 0
+      resting = 0
+      view.removeEventListener('scroll', onViewChange, { capture: true })
+      view.removeEventListener('resize', onViewChange)
       toolbar.removeEventListener('click', onToolbarClick)
       layer.remove()
     },

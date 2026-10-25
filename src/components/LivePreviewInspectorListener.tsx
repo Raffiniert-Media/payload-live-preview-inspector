@@ -77,6 +77,7 @@ import {
   isCollapsedCollapsible,
   livePreviewToolbarEl,
   livePreviewWindowEl,
+  missingLandmarks,
   PAYLOAD_CLASS,
   PAYLOAD_MID_BREAK_PX,
   PAYLOAD_PROPERTY,
@@ -101,6 +102,7 @@ import {
   rowIDPathOf,
   rowPathOf,
 } from '../utilities/structure.js'
+import { Contained } from './Contained.js'
 import { useHost, useMaxWidth, useStored, watchDom } from './editor/dom.js'
 import editorClasses from './editor/Editor.module.css'
 import { editorStyles, HOST } from './editor/editorStyles.js'
@@ -240,6 +242,31 @@ const VEIL_MAX_MS = 4_000
 /** How long the veil takes to come down - `drawCurtain`'s fade, and a frame. */
 const VEIL_FADE_MS = 140
 
+/** Row actions from the preview that may wait for the one running - see `queueRowAction`. */
+const MAX_QUEUED_ROW_ACTIONS = 3
+
+/** The row actions that change the form, rather than only going somewhere in it. */
+const changesForm = (action: RowAction): boolean => action !== 'select' && action !== 'edit'
+
+/**
+ * Whether the editor has just clicked or typed - in the admin or, since a
+ * gesture in a frame counts for the page around it, in the preview.
+ *
+ * The preview's toolbar only ever sends a change as the answer to a click.
+ * Anything else that can post from the preview's window - a script the site
+ * loads, an embed's host code - would be changing the document behind the
+ * editor's back, and is not let through. Where a browser cannot tell, it is.
+ */
+const followsAGesture = (): boolean => {
+  const activation = (navigator as { userActivation?: { isActive: boolean } } & Navigator).userActivation
+  return activation ? activation.isActive : true
+}
+
+/** How long Payload gets to render its edit view before the editor looks for its parts. */
+const LANDMARK_CHECK_MS = 3_000
+/** Parts already reported missing - once a page load is enough. */
+const reportedMissing = new Set<string>()
+
 /** Where a selection came from - which decides what else it moves. */
 type SelectionSource = 'form' | 'outline' | 'path' | 'preview' | 'toolbar'
 
@@ -257,7 +284,11 @@ export const LivePreviewInspectorListener: React.FC<LivePreviewInspectorListener
   if (editDepth > 1) {
     return null
   }
-  return <Inspector {...props} />
+  return (
+    <Contained name="The editor">
+      <Inspector {...props} />
+    </Contained>
+  )
 }
 
 const Inspector: React.FC<LivePreviewInspectorListenerProps> = ({
@@ -333,8 +364,17 @@ const Inspector: React.FC<LivePreviewInspectorListenerProps> = ({
         fields: entityConfig.fields as unknown as SchemaField[],
       }
     : null
-  const readOnlyRef = useRef(false)
-  readOnlyRef.current = hasSavePermission === false || Boolean(form.disabled)
+  const hasSavePermissionRef = useRef(hasSavePermission)
+  hasSavePermissionRef.current = hasSavePermission
+  /**
+   * Whether the form takes changes - asked when it matters, not remembered
+   * from the last render: Payload flips `disabled` on the form's own object
+   * (a lock taken over, a document moved to the trash) without rendering this.
+   */
+  const isReadOnly = useCallback(
+    () => hasSavePermissionRef.current === false || Boolean(formRef.current.disabled),
+    [],
+  )
 
   /* ---------------------------------------------------------------- state */
 
@@ -427,7 +467,17 @@ const Inspector: React.FC<LivePreviewInspectorListenerProps> = ({
   }, [unveil])
   const unveilRef = useRef(unveil)
   unveilRef.current = unveil
-  useEffect(() => () => clearTimeout(veilRef.current.safety), [])
+  useEffect(
+    () => () => {
+      // Gone in the middle of a jump - after an error, say - the editor must
+      // not leave the form faded out behind it.
+      const state = veilRef.current
+      clearTimeout(state.safety)
+      state.curtain?.lift()
+      state.curtain = null
+    },
+    [],
+  )
 
   /* -------------------------------------------------------- reveal engine */
 
@@ -993,28 +1043,36 @@ const Inspector: React.FC<LivePreviewInspectorListenerProps> = ({
         return el === checkExact() ? 'exact' : 'ancestor'
       }
 
-      void revealField().then((outcome) => {
-        liftCurtains()
-        // Lifted by now unless the reveal failed or a newer one took it over.
-        unveilRef.current(veil)
-        timer.end(signal.aborted ? 'aborted' : outcome)
-        // Rows deeper inside mount only after the ones around them rendered -
-        // one more look once all of it had the time to.
-        if (!signal.aborted) {
-          clearTimeout(healTimer)
-          healTimer = setTimeout(() => void healUnrenderedRows(), 600)
-        }
-        if (!signal.aborted) {
-          sendStatus(outcome === 'not-found' ? 'not-found' : 'done')
-          labelTimer = setTimeout(() => setRevealLabel(undefined), 1_500)
-          if (outcome === 'not-found') {
-            showNotFound()
+      void revealField()
+        .catch((error: unknown) => {
+          // A jump that broke ends like one that found nothing: everything it
+          // hid comes back, and the editor hears that the field is not there.
+          // eslint-disable-next-line no-console -- a jump that broke has to leave a trace
+          console.error(`[payload-live-preview-inspector] The jump to "${resolvedPath}" failed.`, error)
+          return 'not-found' as const
+        })
+        .then((outcome) => {
+          liftCurtains()
+          // Lifted by now unless the reveal failed or a newer one took it over.
+          unveilRef.current(veil)
+          timer.end(signal.aborted ? 'aborted' : outcome)
+          // Rows deeper inside mount only after the ones around them rendered -
+          // one more look once all of it had the time to.
+          if (!signal.aborted) {
+            clearTimeout(healTimer)
+            healTimer = setTimeout(() => void healUnrenderedRows(), 600)
           }
-        }
-        if (revealController === controller) {
-          revealController = undefined
-        }
-      })
+          if (!signal.aborted) {
+            sendStatus(outcome === 'not-found' ? 'not-found' : 'done')
+            labelTimer = setTimeout(() => setRevealLabel(undefined), 1_500)
+            if (outcome === 'not-found') {
+              showNotFound()
+            }
+          }
+          if (revealController === controller) {
+            revealController = undefined
+          }
+        })
     }
 
     return () => {
@@ -1157,7 +1215,7 @@ const Inspector: React.FC<LivePreviewInspectorListenerProps> = ({
     const next = buildOutline(schema.fields, getFieldsRef.current(), {
       blocksMap: schema.blocksMap,
       language: languageRef.current,
-      readOnly: readOnlyRef.current,
+      readOnly: isReadOnly(),
     })
     outlineRef.current = next
     const signature = outlineSignature(next)
@@ -1166,7 +1224,7 @@ const Inspector: React.FC<LivePreviewInspectorListenerProps> = ({
       setOutline(next)
       pushStructure()
     }
-  }, [needsOutline, pushStructure])
+  }, [isReadOnly, needsOutline, pushStructure])
 
   // Labels are in the admin's language: a new language is a new outline.
   useEffect(() => {
@@ -1254,6 +1312,14 @@ const Inspector: React.FC<LivePreviewInspectorListenerProps> = ({
     return null
   }, [])
 
+  /** Until Payload's form has taken a change made to `formState` - or a while has passed. */
+  const formChangedFrom = useCallback(async (formState: unknown): Promise<void> => {
+    const started = Date.now()
+    while (getFieldsRef.current() === formState && Date.now() - started < NEW_ROW_WAIT_MS) {
+      await nextFrames(1)
+    }
+  }, [])
+
   const formAPI = (): RowFormAPI => formRef.current as unknown as RowFormAPI
 
   /**
@@ -1288,7 +1354,18 @@ const Inspector: React.FC<LivePreviewInspectorListenerProps> = ({
     async (action: RowAction, rowIDPath: string) => {
       const formState = getFieldsRef.current()
       const path = resolveRowIDs(rowIDPath, formState)
-      const node = path ? outlineRef.current?.byPath.get(path) : undefined
+      // What the row allows, from the form as it is now: the outline is
+      // rebuilt a moment after each change, and an action checked against
+      // the one before could take a row too many past min or max rows.
+      const schema = schemaRef.current
+      const node =
+        path && schema
+          ? buildOutline(schema.fields, formState, {
+              blocksMap: schema.blocksMap,
+              language: languageRef.current,
+              readOnly: isReadOnly(),
+            }).byPath.get(path)
+          : undefined
       if (!path || !node) {
         return
       }
@@ -1298,12 +1375,13 @@ const Inspector: React.FC<LivePreviewInspectorListenerProps> = ({
         selectRef.current(rowIDPath, 'toolbar', { focusField: action === 'edit', reveal: true })
         return
       }
-      if (readOnlyRef.current) {
+      if (isReadOnly()) {
         return
       }
 
       if ((action === 'up' || action === 'down') && node.abilities.move) {
         const moved = moveRow(formAPI(), path, action === 'up' ? -1 : 1)
+        await formChangedFrom(formState)
         if (moved) {
           // The same row, by its id - which is what selection follows.
           selectRef.current(rowIDPath, 'toolbar')
@@ -1331,6 +1409,7 @@ const Inspector: React.FC<LivePreviewInspectorListenerProps> = ({
 
       if (action === 'remove' && node.abilities.remove) {
         const removed = removeRow(formAPI(), path)
+        await formChangedFrom(formState)
         if (removed) {
           selectRef.current(node.parent?.rowIDPath ?? null, 'toolbar')
           toast.success(stringsRef.current.removed(label), {
@@ -1363,10 +1442,35 @@ const Inspector: React.FC<LivePreviewInspectorListenerProps> = ({
         }
       }
     },
-    [selectNewRow, waitForNewRow],
+    [formChangedFrom, isReadOnly, selectNewRow, waitForNewRow],
   )
   const runRowActionRef = useRef(runRowAction)
   runRowActionRef.current = runRowAction
+
+  /*
+   * Row actions from the preview, one at a time and each against the form the
+   * last one left: rows are addressed by index, which every move and removal
+   * shifts. A few may wait - two quick clicks on "up" are two moves - and
+   * past that the preview is sending faster than anyone clicks, so the rest
+   * is dropped.
+   */
+  const rowActionsRef = useRef<{ pending: number; queue: Promise<void> }>({ pending: 0, queue: Promise.resolve() })
+  const queueRowAction = useCallback((action: RowAction, rowIDPath: string) => {
+    const state = rowActionsRef.current
+    if (state.pending >= MAX_QUEUED_ROW_ACTIONS) {
+      return
+    }
+    state.pending += 1
+    state.queue = state.queue
+      .then(() => runRowActionRef.current(action, rowIDPath))
+      .catch((error: unknown) => {
+        // eslint-disable-next-line no-console -- a block action that broke has to leave a trace
+        console.error(`[payload-live-preview-inspector] The block action "${action}" failed.`, error)
+      })
+      .finally(() => {
+        state.pending -= 1
+      })
+  }, [])
 
   /* ------------------------------------------------------- preview channel */
 
@@ -1434,8 +1538,13 @@ const Inspector: React.FC<LivePreviewInspectorListenerProps> = ({
       }
 
       if (data.type === ROW_ACTION_MESSAGE_TYPE) {
-        if (features.blockToolbar && typeof data.path === 'string' && isRowAction(data.action)) {
-          void runRowActionRef.current(data.action, data.path)
+        if (
+          features.blockToolbar &&
+          typeof data.path === 'string' &&
+          isRowAction(data.action) &&
+          (!changesForm(data.action) || followsAGesture())
+        ) {
+          queueRowAction(data.action, data.path)
         }
         return
       }
@@ -1478,7 +1587,7 @@ const Inspector: React.FC<LivePreviewInspectorListenerProps> = ({
       previewRef.current = null
       valuesChannelRef.current = null
     }
-  }, [iframeRef, activeURL, features.blockToolbar, pushStructure])
+  }, [iframeRef, activeURL, features.blockToolbar, pushStructure, queueRowAction])
 
   /* --------------------------------------- the form, as the editor moves in it */
 
@@ -1658,6 +1767,27 @@ const Inspector: React.FC<LivePreviewInspectorListenerProps> = ({
     showPathBar,
   )
 
+  // A Payload the plugin does not know says so once, in the console, rather
+  // than as pieces of the editor quietly not there.
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      const missing = missingLandmarks({ livePreview: isLivePreviewing && previewWindowType === 'iframe' }).filter(
+        (name) => !reportedMissing.has(name),
+      )
+      if (missing.length === 0) {
+        return
+      }
+      missing.forEach((name) => reportedMissing.add(name))
+      // eslint-disable-next-line no-console -- what tells a site owner why the editor is incomplete
+      console.warn(
+        `[payload-live-preview-inspector] Not found in Payload's admin: ${missing.map((name) => `.${name}`).join(', ')}. ` +
+          'This Payload version renders its edit view differently from the ones the plugin was tested with, and ' +
+          'the parts of the editor that need these stay off - a newer version of the plugin should bring them back.',
+      )
+    }, LANDMARK_CHECK_MS)
+    return () => clearTimeout(timer)
+  }, [isLivePreviewing, previewWindowType])
+
   const previewToolsHost = useHost(
     HOST.previewTools,
     () => {
@@ -1755,7 +1885,8 @@ const Inspector: React.FC<LivePreviewInspectorListenerProps> = ({
     [features.stacked, features.split],
   )
 
-  const modifierLabel = MODIFIER_LABELS[previewSettings?.interactionModifier ?? '']
+  const modifier = previewSettings?.interactionModifier ?? ''
+  const modifierLabel = Object.hasOwn(MODIFIER_LABELS, modifier) ? MODIFIER_LABELS[modifier] : undefined
   const hintSentence = `${strings.hint}${modifierLabel ? strings.hintModifier(modifierLabel) : ''}`
   const status = notFoundNotice
     ? { text: strings.notFound, tone: 'notice' as const }

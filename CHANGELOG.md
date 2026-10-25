@@ -6,8 +6,8 @@
 
 Payload's edit view with live preview is a fixed 40/60 split, a form nested as
 deep as the content (section → row → column → component, up to eight levels in
-accordions and tabs), and on a phone the preview *or* the form. Payload 4 does
-not change that. This release builds the missing editor around the form,
+accordions and tabs), and on a phone the preview *or* the form. This release
+builds the missing editor around the form,
 on top of what the plugin already does - finding any field from a click - and
 every part of it can be turned off (`editor` option, see `EditorFeatures`).
 
@@ -67,8 +67,23 @@ every part of it can be turned off (`editor` option, see `EditorFeatures`).
 What the plugin reads of Payload's rendered admin - class names, ids,
 attributes - lives in `payloadAdmin.ts`, and `payloadAdmin.test.ts` checks
 every name against the installed `@payloadcms/ui`. An upgrade that renames one
-(Payload 4 redesigns the admin) fails there by name instead of a reveal quietly
-finding nothing.
+fails there by name instead of a reveal quietly finding nothing.
+
+The tests run against Payload 3.90.1 - the version the sites using this plugin
+are on - and CI checks the names, types and unit tests against the oldest
+version the peer range admits (3.84.1) as well.
+
+### When Payload changes underneath
+
+- **A failure stays in the plugin.** The editor in the admin and the
+  inspector in the preview each sit behind an error boundary: if either
+  throws, it disappears and logs why, and Payload's edit view - or the site's
+  page - carries on as without the plugin. Taken down with it, the editor
+  lifts any fade it had put on the form; a jump to a field that throws ends
+  like one that found nothing, everything it hid shown again.
+- **A Payload the plugin does not know says so.** When the parts of the edit
+  view the editor hangs on are not there - renamed in a Payload release - the
+  console names them once, instead of pieces of the editor quietly missing.
 
 ### Smaller changes
 
@@ -81,6 +96,35 @@ finding nothing.
   two listeners answered every click twice there.
 - Choices remembered in the browser are read after hydration, so the document
   controls render the same on server and client.
+- **The bar above the preview folds instead of overlapping.** Dragged narrow,
+  it gives up, in this order, the hint's sentence for its icon, Payload's
+  width and height fields, and Payload's breakpoint menu (only beside the
+  editor's screen widths, which do what it does) - measured, so it holds for
+  any language's labels. Screen widths, zoom and "open in new window" stay.
+  The hint shows whole or as the icon, never cut off; a status during a jump
+  covers it without moving the bar.
+- **The preview's toolbar rests with the page.** It followed its block every
+  frame for as long as one was selected - about 13 ms of main thread a second
+  on a page at rest, measured; now it looks a few times a second and changes
+  nothing until something moves, and a scroll wakes it at once (about 2 ms).
+
+### Hardening
+
+- Block actions that change the document - move, duplicate, add, remove - are
+  taken from the preview only right after a click or key press (the browser's
+  user activation, which a click in the preview frame gives the admin too). A
+  script the site loads can post as the preview; it can no longer rearrange
+  the document behind the editor's back.
+- Those actions run one at a time, each checked against the form as the last
+  one left it (`minRows`, `maxRows`, read-only - read at that moment, not from
+  the last render), so a burst of them can neither pass a row limit nor take
+  the wrong row.
+- Read-only reaches the rows inside: an array in a read-only group,
+  collapsible, row or array offers no move, duplicate, add or remove.
+- The accent colour the admin sends the preview is used only if it is a
+  colour; paths in CSS selectors have line breaks escaped too (a path with one
+  threw).
+- The click mark's layer is removed with the component.
 
 ## 1.13.0
 

@@ -95,35 +95,44 @@
   display: flex;
   flex: 1 1 auto;
   gap: calc(var(--base) / 2);
-  min-width: 0;
   padding: 0 calc(var(--base) / 2);
 }
 
 /*
- * The sentence where the bar has room for it beside Payload's controls, an
- * icon carrying it where not - measured on the bar itself (its host is a
- * container), not on the window: the divider decides how wide it is.
+ * The hint: the sentence or its icon, as the bar folds (the editor stylesheet
+ * decides which). The sentence never shrinks - cut off it would be a riddle,
+ * and its overflow is how the bar knows it does not fit.
  */
+.hintSlot {
+  align-items: center;
+  align-self: stretch;
+  display: flex;
+  flex: 1 0 auto;
+  position: relative;
+}
+
 .hintSentence {
-  display: none;
+  flex: none;
 }
 
 .hintIcon {
   align-items: center;
   color: var(--theme-elevation-400, #8f8f8f);
   cursor: help;
-  display: inline-flex;
   flex: 0 0 auto;
 }
 
-@container (min-width: 600px) {
-  .hintSentence {
-    display: block;
-  }
+/* Where a click is going: over the hint, in the room the hint has. */
+.status {
+  left: 0;
+  position: absolute;
+  right: 0;
+  top: 50%;
+  translate: 0 -50%;
+}
 
-  .hintIcon {
-    display: none;
-  }
+.hintSlot[data-busy] > :not(.status) {
+  visibility: hidden;
 }
 
 /* ---- Divider between form and preview ---- */

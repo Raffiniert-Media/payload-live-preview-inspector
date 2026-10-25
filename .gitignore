@@ -53,3 +53,7 @@ next-env.d.ts
 /playwright-report/
 /blob-report/
 /playwright/.cache/
+
+# Written by `next dev` (Next 16.3) into the app directory on every start
+dev/AGENTS.md
+dev/CLAUDE.md

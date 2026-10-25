@@ -37,6 +37,11 @@ export const PAYLOAD_CLASS = {
   livePreviewIframe: 'live-preview-iframe',
   /** The bar above the preview with Payload's size, zoom and pop-out controls. */
   livePreviewToolbar: 'live-preview-toolbar',
+  /** In that bar: the menu of configured breakpoints, and the width and height fields. */
+  livePreviewToolbarBreakpoint: 'live-preview-toolbar-controls__breakpoint',
+  /** Payload's controls in that bar, as one element. */
+  livePreviewToolbarControls: 'live-preview-toolbar-controls',
+  livePreviewToolbarSize: 'live-preview-toolbar-controls__device-size',
   livePreviewWindow: 'live-preview-window',
   livePreviewWindowMain: 'live-preview-window__main',
   /** The container a row renders its fields into. */
@@ -156,3 +161,28 @@ export const payloadPropertyPx = (name: string, fallback: number, doc: Document 
   const value = parseFloat(getComputedStyle(doc.documentElement).getPropertyValue(name))
   return Number.isFinite(value) ? value : fallback
 }
+
+/**
+ * The parts of Payload's edit view everything else hangs on: the form's
+ * column and its bar, and - while the inline live preview is open - the
+ * preview panel, its bar and the row holding both.
+ */
+const LANDMARKS = [PAYLOAD_CLASS.editView, PAYLOAD_CLASS.editMain, PAYLOAD_CLASS.docControls] as const
+const LIVE_PREVIEW_LANDMARKS = [
+  PAYLOAD_CLASS.editMainWrapper,
+  PAYLOAD_CLASS.livePreviewWindow,
+  PAYLOAD_CLASS.livePreviewWindowMain,
+  PAYLOAD_CLASS.livePreviewToolbar,
+  PAYLOAD_CLASS.livePreviewToolbarControls,
+] as const
+
+/**
+ * Which of those are not on the page - the class names, empty when all are.
+ *
+ * The test against the installed `@payloadcms/ui` catches a rename before a
+ * release; this catches it on a site that updated Payload past the plugin,
+ * where a renamed class would otherwise only show as a piece of the editor
+ * quietly missing.
+ */
+export const missingLandmarks = ({ livePreview }: { livePreview: boolean }, doc: Document = document): string[] =>
+  [...LANDMARKS, ...(livePreview ? LIVE_PREVIEW_LANDMARKS : [])].filter((name) => !doc.querySelector(selectorOf(name)))

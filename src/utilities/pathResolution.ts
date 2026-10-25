@@ -1,7 +1,7 @@
 import type { CaretHint } from './caret.js'
 
 import { applyCaretHint } from './caret.js'
-import { isRowIDSegment, rowIDFromSegment, rowIDSegment } from './pathAttribute.js'
+import { escapeAttributeValue, isRowIDSegment, rowIDFromSegment, rowIDSegment } from './pathAttribute.js'
 import {
   collapsibleOf,
   FIELD_ID_PREFIX,
@@ -98,7 +98,7 @@ export const resolveExactFieldElement = (path: string): HTMLElement | null => {
     return rowEl
   }
 
-  return document.querySelector<HTMLElement>(`[${FIELD_PATH_ATTRIBUTE}="${path.replace(/["\\]/g, '\\$&')}"]`)
+  return document.querySelector<HTMLElement>(`[${FIELD_PATH_ATTRIBUTE}="${escapeAttributeValue(path)}"]`)
 }
 
 /**

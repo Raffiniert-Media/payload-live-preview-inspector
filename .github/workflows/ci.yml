@@ -44,3 +44,32 @@ jobs:
           name: playwright-report
           path: playwright-report/
           retention-days: 7
+
+  oldest-payload:
+    # The oldest Payload the peer range admits, beside the one the dev app
+    # runs: the names in src/utilities/payloadAdmin.ts are Payload's internals,
+    # and each has to be in every version a site may have installed.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install the oldest supported Payload
+        run: |
+          OLDEST=$(node -p "require('./package.json').peerDependencies.payload.replace(/^\^/, '')")
+          echo "Payload $OLDEST"
+          pnpm add --save-dev --save-exact \
+            payload@$OLDEST @payloadcms/ui@$OLDEST @payloadcms/next@$OLDEST @payloadcms/db-sqlite@$OLDEST \
+            @payloadcms/live-preview-react@$OLDEST @payloadcms/richtext-lexical@$OLDEST
+
+      - name: Typecheck
+        run: pnpm exec tsc --noEmit
+
+      - name: Unit & integration tests
+        run: pnpm test:int

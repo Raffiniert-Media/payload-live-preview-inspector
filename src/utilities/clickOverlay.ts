@@ -8,6 +8,8 @@ export type ClickOverlayClasses = {
 }
 
 export type ClickOverlay = {
+  /** Gone for good, layer and all - the component unmounts. */
+  destroy: () => void
   /** The admin answered: fade out, or say there was nothing to go to. */
   finish: (outcome: 'done' | 'not-found') => void
   /** Drops the mark at once - a newer click, an unmount. */
@@ -80,6 +82,11 @@ export const createClickOverlay = (doc: Document, classes: ClickOverlayClasses):
   }
 
   return {
+    destroy: () => {
+      hide()
+      layer?.remove()
+      layer = undefined
+    },
     finish: (outcome) => {
       if (!box) {
         return

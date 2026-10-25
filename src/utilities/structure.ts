@@ -223,6 +223,14 @@ const kindOf = (field: SchemaField, block: ReturnType<typeof rowFieldsOf>['block
   )
 }
 
+/**
+ * Read-only reaches everything inside, the way Payload renders it: a field in
+ * a read-only group, collapsible, row or array is read-only too, whatever its
+ * own config says.
+ */
+const lockedCtx = (ctx: Ctx): Ctx => (ctx.readOnly ? ctx : { ...ctx, readOnly: true })
+const within = (field: SchemaField, ctx: Ctx): Ctx => (field.admin?.readOnly === true ? lockedCtx(ctx) : ctx)
+
 const rowsOf = (
   field: SchemaField,
   fieldPath: string,
@@ -267,7 +275,7 @@ const rowsOf = (
 
     outline.byPath.set(path, node)
     outline.byRowIDPath.set(rowIDPath, node)
-    collect(fields, path, rowIDPath, ctx, node, depth + 1, outline)
+    collect(fields, path, rowIDPath, locked ? lockedCtx(ctx) : ctx, node, depth + 1, outline)
 
     node.summary =
       (typeof blockName === 'string' && blockName.trim() ? shorten(blockName) : undefined) ??
@@ -311,7 +319,7 @@ const collect = (
     }
     if (!field.name) {
       if (field.fields) {
-        collect(field.fields, path, idPath, ctx, parent, depth, outline)
+        collect(field.fields, path, idPath, within(field, ctx), parent, depth, outline)
       }
       continue
     }
@@ -323,7 +331,7 @@ const collect = (
     }
 
     if (field.type === 'group' && field.fields) {
-      collect(field.fields, fieldPath, fieldIDPath, ctx, parent, depth, outline)
+      collect(field.fields, fieldPath, fieldIDPath, within(field, ctx), parent, depth, outline)
       continue
     }
     if (field.type !== 'array' && field.type !== 'blocks') {

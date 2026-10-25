@@ -187,6 +187,30 @@ describe('buildOutline', () => {
     expect(outline.byPath.get('layout.0')?.abilities.move).toBe(true)
   })
 
+  it('allows nothing inside a read-only field, whatever the rows inside say', () => {
+    const locked: SchemaField[] = [
+      {
+        type: 'collapsible',
+        admin: { readOnly: true },
+        fields: [{ name: 'links', type: 'array', fields: [{ name: 'url', type: 'text' }] }],
+      },
+      {
+        name: 'sections',
+        type: 'array',
+        admin: { readOnly: true },
+        fields: [{ name: 'items', type: 'array', fields: [{ name: 'text', type: 'text' }] }],
+      },
+    ]
+    const state: MinimalFormState = {
+      links: { rows: [{ id: 'l1' }, { id: 'l2' }] },
+      sections: { rows: [{ id: 's1' }] },
+      'sections.0.items': { rows: [{ id: 'i1' }, { id: 'i2' }] },
+    }
+    const nodes = flattenOutline(buildOutline(locked, state, {}))
+    expect(nodes.map((node) => node.path)).toEqual(['links.0', 'links.1', 'sections.0', 'sections.0.items.0', 'sections.0.items.1'])
+    expect(nodes.every((node) => Object.values(node.abilities).every((allowed) => !allowed))).toBe(true)
+  })
+
   it('allows nothing on a read-only form', () => {
     const readOnly = buildOutline(fields, formState, { blocksMap, readOnly: true })
     expect(

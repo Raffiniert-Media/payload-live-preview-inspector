@@ -41,3 +41,11 @@ export const rowIDPathOf = (path: string): null | string => {
   }
   return null
 }
+
+/**
+ * `value` as the inside of a quoted CSS string: quotes and backslashes
+ * escaped, and line breaks too - unescaped, one ends the string and the
+ * selector throws.
+ */
+export const escapeAttributeValue = (value: string): string =>
+  value.replace(/["\\]/g, '\\$&').replace(/[\n\r\f]/g, (char) => `\\${char.charCodeAt(0).toString(16)} `)

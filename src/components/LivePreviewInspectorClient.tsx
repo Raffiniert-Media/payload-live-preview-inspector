@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef } from 'react'
+import React, { useEffect, useRef } from 'react'
 
 import type { AutoTagger } from '../utilities/autoTagger.js'
 import type { BlockToolbar, BlockToolbarAction } from '../utilities/blockToolbar.js'
@@ -35,6 +35,7 @@ import {
   uncover,
   UNCOVER_MARGIN_PX,
 } from '../utilities/pathResolution.js'
+import { Contained } from './Contained.js'
 import classes from './LivePreviewInspectorClient.module.css'
 
 export { LIVE_PREVIEW_HOVER_CLASS_NAME }
@@ -217,7 +218,7 @@ const isPreviewRow = (value: unknown): value is PreviewRow =>
 const isPreviewStrings = (value: unknown): value is PreviewStrings =>
   Boolean(value) && typeof value === 'object' && typeof (value as PreviewStrings).moveUp === 'string'
 
-export const LivePreviewInspectorClient: React.FC<LivePreviewInspectorClientProps> = ({
+const PreviewInspector: React.FC<LivePreviewInspectorClientProps> = ({
   blockToolbar = true,
   disableInteractions = true,
   disableLinks = true,
@@ -301,7 +302,9 @@ export const LivePreviewInspectorClient: React.FC<LivePreviewInspectorClientProp
 
       if (data.type === THEME_MESSAGE_TYPE) {
         // A configured `hoverColor` wins over the admin's accent.
-        if (!hoverColor && typeof data.accent === 'string' && data.accent) {
+        // A colour and nothing else: the value lands in a `background`, where
+        // a `url()` would have the preview fetch whatever it names.
+        if (!hoverColor && typeof data.accent === 'string' && CSS.supports('color', data.accent)) {
           document.documentElement.style.setProperty(ACCENT_PROPERTY, data.accent)
         }
         return
@@ -528,6 +531,7 @@ export const LivePreviewInspectorClient: React.FC<LivePreviewInspectorClientProp
       document.removeEventListener('keydown', onKeyDown)
       toolbar?.destroy()
       endPending()
+      overlay.destroy()
       document.removeEventListener('mousemove', onMouseMove)
       document.documentElement.removeEventListener('mouseleave', onMouseLeave)
       window.removeEventListener('click', onClick, { capture: true })
@@ -673,3 +677,13 @@ export const LivePreviewInspectorClient: React.FC<LivePreviewInspectorClientProp
 
   return null
 }
+
+/**
+ * The preview's half of the plugin, mounted by the site. Wrapped so that
+ * whatever goes wrong in it stays in it: the site's page renders on either way.
+ */
+export const LivePreviewInspectorClient: React.FC<LivePreviewInspectorClientProps> = (props) => (
+  <Contained name="The preview's inspector">
+    <PreviewInspector {...props} />
+  </Contained>
+)

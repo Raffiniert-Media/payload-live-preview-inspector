@@ -1,7 +1,12 @@
 import type { DocumentLeafValue } from './pathResolution.js'
 
 import { collapsedTextOf, NON_CONTENT_TAGS } from './caret.js'
-import { isRowIDSegment, LIVE_PREVIEW_AUTO_ATTRIBUTE, LIVE_PREVIEW_PATH_ATTRIBUTE } from './pathAttribute.js'
+import {
+  escapeAttributeValue,
+  isRowIDSegment,
+  LIVE_PREVIEW_AUTO_ATTRIBUTE,
+  LIVE_PREVIEW_PATH_ATTRIBUTE,
+} from './pathAttribute.js'
 import { findStegaPaths, hasStegaHint, stegaClean } from './stega.js'
 
 /** Text-bearing attributes also scanned for stega-encoded paths. */
@@ -307,8 +312,6 @@ export const findTaggedElementAt = (doc: Document, x: number, y: number): HTMLEl
 
   return best
 }
-
-const escapeAttributeValue = (value: string): string => value.replace(/["\\]/g, '\\$&')
 
 const elementWithExactPath = (doc: Document, path: string): HTMLElement | null =>
   doc.querySelector<HTMLElement>(`[${LIVE_PREVIEW_PATH_ATTRIBUTE}="${escapeAttributeValue(path)}"]`)

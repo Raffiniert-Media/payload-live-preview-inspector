@@ -633,7 +633,7 @@ test('a click the inspector cannot answer is left to the page', async ({ page })
 
 test('the admin hint names the modifier the preview reported', async ({ page }) => {
   // Wide enough for the whole sentence; narrower, an icon carries it.
-  await page.setViewportSize({ height: 900, width: 1800 })
+  await page.setViewportSize({ height: 900, width: 2200 })
   await login(page)
 
   await openLivePreview(page)
@@ -645,8 +645,14 @@ test('the admin hint names the modifier the preview reported', async ({ page }) 
    * default rather than this preview.
    */
   await expect(page.locator('text=hold ⌥ (Alt) to use the page instead')).toBeVisible()
+  // Whole: a sentence cut off at "hold" would teach nothing.
+  await expect
+    .poll(() =>
+      page.locator('[data-payload-live-preview-inspector-hint-sentence]').evaluate((hint) => hint.scrollWidth - hint.clientWidth),
+    )
+    .toBe(0)
 
-  // Where the document controls are crowded, the sentence is the icon's label.
+  // Where the bar above the preview is short of room, the sentence is the icon's label.
   await page.setViewportSize({ height: 800, width: 1280 })
   await expect(page.locator('[data-payload-live-preview-inspector-hint-icon]')).toBeVisible()
   await expect(page.locator('[data-payload-live-preview-inspector-hint-icon]')).toHaveAttribute(
@@ -1412,6 +1418,80 @@ test('editor: a screen width lays the page out at that width, fitted to the pane
   // The chosen one again: back to the panel's own width.
   await page.click('[data-viewport=mobile]')
   await expect.poll(innerWidth).toBeGreaterThan(600)
+})
+
+/** What is on screen in Payload's preview bar - ours and Payload's - left to right. */
+const barParts = (page: Page) =>
+  page.locator('.live-preview-toolbar').evaluate((bar) => {
+    const box = bar.getBoundingClientRect()
+    const parts = [
+      ...bar.querySelectorAll(
+        '[data-payload-live-preview-inspector-preview-tools] [role=group], [data-payload-live-preview-inspector-hint-sentence], [data-payload-live-preview-inspector-hint-icon], .live-preview-toolbar-controls > *',
+      ),
+    ]
+    return {
+      left: box.left,
+      parts: parts
+        .filter((part) => part.getClientRects().length > 0)
+        .map((part) => {
+          const rect = part.getBoundingClientRect()
+          return { name: part.getAttribute('class') ?? part.tagName, left: rect.left, right: rect.right }
+        })
+        .sort((a, b) => a.left - b.left),
+      right: box.right,
+    }
+  })
+
+const expectSideBySide = async (page: Page) => {
+  const { left, parts, right } = await barParts(page)
+  expect(parts[0].left).toBeGreaterThanOrEqual(left)
+  expect(parts[parts.length - 1].right).toBeLessThanOrEqual(right + 0.5)
+  for (let index = 1; index < parts.length; index++) {
+    expect(parts[index].left, `${parts[index].name} starts inside ${parts[index - 1].name}`).toBeGreaterThanOrEqual(
+      parts[index - 1].right - 0.5,
+    )
+  }
+}
+
+test('editor: the bar above a narrow preview folds what matters least, and nothing in it overlaps', async ({
+  page,
+}) => {
+  await page.setViewportSize({ height: 900, width: 2200 })
+  await openEditor(page)
+  await page.click('[data-viewport=desktop]')
+  const sentence = page.locator('[data-payload-live-preview-inspector-hint-sentence]')
+  const size = page.locator('.live-preview-toolbar-controls__device-size')
+  const breakpoint = page.locator('.live-preview-toolbar-controls__breakpoint')
+
+  // With room, all of it.
+  await expect(sentence).toBeVisible()
+  await expect(size).toBeVisible()
+  await expect(breakpoint).toBeVisible()
+  await expectSideBySide(page)
+
+  // The preview as narrow as the divider makes it.
+  const handle = (await page.locator('[data-payload-live-preview-inspector-split]').boundingBox())!
+  await page.mouse.move(handle.x + handle.width / 2, handle.y + handle.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(2190, handle.y + handle.height / 2, { steps: 8 })
+  await page.mouse.up()
+  await expect.poll(async () => (await page.locator('.live-preview-window').boundingBox())!.width).toBeLessThan(400)
+
+  // The sentence became its icon and Payload's sizes went - its breakpoint
+  // menu too where its label is long, as "Benutzerdefiniert" is - and what is
+  // left sits side by side.
+  await expect(sentence).toBeHidden()
+  await expect(page.locator('[data-payload-live-preview-inspector-hint-icon]')).toBeVisible()
+  await expect(size).toBeHidden()
+  await expect(page.locator('[data-viewport=desktop]')).toBeVisible()
+  await expect(page.locator('.live-preview-toolbar-controls__zoom')).toBeVisible()
+  await expectSideBySide(page)
+
+  // Back to the shared default: it all comes back.
+  await page.locator('[data-payload-live-preview-inspector-split]').dblclick()
+  await expect(sentence).toBeVisible()
+  await expect(size).toBeVisible()
+  await expectSideBySide(page)
 })
 
 test('editor: on a narrow screen the preview sits above the form, and a tap shows just that block', async ({
