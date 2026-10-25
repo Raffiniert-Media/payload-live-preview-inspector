@@ -666,6 +666,9 @@ test('the admin hint names the modifier the preview reported', async ({ page }) 
   // Wide enough for the whole sentence; narrower, an icon carries it.
   await page.setViewportSize({ height: 900, width: 2200 })
   await login(page)
+  // Classic: page mode leaves Payload's sizes out of the bar, and at 1280 px
+  // the sentence then fits - what is folded there is the page mode test's.
+  await page.evaluate(() => localStorage.setItem('payload-live-preview-inspector:page-mode', 'false'))
 
   await openLivePreview(page)
 
