@@ -198,6 +198,9 @@ export const editMainWrapperEl = (doc: Document = document): HTMLElement | null 
 export const livePreviewWindowEl = (doc: Document = document): HTMLElement | null =>
   landmark(PAYLOAD_CLASS.livePreviewWindow, doc)
 
+/** The bar with the save buttons. */
+export const docControlsEl = (doc: Document = document): HTMLElement | null => landmark(PAYLOAD_CLASS.docControls, doc)
+
 /** The left part of the bar with the save buttons - the document's status and dates. */
 export const docControlsContentEl = (doc: Document = document): HTMLElement | null =>
   landmark(PAYLOAD_CLASS.docControlsContent, doc)

@@ -1695,6 +1695,14 @@ test('page mode keeps the status and the way to the versions, on a wide screen a
       const versions = page.locator('[data-payload-live-preview-inspector-page-versions]')
       await expect(versions).toBeInViewport()
       await expect(versions).toHaveAttribute('href', /\/admin\/collections\/posts\/[^/]+\/versions$/)
+      // The preview starts under all of the bar, status line included, and ends with the screen.
+      await expect
+        .poll(async () => {
+          const bar = (await page.locator('.doc-controls').boundingBox())!
+          const preview = (await page.locator('.live-preview-window').boundingBox())!
+          return [Math.round(preview.y - (bar.y + bar.height)), Math.round(preview.y + preview.height - viewport.height)]
+        })
+        .toEqual(viewport.width < 500 ? [0, 0] : [expect.any(Number), expect.any(Number)])
     } finally {
       await context.close()
     }

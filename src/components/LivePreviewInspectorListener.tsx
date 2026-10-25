@@ -81,6 +81,7 @@ import {
 import {
   collapsibleOf,
   docControlsContentEl,
+  docControlsEl,
   editMainEl,
   editMainWrapperEl,
   isCollapsedCollapsible,
@@ -115,7 +116,7 @@ import { Contained } from './Contained.js'
 import { Dock, type DockAction, type DockSwitch } from './editor/Dock.js'
 import { useHost, useMaxWidth, useStored, watchDom } from './editor/dom.js'
 import editorClasses from './editor/Editor.module.css'
-import { editorStyles, HOST, PAGE_ATTRIBUTE, PANEL_ATTRIBUTE } from './editor/editorStyles.js'
+import { EDITOR_PROPERTY, editorStyles, HOST, PAGE_ATTRIBUTE, PANEL_ATTRIBUTE } from './editor/editorStyles.js'
 import { BackIcon, FocusIcon, FormIcon, OutlineIcon, PageIcon } from './editor/icons.js'
 import { OutlinePanel } from './editor/OutlinePanel.js'
 import { PageTitle, PageVersions } from './editor/PageTitle.js'
@@ -465,6 +466,36 @@ const Inspector: React.FC<LivePreviewInspectorListenerProps> = ({
     setPanelOpenState(open)
   }, [])
   useEffect(() => () => document.documentElement.removeAttribute(PANEL_ATTRIBUTE), [])
+  // Page mode on a narrow screen: how tall the bar at the top is, for what
+  // sticks under it - see `EDITOR_PROPERTY.topBar`.
+  useEffect(() => {
+    if (!pageMode || !stacked) {
+      return
+    }
+    const root = document.documentElement
+    let last = ''
+    const measure = () => {
+      const bar = docControlsEl()
+      const height = bar ? `${Math.round(bar.getBoundingClientRect().height)}px` : ''
+      if (height && height !== last) {
+        last = height
+        root.style.setProperty(EDITOR_PROPERTY.topBar, height)
+      }
+    }
+    const observer = new ResizeObserver(measure)
+    const stop = watchDom(document.body, () => {
+      const bar = docControlsEl()
+      if (bar) {
+        observer.observe(bar)
+      }
+      measure()
+    })
+    return () => {
+      stop()
+      observer.disconnect()
+      root.style.removeProperty(EDITOR_PROPERTY.topBar)
+    }
+  }, [pageMode, stacked])
   /** Brings the form up if it is a sheet that is down; whether it did. */
   const raisePanel = useCallback((): boolean => {
     if (!pageModeRef.current || !stackedRef.current || document.documentElement.hasAttribute(PANEL_ATTRIBUTE)) {

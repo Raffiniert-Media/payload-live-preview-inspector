@@ -17,11 +17,21 @@ import {
   readStored,
   writeStored,
 } from '../../utilities/layout.js'
-import { livePreviewWindowEl, PAYLOAD_PROPERTY, payloadPropertyPx } from '../../utilities/payloadAdmin.js'
+import { docControlsEl, livePreviewWindowEl, PAYLOAD_PROPERTY, payloadPropertyPx } from '../../utilities/payloadAdmin.js'
 import classes from './Editor.module.css'
-import { EDITOR_PROPERTY, HOST } from './editorStyles.js'
+import { EDITOR_PROPERTY, HOST, PAGE_ATTRIBUTE } from './editorStyles.js'
 
 const SHARE_KEY = 'payload-live-preview-inspector:preview-share'
+
+/**
+ * The bar above the stacked preview. In page mode all of Payload's document
+ * controls - the buttons and the status line above them - measured; else the
+ * buttons' own height, which is all that sticks there.
+ */
+const barHeight = (): number => {
+  const bar = document.documentElement.hasAttribute(PAGE_ATTRIBUTE) ? docControlsEl() : null
+  return bar ? bar.getBoundingClientRect().height : payloadPropertyPx(PAYLOAD_PROPERTY.docControlsHeight, 56)
+}
 const HEIGHT_KEY = 'payload-live-preview-inspector:preview-height'
 
 /** Step for an arrow key, and for one with Shift held. */
@@ -107,7 +117,7 @@ export const SplitHandle: React.FC<Props> = ({ getWrapper, outlineOpen, stacked,
   )
 
   const applyHeight = useCallback((value: number) => {
-    const controls = payloadPropertyPx(PAYLOAD_PROPERTY.docControlsHeight, 56)
+    const controls = barHeight()
     const px = Math.round(clampPreviewHeightShare(value) * (window.innerHeight - controls))
     document.documentElement.style.setProperty(EDITOR_PROPERTY.previewHeight, `${px}px`)
   }, [])
@@ -118,6 +128,11 @@ export const SplitHandle: React.FC<Props> = ({ getWrapper, outlineOpen, stacked,
     apply()
     const wrapper = getWrapperRef.current()
     const observer = new ResizeObserver(apply)
+    // The bar above: in page mode its status line comes and goes with the status.
+    const bar = docControlsEl()
+    if (stacked && bar) {
+      observer.observe(bar)
+    }
     if (wrapper) {
       observer.observe(wrapper)
       for (const child of Array.from(wrapper.children)) {
@@ -160,7 +175,7 @@ export const SplitHandle: React.FC<Props> = ({ getWrapper, outlineOpen, stacked,
   const shareAt = useCallback(
     (event: { clientX: number; clientY: number }): null | number => {
       if (stacked) {
-        const controls = payloadPropertyPx(PAYLOAD_PROPERTY.docControlsHeight, 56)
+        const controls = barHeight()
         return (event.clientY - previewTopRef.current) / (window.innerHeight - controls)
       }
       const space = measure()
@@ -185,7 +200,7 @@ export const SplitHandle: React.FC<Props> = ({ getWrapper, outlineOpen, stacked,
       return
     }
     if (stacked) {
-      const controls = payloadPropertyPx(PAYLOAD_PROPERTY.docControlsHeight, 56)
+      const controls = barHeight()
       const height = Math.round(clampPreviewHeightShare(value) * (window.innerHeight - controls))
       ghost.style.transform = `translateY(${previewTopRef.current + height}px)`
       badge.textContent = `${height} px`

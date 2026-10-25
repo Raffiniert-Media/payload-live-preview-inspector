@@ -27,6 +27,12 @@ export const EDITOR_PROPERTY = {
   previewWidth: '--payload-live-preview-inspector-preview-width',
   /** The preview's height above the form on a narrow screen. */
   previewHeight: '--payload-live-preview-inspector-preview-height',
+  /**
+   * Page mode on a narrow screen: how tall the bar at the top is, measured -
+   * the buttons and the status line above them, which Payload's own height
+   * property does not count.
+   */
+  topBar: '--payload-live-preview-inspector-top-bar',
 } as const
 
 /** `HOST_ATTRIBUTE` values - which of the editor's elements a host carries. */
@@ -77,6 +83,8 @@ const bar = c(PAYLOAD_CLASS.livePreviewToolbar)
 const folded = (part: BarFold) => `${bar}[${FOLDED_ATTRIBUTE}~="${part}"]`
 const controls = `var(${PAYLOAD_PROPERTY.docControlsHeight}, 56px)`
 const page = `html[${PAGE_ATTRIBUTE}]`
+/** Page mode on a narrow screen: the bar at the top, as measured, Payload's buttons' height until then. */
+const topBar = `var(${EDITOR_PROPERTY.topBar}, ${controls})`
 const pagePanel = `html[${PAGE_ATTRIBUTE}][${PANEL_ATTRIBUTE}]`
 const pageNoPanel = `html[${PAGE_ATTRIBUTE}]:not([${PANEL_ATTRIBUTE}])`
 
@@ -152,7 +160,17 @@ ${page} ${c(PAYLOAD_CLASS.livePreviewToolbarBreakpoint)} {
   }
   ${pageNoPanel} ${previewing} ${c(PAYLOAD_CLASS.livePreviewWindow)} {
     box-shadow: none;
-    height: calc(100dvh - ${controls});
+    height: calc(100dvh - ${topBar});
+  }
+  /* Everything that sticks under the bar sticks under all of it. */
+  ${page} ${previewing} ${c(PAYLOAD_CLASS.livePreviewWindow)} {
+    top: ${topBar};
+  }
+  ${page} ${previewing} ${host(HOST.split)} {
+    top: calc(${topBar} + var(${EDITOR_PROPERTY.previewHeight}, 42vh));
+  }
+  ${page} ${previewing} ${host(HOST.pathBar)} {
+    top: calc(${topBar} + var(${EDITOR_PROPERTY.previewHeight}, 42vh) + 18px);
   }
   /* The sheet's top edge. */
   ${pagePanel} ${host(HOST.split)} [data-payload-live-preview-inspector-split] {
