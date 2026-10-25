@@ -28,7 +28,7 @@ import { createCamera } from '../utilities/camera.js'
 import { caretHintFromSelection, parseCaretHint } from '../utilities/caret.js'
 import { drawCurtain, openingAreaOf, tabContentOf, visibleRowsAfter } from '../utilities/curtain.js'
 import { previewStringsOf, stringsFor } from '../utilities/i18n.js'
-import { isolate } from '../utilities/isolate.js'
+import { HOST_ATTRIBUTE, isolate } from '../utilities/isolate.js'
 import { DEFAULT_VIEWPORTS, isBoolean } from '../utilities/layout.js'
 import {
   CLICK_MESSAGE_TYPE,
@@ -75,6 +75,7 @@ import {
   editMainEl,
   editMainWrapperEl,
   isCollapsedCollapsible,
+  livePreviewToolbarEl,
   livePreviewWindowEl,
   PAYLOAD_CLASS,
   PAYLOAD_MID_BREAK_PX,
@@ -103,12 +104,11 @@ import {
 import { useHost, useMaxWidth, useStored, watchDom } from './editor/dom.js'
 import editorClasses from './editor/Editor.module.css'
 import { editorStyles, HOST } from './editor/editorStyles.js'
-import { FocusIcon, InfoIcon, OutlineIcon } from './editor/icons.js'
 import { OutlinePanel } from './editor/OutlinePanel.js'
 import { PathBar } from './editor/PathBar.js'
+import { PreviewTools } from './editor/PreviewTools.js'
 import { duplicateRow, insertRowBelow, isRowAction, moveRow, removeRow, splitRowPath } from './editor/rowActions.js'
 import { SplitHandle } from './editor/SplitHandle.js'
-import { ViewportControls } from './editor/ViewportControls.js'
 import classes from './LivePreviewInspectorListener.module.css'
 
 export type LivePreviewInspectorListenerProps = {
@@ -229,9 +229,16 @@ type RevealOptions = {
   focus?: boolean
   /** How the reveal is going - the preview's click mark listens. */
   onStatus?: (status: RevealStatus, label?: string) => void
+  /** The veil over the form this reveal lifts once the field is in place - see `veilRef`. */
+  veil?: number
 }
 
 type Reveal = (path: string, options?: RevealOptions) => void
+
+/** Longest a veil stays down, whatever happens to the reveal under it. */
+const VEIL_MAX_MS = 4_000
+/** How long the veil takes to come down - `drawCurtain`'s fade, and a frame. */
+const VEIL_FADE_MS = 140
 
 /** Where a selection came from - which decides what else it moves. */
 type SelectionSource = 'form' | 'outline' | 'path' | 'preview' | 'toolbar'
@@ -371,6 +378,57 @@ const Inspector: React.FC<LivePreviewInspectorListenerProps> = ({
   const engineRef = useRef({ suppressFocusEcho: false })
   const revealRef = useRef<Reveal>(() => {})
 
+  /*
+   * The veil: the form faded out while a reveal opens rows, switches tabs and
+   * jumps, and faded in once the field is in place.
+   *
+   * Without it a jump to a field closed three levels down is seen in stages -
+   * a header lights up, a row slides open empty, its fields pop in, the page
+   * leaps, the field flashes - which reads as lag even where it is quick. With
+   * it, it is one change: the form goes, and comes back at the field. Only
+   * where the page jumps anyway (`scrollBehavior: 'instant'`, the theme's
+   * default): an animated glide is there to show the way, and hiding it would
+   * hide the point. And only when something moves - a field in plain view is
+   * flashed where it is.
+   *
+   * One veil at a time, owned by the newest reveal: a second click while the
+   * first is under way takes it over rather than lifting it half-way.
+   */
+  const veilRef = useRef<{ curtain: Curtain | null; owner: number; safety?: ReturnType<typeof setTimeout> }>({
+    curtain: null,
+    owner: 0,
+  })
+  const unveil = useCallback((owner?: number) => {
+    const state = veilRef.current
+    if (owner === undefined || owner !== state.owner || !state.curtain) {
+      return
+    }
+    clearTimeout(state.safety)
+    state.curtain.lift()
+    state.curtain = null
+  }, [])
+  const veilForm = useCallback((): number => {
+    const state = veilRef.current
+    const owner = state.owner + 1
+    state.owner = owner
+    if (!state.curtain) {
+      const main = editMainEl()
+      const parts = main
+        ? Array.from(main.children).filter(
+            (child): child is HTMLElement => child instanceof HTMLElement && !child.hasAttribute(HOST_ATTRIBUTE),
+          )
+        : []
+      const curtains = parts.map((part) => drawCurtain(part, { fade: true }))
+      state.curtain = { lift: () => curtains.forEach((curtain) => curtain.lift()) }
+    }
+    clearTimeout(state.safety)
+    state.safety = setTimeout(() => unveil(owner), VEIL_MAX_MS)
+    return owner
+  }, [unveil])
+  const unveilRef = useRef(unveil)
+  unveilRef.current = unveil
+  useEffect(() => () => clearTimeout(veilRef.current.safety), [])
+
   /* -------------------------------------------------------- reveal engine */
 
   useEffect(() => {
@@ -395,8 +453,19 @@ const Inspector: React.FC<LivePreviewInspectorListenerProps> = ({
       noticeTimer = setTimeout(() => setNotFoundNotice(false), NOT_FOUND_NOTICE_MS)
     }
 
-    revealRef.current = (path, { caret, focus = true, onStatus } = {}) => {
+    revealRef.current = (path, { caret, focus = true, onStatus, veil } = {}) => {
       const sendStatus = (status: RevealStatus, label?: string) => onStatus?.(status, label)
+      // Under the veil nothing is seen until the end: no route to light up, no
+      // area to fade in on its own.
+      const veiled = veil !== undefined
+      // The page may only move once the form is out of sight: a jump during
+      // the fade is a jump the editor sees.
+      const veilDownAt = veiled ? performance.now() + VEIL_FADE_MS : 0
+      const glow = (el: Element | null | undefined) => {
+        if (!veiled) {
+          pulse(el)
+        }
+      }
       const formState = getFieldsRef.current()
       const resolvedPath = resolveRowIDs(path, formState)
       const schema = schemaRef.current
@@ -415,6 +484,7 @@ const Inspector: React.FC<LivePreviewInspectorListenerProps> = ({
           // eslint-disable-next-line no-console -- intentional dev-only diagnostic
           console.warn(`[payload-live-preview-inspector] Could not resolve a row id in path "${path}"`)
         }
+        unveilRef.current(veil)
         sendStatus('not-found')
         showNotFound()
         return
@@ -494,6 +564,11 @@ const Inspector: React.FC<LivePreviewInspectorListenerProps> = ({
       // Always lifted in the end - an aborted or failed reveal must not leave
       // anything invisible.
       const curtains: Curtain[] = []
+      const hideWhileRendering = (el: HTMLElement | null | undefined, options?: { fade?: boolean }) => {
+        if (!veiled) {
+          curtains.push(drawCurtain(el, options))
+        }
+      }
       const liftCurtains = () => {
         for (const curtain of curtains.splice(0)) {
           curtain.lift()
@@ -550,7 +625,8 @@ const Inspector: React.FC<LivePreviewInspectorListenerProps> = ({
             return Boolean(tabsEl && tabButtonsOf(tabsEl)[step.index]?.classList.contains(TAB_BUTTON_ACTIVE_CLASS))
           })
         const target = deepest()
-        if (routeInView && target && !(checkExact() && isInRestingView(target))) {
+        // Under a veil there is no way to show, only an end to arrive at.
+        if (!veiled && routeInView && target && !(checkExact() && isInRestingView(target))) {
           camera.aim(deepest)
         }
 
@@ -566,8 +642,8 @@ const Inspector: React.FC<LivePreviewInspectorListenerProps> = ({
           // tab switches once the page is still.
           const bringIntoView = async (control: HTMLElement | null | undefined, { atRest = false } = {}) => {
             // A control focus mode hides has no place on the page to travel
-            // to - it is operated where it is.
-            if (control && control.getClientRects().length === 0) {
+            // to - it is operated where it is. Nor has one under the veil.
+            if (veiled || (control && control.getClientRects().length === 0)) {
               return
             }
             if (control && !isInOpeningView(control)) {
@@ -622,9 +698,9 @@ const Inspector: React.FC<LivePreviewInspectorListenerProps> = ({
               // pushed down in bursts as it fills - and come back where they
               // end up.
               const rowEl = document.getElementById(rowIDFromPath(`${step.path}.${step.index}`) ?? '')
-              curtains.push(drawCurtain(openingAreaOf(collapsibleOf(rowEl))))
-              for (const below of visibleRowsAfter(rowEl)) {
-                curtains.push(drawCurtain(below, { fade: true }))
+              hideWhileRendering(openingAreaOf(collapsibleOf(rowEl)))
+              for (const below of veiled ? [] : visibleRowsAfter(rowEl)) {
+                hideWhileRendering(below, { fade: true })
               }
               setRowsCollapsed(rows, false)
               rowsExpanded = true
@@ -639,7 +715,7 @@ const Inspector: React.FC<LivePreviewInspectorListenerProps> = ({
                 return 'not-found'
               }
               for (const row of rows) {
-                pulse(rowHeaderOf(row.path, row.index))
+                glow(rowHeaderOf(row.path, row.index))
               }
               continue
             }
@@ -665,8 +741,8 @@ const Inspector: React.FC<LivePreviewInspectorListenerProps> = ({
                 if (signal.aborted) {
                   return 'not-found'
                 }
-                pulse(toggleWrap)
-                curtains.push(drawCurtain(openingAreaOf(collapsible)))
+                glow(toggleWrap)
+                hideWhileRendering(openingAreaOf(collapsible))
                 toggleButtonOf(collapsible)?.click()
                 clicked = true
               }
@@ -692,8 +768,8 @@ const Inspector: React.FC<LivePreviewInspectorListenerProps> = ({
               if (signal.aborted) {
                 return 'not-found'
               }
-              pulse(button)
-              curtains.push(drawCurtain(tabContentOf(tabsEl)))
+              glow(button)
+              hideWhileRendering(tabContentOf(tabsEl))
               button.click()
               clicked = true
             }
@@ -775,6 +851,16 @@ const Inspector: React.FC<LivePreviewInspectorListenerProps> = ({
             console.warn(`[payload-live-preview-inspector] Could not resolve path "${resolvedPath}" to a field`)
           }
           return 'not-found'
+        }
+
+        if (veiled) {
+          const wait = veilDownAt - performance.now()
+          if (wait > 0) {
+            await waitForElement(() => null, wait, { signal })
+            if (signal.aborted) {
+              return 'not-found'
+            }
+          }
         }
 
         // Phase 3: scroll and settle. Payload defers rendering fields that
@@ -898,7 +984,9 @@ const Inspector: React.FC<LivePreviewInspectorListenerProps> = ({
         }
 
         // Last, once nothing moves any more: a field that lights up while the
-        // page still slides under it reads as restless, not as "here".
+        // page still slides under it reads as restless, not as "here". The
+        // form comes back at the same moment.
+        unveilRef.current(veil)
         sharedFlashElement(el, { className: classes.flash, color: flashColor, durationMs: flashDurationMs })
         timer.phase('focus')
 
@@ -907,6 +995,8 @@ const Inspector: React.FC<LivePreviewInspectorListenerProps> = ({
 
       void revealField().then((outcome) => {
         liftCurtains()
+        // Lifted by now unless the reveal failed or a newer one took it over.
+        unveilRef.current(veil)
         timer.end(signal.aborted ? 'aborted' : outcome)
         // Rows deeper inside mount only after the ones around them rendered -
         // one more look once all of it had the time to.
@@ -973,6 +1063,41 @@ const Inspector: React.FC<LivePreviewInspectorListenerProps> = ({
     isolate(root, el, chain[0] ? rowEl(chain[0].rowIDPath) : null)
   }, [])
 
+  const scrollBehaviorRef = useRef(scrollBehavior)
+  scrollBehaviorRef.current = scrollBehavior
+
+  /**
+   * Veils the form for a reveal of `path` that is going to change what it
+   * shows - focus mode moving to another row, or a field that is not in plain
+   * view - and returns the veil's owner, for the reveal to lift; `undefined`
+   * where nothing will visibly move, or where the page glides instead of
+   * jumping (see `veilRef`). A veil already down is always taken over.
+   */
+  const beginTravel = useCallback(
+    (path: string, isolateTo: null | string): number | undefined => {
+      if (veilRef.current.curtain) {
+        return veilForm()
+      }
+      if (scrollBehaviorRef.current !== 'instant') {
+        return undefined
+      }
+      if (focusModeRef.current && isolateTo !== isolationRef.current) {
+        return veilForm()
+      }
+      const formState = getFieldsRef.current()
+      const resolved = resolveRowIDs(path, formState)
+      if (!resolved) {
+        return undefined
+      }
+      const fieldPath = fieldPathFromFormState(resolved, formState)
+      const el = resolveExactFieldElement(resolved) ?? (fieldPath ? resolveExactFieldElement(fieldPath) : null)
+      return el && el.getClientRects().length > 0 && isInRestingView(el) ? undefined : veilForm()
+    },
+    [veilForm],
+  )
+  const beginTravelRef = useRef(beginTravel)
+  beginTravelRef.current = beginTravel
+
   /**
    * The editor is at `rowIDPath` now. Where it came from decides what else
    * follows: a choice in the preview, the outline or the path bar narrows
@@ -982,8 +1107,11 @@ const Inspector: React.FC<LivePreviewInspectorListenerProps> = ({
    */
   const select = useCallback(
     (rowIDPath: null | string, from: SelectionSource, { focusField = false, reveal = false } = {}) => {
+      const narrows = focusModeRef.current && from !== 'form'
+      const veil =
+        reveal && rowIDPath ? beginTravel(rowIDPath, narrows ? rowIDPath : isolationRef.current) : undefined
       setSelection(rowIDPath)
-      if (focusModeRef.current && from !== 'form') {
+      if (narrows) {
         setFocusRoot(rowIDPath)
         // At once, before the reveal below starts: it opens the way to the
         // row, and what it opens should already be all there is to see.
@@ -991,7 +1119,7 @@ const Inspector: React.FC<LivePreviewInspectorListenerProps> = ({
         applyIsolation()
       }
       if (reveal && rowIDPath) {
-        revealRef.current(rowIDPath, { focus: focusField })
+        revealRef.current(rowIDPath, { focus: focusField, veil })
       }
       if (features.blockToolbar) {
         postToPreview({ type: SELECT_MESSAGE_TYPE, path: rowIDPath })
@@ -1001,7 +1129,7 @@ const Inspector: React.FC<LivePreviewInspectorListenerProps> = ({
         postToPreview({ type: FOCUS_MESSAGE_TYPE, path: rowIDPath })
       }
     },
-    [applyIsolation, features.blockToolbar, postToPreview],
+    [applyIsolation, beginTravel, features.blockToolbar, postToPreview],
   )
   const selectRef = useRef(select)
   selectRef.current = select
@@ -1153,7 +1281,7 @@ const Inspector: React.FC<LivePreviewInspectorListenerProps> = ({
       }
       await nextFrames(3)
     }
-    revealRef.current(rowIDPath, { focus: true })
+    revealRef.current(rowIDPath, { focus: true, veil: beginTravelRef.current(rowIDPath, isolationRef.current) })
   }, [])
 
   const runRowAction = useCallback(
@@ -1329,11 +1457,18 @@ const Inspector: React.FC<LivePreviewInspectorListenerProps> = ({
       const formState = getFieldsRef.current()
       const resolvedPath = resolveRowIDs(data.path, formState)
       const rowPath = resolvedPath ? rowPathOf(resolvedPath, formState) : null
-      if (rowPath) {
-        selectRef.current(toRowIDPath(rowPath, formState), 'preview')
+      const rowIDPath = rowPath ? toRowIDPath(rowPath, formState) : null
+      // Down before focus mode moves: what it hides and shows is part of the
+      // change the editor sees only the end of.
+      const veil = beginTravelRef.current(
+        data.path,
+        focusModeRef.current && rowIDPath ? rowIDPath : isolationRef.current,
+      )
+      if (rowIDPath) {
+        selectRef.current(rowIDPath, 'preview')
       }
 
-      revealRef.current(data.path, { caret: parseCaretHint(data.caret), onStatus })
+      revealRef.current(data.path, { caret: parseCaretHint(data.caret), onStatus, veil })
     }
 
     window.addEventListener('message', handleMessage)
@@ -1466,10 +1601,20 @@ const Inspector: React.FC<LivePreviewInspectorListenerProps> = ({
 
   const toggleFocusMode = () => {
     const next = !focusMode
+    const root = next ? selection : null
+    // Everything but one block goes, or everything comes back: always a change
+    // worth a veil where the page jumps.
+    const veil =
+      selection && (scrollBehavior === 'instant' || veilRef.current.curtain) ? veilForm() : undefined
     setFocusModeChoice(next)
-    setFocusRoot(next ? selection : null)
-    if (next && selection) {
-      revealRef.current(selection, { focus: false })
+    setFocusRoot(root)
+    // Applied now, under the veil, rather than on the next render.
+    focusModeRef.current = next
+    isolationRef.current = root
+    applyIsolation()
+    if (selection) {
+      // Kept in view either way: narrowed to it, or with everything back around it.
+      revealRef.current(selection, { focus: false, veil })
     }
   }
 
@@ -1502,7 +1647,8 @@ const Inspector: React.FC<LivePreviewInspectorListenerProps> = ({
     () => chainOf(pathTarget ? outline?.byRowIDPath.get(pathTarget) : null),
     [outline, pathTarget],
   )
-  const showPathBar = features.pathBar && (chain.length > 0 || Boolean(focusMode && focusRoot))
+  // Always there when anything in it is: the switches live in it.
+  const showPathBar = features.pathBar || features.outline || features.focusMode
   const pathHost = useHost(
     HOST.pathBar,
     () => {
@@ -1511,6 +1657,26 @@ const Inspector: React.FC<LivePreviewInspectorListenerProps> = ({
     },
     showPathBar,
   )
+
+  const previewToolsHost = useHost(
+    HOST.previewTools,
+    () => {
+      const toolbar = livePreviewToolbarEl()
+      return toolbar ? { parent: toolbar } : null
+    },
+    isLivePreviewing && previewWindowType === 'iframe',
+  )
+
+  /** "All fields": focus mode shows everything again, and the block the editor is at stays in view. */
+  const showAllFields = () => {
+    const veil = selection && (scrollBehavior === 'instant' || veilRef.current.curtain) ? veilForm() : undefined
+    setFocusRoot(null)
+    isolationRef.current = null
+    applyIsolation()
+    if (selection) {
+      revealRef.current(selection, { focus: false, veil })
+    }
+  }
 
   /* -------------------------------------------------- adding a block below */
 
@@ -1590,76 +1756,28 @@ const Inspector: React.FC<LivePreviewInspectorListenerProps> = ({
   )
 
   const modifierLabel = MODIFIER_LABELS[previewSettings?.interactionModifier ?? '']
-  const hint = !isLivePreviewing ? null : notFoundNotice ? (
-    <div className={`${editorClasses.hint} ${editorClasses.hintActive}`} role="status">
-      {strings.notFound}
-    </div>
-  ) : revealLabel ? (
-    <div className={`${editorClasses.hint} ${editorClasses.hintActive}`} role="status">
-      → {revealLabel}
-    </div>
-  ) : (
-    <>
-      <div className={editorClasses.hint}>
-        {strings.hint}
-        {modifierLabel ? strings.hintModifier(modifierLabel) : ''}
-      </div>
-      {/*
-       * Where the sentence does not fit, it is still there to find: the only
-       * place an editor learns that the modifier gives them the page back.
-       */}
-      <span
-        aria-label={`${strings.hint}${modifierLabel ? strings.hintModifier(modifierLabel) : ''}`}
-        className={editorClasses.hintIcon}
-        data-payload-live-preview-inspector-hint-icon=""
-        role="img"
-        title={`${strings.hint}${modifierLabel ? strings.hintModifier(modifierLabel) : ''}`}
-      >
-        <InfoIcon />
-      </span>
-    </>
-  )
+  const hintSentence = `${strings.hint}${modifierLabel ? strings.hintModifier(modifierLabel) : ''}`
+  const status = notFoundNotice
+    ? { text: strings.notFound, tone: 'notice' as const }
+    : revealLabel
+      ? { text: `→ ${revealLabel}`, tone: 'active' as const }
+      : undefined
 
   return (
-    <div className={editorClasses.toolbar} data-payload-live-preview-inspector-toolbar="">
+    <div className={editorClasses.root} data-payload-live-preview-inspector-toolbar="">
       <style>{styles}</style>
       <FormWatcher onChange={onFormChange} />
-      {hint}
-      {(features.outline || features.focusMode) && (
-        <div className={editorClasses.group}>
-          {features.outline && (
-            <button
-              aria-label={outlineOpen ? strings.outlineHide : strings.outlineShow}
-              aria-pressed={outlineOpen}
-              className={editorClasses.button}
-              data-payload-live-preview-inspector-outline-toggle=""
-              onClick={toggleOutline}
-              title={outlineOpen ? strings.outlineHide : strings.outlineShow}
-              type="button"
-            >
-              <OutlineIcon />
-              <span className={editorClasses.buttonLabel}>{strings.outline}</span>
-            </button>
-          )}
-          {features.focusMode && (
-            <button
-              aria-label={focusMode ? strings.focusModeOff : strings.focusModeOn}
-              aria-pressed={focusMode}
-              className={`${editorClasses.button} ${editorClasses.toolbarFocus}`}
-              data-payload-live-preview-inspector-focus-toggle=""
-              onClick={toggleFocusMode}
-              title={focusMode ? strings.focusModeOff : strings.focusModeOn}
-              type="button"
-            >
-              <FocusIcon />
-              <span className={editorClasses.buttonLabel}>{strings.focusMode}</span>
-            </button>
-          )}
-        </div>
-      )}
-      {features.viewports.length > 0 && isLivePreviewing && previewWindowType === 'iframe' && !stacked && (
-        <ViewportControls language={language} strings={strings} viewports={features.viewports} />
-      )}
+      {previewToolsHost &&
+        createPortal(
+          <PreviewTools
+            hint={hintSentence}
+            language={language}
+            status={status}
+            strings={strings}
+            viewports={stacked ? [] : features.viewports}
+          />,
+          previewToolsHost,
+        )}
       {splitHost &&
         createPortal(
           <SplitHandle
@@ -1700,12 +1818,17 @@ const Inspector: React.FC<LivePreviewInspectorListenerProps> = ({
             focusRootPath={focusMode ? focusRoot : null}
             onSelect={(node) => {
               if (!node) {
-                setFocusRoot(null)
+                if (focusMode && focusRoot) {
+                  showAllFields()
+                }
                 return
               }
               select(node.rowIDPath, 'path', { reveal: true })
             }}
             onToggleFocus={features.focusMode ? toggleFocusMode : undefined}
+            onToggleOutline={features.outline ? toggleOutline : undefined}
+            outlineOpen={outlineOpen}
+            showPath={features.pathBar}
             strings={strings}
           />,
           pathHost,

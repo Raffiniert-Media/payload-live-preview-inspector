@@ -1,4 +1,10 @@
-import { AROUND_ATTRIBUTE, HIDDEN_ATTRIBUTE, HOST_ATTRIBUTE } from '../../utilities/isolate.js'
+import {
+  ABOVE_ATTRIBUTE,
+  AROUND_ATTRIBUTE,
+  FOCUSING_ATTRIBUTE,
+  HIDDEN_ATTRIBUTE,
+  HOST_ATTRIBUTE,
+} from '../../utilities/isolate.js'
 import { PAYLOAD_CLASS, PAYLOAD_MID_BREAK_PX, PAYLOAD_PROPERTY } from '../../utilities/payloadAdmin.js'
 
 /**
@@ -26,7 +32,10 @@ export const EDITOR_PROPERTY = {
 /** `HOST_ATTRIBUTE` values - which of the editor's elements a host carries. */
 export const HOST = {
   outline: 'outline',
+  /** The editor's bar above the form: outline, focus mode, the path. */
   pathBar: 'path-bar',
+  /** The editor's part of Payload's bar above the preview: screen widths, the hint. */
+  previewTools: 'preview-tools',
   split: 'split',
 } as const
 
@@ -39,15 +48,32 @@ const controls = `var(${PAYLOAD_PROPERTY.docControlsHeight}, 56px)`
 export const editorStyles = ({ mobile, split }: { mobile: boolean; split: boolean }): string => `
 [${HIDDEN_ATTRIBUTE}] { display: none !important; }
 
-/* Focus mode: the rows around the shown one, flat - no frame, no indent. */
+/*
+ * Focus mode: the rows around the shown one, flat - no frame, no indent, no
+ * space above or below; and above them only the vertical space goes, the page
+ * keeps its margin. What is left is the block, right under the editor's bar.
+ */
 [${AROUND_ATTRIBUTE}] {
   background: none !important;
   border-color: transparent !important;
   box-shadow: none !important;
-  margin-left: 0 !important;
-  margin-right: 0 !important;
-  padding-left: 0 !important;
-  padding-right: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+}
+
+[${ABOVE_ATTRIBUTE}] {
+  margin-bottom: 0 !important;
+  margin-top: 0 !important;
+  padding-bottom: 0 !important;
+  padding-top: 0 !important;
+}
+
+[${FOCUSING_ATTRIBUTE}] {
+  padding-bottom: calc(var(--base) * 2);
+}
+
+[${FOCUSING_ATTRIBUTE}] > ${host(HOST.pathBar)} {
+  margin-bottom: var(--base);
 }
 
 ${host(HOST.outline)} {
@@ -62,6 +88,24 @@ ${host(HOST.pathBar)} {
   position: sticky;
   top: ${controls};
   z-index: 3;
+}
+
+/*
+ * In Payload's preview bar, on the left, taking the room Payload's centred
+ * controls leave - which pushes those to the right. A container, so the hint
+ * can tell whether its sentence fits.
+ */
+${host(HOST.previewTools)} {
+  align-self: stretch;
+  container-type: inline-size;
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* Payload's controls, pushed to the right by ours, off the edge. */
+${c(PAYLOAD_CLASS.livePreviewToolbar)}:has(> ${host(HOST.previewTools)}) {
+  padding-right: calc(var(--base) / 2);
 }
 
 ${

@@ -26,6 +26,16 @@ export const HIDDEN_ATTRIBUTE = 'data-payload-live-preview-inspector-hidden'
  */
 export const AROUND_ATTRIBUTE = 'data-payload-live-preview-inspector-around'
 
+/**
+ * Set on what surrounds the outermost row on the way up to the form's column -
+ * the tab, the field list, the page gutter. Their vertical space goes (a 40 px
+ * margin, a 30 px padding), their sides stay: that is the page's own margin.
+ */
+export const ABOVE_ATTRIBUTE = 'data-payload-live-preview-inspector-above'
+
+/** Set on the form's column while focus mode shows a part of it. */
+export const FOCUSING_ATTRIBUTE = 'data-payload-live-preview-inspector-focusing'
+
 /** Set on the editor's own elements inside the form, which focus mode must never hide. */
 export const HOST_ATTRIBUTE = 'data-payload-live-preview-inspector-host'
 
@@ -93,6 +103,23 @@ const mark = (root: Element, attribute: string, want: Set<Element>) => {
 export const isolate = (root: Element, target: Element | null, flattenFrom?: Element | null): boolean => {
   const hide = target ? siblingsToHide(root, target) : new Set<Element>()
   mark(root, HIDDEN_ATTRIBUTE, hide)
-  mark(root, AROUND_ATTRIBUTE, target ? elementsAround(target, flattenFrom) : new Set())
+  const around = target ? elementsAround(target, flattenFrom) : new Set<Element>()
+  mark(root, AROUND_ATTRIBUTE, around)
+  // From the outermost row - or the target itself - up to the column.
+  const above = new Set<Element>()
+  if (target && hide.size > 0) {
+    const outermost = flattenFrom && around.has(flattenFrom) ? flattenFrom : target
+    for (let node = outermost.parentElement; node && node !== root; node = node.parentElement) {
+      above.add(node)
+    }
+  }
+  mark(root, ABOVE_ATTRIBUTE, above)
+  if (hide.size > 0) {
+    if (!root.hasAttribute(FOCUSING_ATTRIBUTE)) {
+      root.setAttribute(FOCUSING_ATTRIBUTE, '')
+    }
+  } else if (root.hasAttribute(FOCUSING_ATTRIBUTE)) {
+    root.removeAttribute(FOCUSING_ATTRIBUTE)
+  }
   return hide.size > 0
 }

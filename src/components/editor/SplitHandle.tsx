@@ -17,7 +17,7 @@ import {
   readStored,
   writeStored,
 } from '../../utilities/layout.js'
-import { PAYLOAD_PROPERTY, payloadPropertyPx } from '../../utilities/payloadAdmin.js'
+import { livePreviewWindowEl, PAYLOAD_PROPERTY, payloadPropertyPx } from '../../utilities/payloadAdmin.js'
 import classes from './Editor.module.css'
 import { EDITOR_PROPERTY, HOST } from './editorStyles.js'
 
@@ -61,6 +61,15 @@ export const SplitHandle: React.FC<Props> = ({ getWrapper, outlineOpen, stacked,
     readStored(HEIGHT_KEY, isNumber, DEFAULT_PREVIEW_HEIGHT_SHARE),
   )
   const [dragging, setDragging] = useState(false)
+  const ghostRef = useRef<HTMLDivElement>(null)
+  const badgeRef = useRef<HTMLSpanElement>(null)
+  /**
+   * Where the stacked preview starts on screen, taken when a drag starts. Not
+   * the document controls' height: that is only where it sticks once the
+   * page is scrolled - at the top of the page Payload's header is above it,
+   * and a height measured from the controls came out 200 px too tall.
+   */
+  const previewTopRef = useRef(0)
   const shareRef = useRef(share)
   shareRef.current = share
   const getWrapperRef = useRef(getWrapper)
@@ -152,13 +161,44 @@ export const SplitHandle: React.FC<Props> = ({ getWrapper, outlineOpen, stacked,
     (event: { clientX: number; clientY: number }): null | number => {
       if (stacked) {
         const controls = payloadPropertyPx(PAYLOAD_PROPERTY.docControlsHeight, 56)
-        return (event.clientY - controls) / (window.innerHeight - controls)
+        return (event.clientY - previewTopRef.current) / (window.innerHeight - controls)
       }
       const space = measure()
       return space ? previewShareAt(event.clientX, space.left, space.width) : null
     },
     [measure, stacked],
   )
+
+  /**
+   * Where the divider would land for `value`, drawn as a line over everything.
+   *
+   * Dragging used to resize the panes on every frame - and every frame then
+   * laid out the whole site in the preview and the whole form beside it, which
+   * on a real page is far more than a frame's worth of work: the divider
+   * trailed the pointer. The line is one transform; the panes are resized
+   * once, when it is let go.
+   */
+  const placeGhost = (value: number) => {
+    const ghost = ghostRef.current
+    const badge = badgeRef.current
+    if (!ghost || !badge) {
+      return
+    }
+    if (stacked) {
+      const controls = payloadPropertyPx(PAYLOAD_PROPERTY.docControlsHeight, 56)
+      const height = Math.round(clampPreviewHeightShare(value) * (window.innerHeight - controls))
+      ghost.style.transform = `translateY(${previewTopRef.current + height}px)`
+      badge.textContent = `${height} px`
+      return
+    }
+    const space = measure()
+    if (!space) {
+      return
+    }
+    const width = Math.round(clampPreviewShare(value, space.width, MIN_PANE_PX) * space.width)
+    ghost.style.transform = `translateX(${space.left + space.width - width}px)`
+    badge.textContent = `${space.width - width} px | ${width} px`
+  }
 
   const onPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) {
@@ -167,9 +207,13 @@ export const SplitHandle: React.FC<Props> = ({ getWrapper, outlineOpen, stacked,
     event.preventDefault()
     const handle = event.currentTarget
     handle.setPointerCapture(event.pointerId)
+    previewTopRef.current =
+      livePreviewWindowEl()?.getBoundingClientRect().top ?? payloadPropertyPx(PAYLOAD_PROPERTY.docControlsHeight, 56)
     setDragging(true)
     let latest: null | number = null
     let frame = 0
+    // The line starts where the divider is, once it has rendered.
+    requestAnimationFrame(() => placeGhost(stacked ? heightShare : shareRef.current))
 
     const move = (moveEvent: PointerEvent) => {
       latest = shareAt(moveEvent)
@@ -177,11 +221,7 @@ export const SplitHandle: React.FC<Props> = ({ getWrapper, outlineOpen, stacked,
         frame = requestAnimationFrame(() => {
           frame = 0
           if (latest !== null) {
-            if (stacked) {
-              applyHeight(latest)
-            } else {
-              applyWidth(latest)
-            }
+            placeGhost(latest)
           }
         })
       }
@@ -262,8 +302,12 @@ export const SplitHandle: React.FC<Props> = ({ getWrapper, outlineOpen, stacked,
       {dragging &&
         createPortal(
           // Over the preview's iframe, which would otherwise take the pointer
-          // the moment it crosses into it.
-          <div className={[classes.dragShield, stacked ? classes.dragShieldVertical : ''].join(' ')} />,
+          // the moment it crosses into it - and the ground the line is drawn on.
+          <div className={[classes.dragShield, stacked ? classes.dragShieldVertical : ''].join(' ')}>
+            <div className={stacked ? classes.ghostRow : classes.ghostColumn} ref={ghostRef}>
+              <span className={classes.ghostBadge} ref={badgeRef} />
+            </div>
+          </div>,
           document.body,
         )}
     </>

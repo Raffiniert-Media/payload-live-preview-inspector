@@ -1275,6 +1275,10 @@ test('editor: the divider sets how the screen is shared, and the choice outlasts
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
   await page.mouse.down()
   await page.mouse.move(box.x - 200, box.y + box.height / 2, { steps: 8 })
+  // While dragging only a line moves: laying out the site and the form on
+  // every frame is what made the divider trail the pointer.
+  await expect(page.locator('[class*=ghostBadge]')).toHaveText(/\d+ px \| \d+ px/)
+  expect((await preview.boundingBox())!.width).toBe(before)
   await page.mouse.up()
   await expect.poll(async () => (await preview.boundingBox())!.width).toBeGreaterThan(before + 150)
   const dragged = (await preview.boundingBox())!.width
@@ -1314,6 +1318,19 @@ test('editor: focus mode shows only the block clicked in the preview, and “All
   await expect(page.locator('#sections-row-1')).toBeHidden()
   await expect(page.locator('#field-title')).toBeHidden()
   await expect(page.locator(PATH_BAR)).toContainText('Feature 1')
+
+  // A card inside a section: right under the bar - the frames, paddings and
+  // margins of the section around it are gone too (measured: 21 px, and 71
+  // without, with 40 px of width lost to the indent).
+  await frame.locator('h3', { hasText: 'Card 2 of section 3' }).first().click()
+  await expect(page.locator(PATH_BAR)).toContainText('Card 2')
+  await expect
+    .poll(async () => {
+      const bar = (await page.locator(PATH_BAR).boundingBox())!
+      const row = (await page.locator('#sections-2-cards-row-1').boundingBox())!
+      return row.y - (bar.y + bar.height)
+    })
+    .toBeLessThan(40)
 
   await page.locator(`${PATH_BAR} button`, { hasText: /^All fields$/ }).click()
   await expect(page.locator(HIDDEN)).toHaveCount(0)
@@ -1409,8 +1426,21 @@ test('editor: on a narrow screen the preview sits above the form, and a tap show
     expect(preview.width).toBe(390)
     expect(preview.y + preview.height).toBeLessThanOrEqual(form.y + 1)
     await expect(page.locator('[data-payload-live-preview-inspector-split]')).toBeVisible()
-    // Payload's own buttons still fit beside the editor's.
+    // Payload's own buttons have the document controls to themselves.
     await expect(page.locator('#live-preview-toggler')).toBeInViewport()
+
+    // The bar under the preview moves by as much as it is dragged - measured
+    // from where the preview starts, which is not where it sticks once the
+    // page scrolls (it came out 200 px too tall).
+    const bar = (await page.locator('[data-payload-live-preview-inspector-split]').boundingBox())!
+    await page.mouse.move(bar.x + bar.width / 2, bar.y + bar.height / 2)
+    await page.mouse.down()
+    await page.mouse.move(bar.x + bar.width / 2, bar.y + bar.height / 2 + 100, { steps: 5 })
+    await page.mouse.up()
+    await expect
+      .poll(async () => (await page.locator('.live-preview-window').boundingBox())!.height - preview.height)
+      .toBeGreaterThan(85)
+    expect((await page.locator('.live-preview-window').boundingBox())!.height - preview.height).toBeLessThan(115)
 
     await firstSection(frame).tap()
     // Focus mode is on by default here.

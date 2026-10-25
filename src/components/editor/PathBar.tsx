@@ -6,7 +6,7 @@ import type { EditorStrings } from '../../utilities/i18n.js'
 import type { OutlineNode } from '../../utilities/structure.js'
 
 import classes from './Editor.module.css'
-import { ChevronIcon, FocusIcon } from './icons.js'
+import { ChevronIcon, FocusIcon, OutlineIcon } from './icons.js'
 
 type Props = {
   /** The rows from the outermost down to the selected one. */
@@ -17,39 +17,93 @@ type Props = {
   focusRootPath: null | string
   /** A crumb: `null` is "all fields". */
   onSelect: (node: null | OutlineNode) => void
-  /** Focus mode's switch, also here - on a phone the only place it fits. Absent when focus mode is off for the site. */
+  /** Focus mode's switch; absent when the site turned focus mode off. */
   onToggleFocus?: () => void
+  /** The outline's switch; absent when the site turned the outline off. */
+  onToggleOutline?: () => void
+  outlineOpen: boolean
+  /** Whether to spell out where the editor is - the site may want only the switches. */
+  showPath: boolean
   strings: EditorStrings
 }
 
 /**
- * Where in the document the editor is: "Section 3 › Row 1 › Column 2 › Text 1",
- * pinned above the form.
+ * The editor's bar above the form: the outline and focus mode on the left,
+ * and where in the document the editor is - "Section 3 › Row 1 › Column 2 ›
+ * Text 1" - beside them.
+ *
+ * Its own bar rather than buttons in Payload's document controls: those hold
+ * Payload's status, dates and save buttons, and with ours beside them none of
+ * it fitted - on a laptop the dates were cut, on a phone the publish button.
+ * As high as Payload's bar above the preview, and level with it, so the two
+ * read as one bar across the screen: the form's half and the preview's half.
  *
  * Four levels of rows look alike from the inside - a column's fields do not say
- * which section they are in - and this says it. Every crumb goes there; in
- * focus mode the first one, "All fields", shows the whole form again.
+ * which section they are in - and the path says it. Every crumb goes there;
+ * the first one, "All fields", shows the whole form again in focus mode.
  */
-export const PathBar: React.FC<Props> = ({ chain, focusMode, focusRootPath, onSelect, onToggleFocus, strings }) => {
-  const barRef = useRef<HTMLElement>(null)
+export const PathBar: React.FC<Props> = ({
+  chain,
+  focusMode,
+  focusRootPath,
+  onSelect,
+  onToggleFocus,
+  onToggleOutline,
+  outlineOpen,
+  showPath,
+  strings,
+}) => {
+  const crumbsRef = useRef<HTMLOListElement>(null)
 
   // A long path keeps its end - the row the editor is in - in view.
   useEffect(() => {
-    const bar = barRef.current
-    if (bar) {
-      bar.scrollLeft = bar.scrollWidth
+    const crumbs = crumbsRef.current
+    if (crumbs) {
+      crumbs.scrollLeft = crumbs.scrollWidth
     }
   }, [chain])
 
   const last = chain[chain.length - 1]
 
   return (
-    <nav aria-label={strings.path} className={classes.pathBar} data-payload-live-preview-inspector-path="" ref={barRef}>
-      <ol className={classes.crumbs}>
-        {focusMode && (
+    <nav aria-label={strings.path} className={classes.pathBar} data-payload-live-preview-inspector-path="">
+      {(onToggleOutline || onToggleFocus) && (
+        <div className={classes.pathBarSwitches}>
+          {onToggleOutline && (
+            <button
+              aria-label={outlineOpen ? strings.outlineHide : strings.outlineShow}
+              aria-pressed={outlineOpen}
+              className={classes.button}
+              data-payload-live-preview-inspector-outline-toggle=""
+              onClick={onToggleOutline}
+              title={outlineOpen ? strings.outlineHide : strings.outlineShow}
+              type="button"
+            >
+              <OutlineIcon />
+              <span className={classes.buttonLabel}>{strings.outline}</span>
+            </button>
+          )}
+          {onToggleFocus && (
+            <button
+              aria-label={focusMode ? strings.focusModeOff : strings.focusModeOn}
+              aria-pressed={focusMode}
+              className={classes.button}
+              data-payload-live-preview-inspector-focus-toggle=""
+              onClick={onToggleFocus}
+              title={focusMode ? strings.focusModeOff : strings.focusModeOn}
+              type="button"
+            >
+              <FocusIcon />
+              <span className={classes.buttonLabel}>{strings.focusMode}</span>
+            </button>
+          )}
+        </div>
+      )}
+      {showPath && (
+        <ol className={classes.crumbs} ref={crumbsRef}>
           <li className={classes.crumb}>
             <button
-              aria-current={!focusRootPath ? 'true' : undefined}
+              aria-current={chain.length === 0 || (focusMode && !focusRootPath) ? 'true' : undefined}
               className={classes.crumbButton}
               onClick={() => onSelect(null)}
               type="button"
@@ -57,42 +111,26 @@ export const PathBar: React.FC<Props> = ({ chain, focusMode, focusRootPath, onSe
               {strings.allFields}
             </button>
           </li>
-        )}
-        {chain.map((node, index) => (
-          <li className={classes.crumb} key={node.rowIDPath}>
-            {(focusMode || index > 0) && (
+          {chain.map((node) => (
+            <li className={classes.crumb} key={node.rowIDPath}>
               <span aria-hidden="true" className={classes.crumbSeparator}>
                 <ChevronIcon />
               </span>
-            )}
-            <button
-              aria-current={node === last ? 'true' : undefined}
-              className={[classes.crumbButton, node.rowIDPath === focusRootPath ? classes.crumbRoot : '']
-                .filter(Boolean)
-                .join(' ')}
-              onClick={() => onSelect(node)}
-              title={node.summary ? `${node.label} · ${node.summary}` : node.label}
-              type="button"
-            >
-              {node.label}
-              {node === last && node.summary ? <span className={classes.crumbSummary}> · {node.summary}</span> : null}
-            </button>
-          </li>
-        ))}
-      </ol>
-      {onToggleFocus && (
-        <button
-          aria-label={focusMode ? strings.focusModeOff : strings.focusModeOn}
-          aria-pressed={focusMode}
-          className={`${classes.button} ${classes.pathFocus}`}
-          data-payload-live-preview-inspector-path-focus=""
-          onClick={onToggleFocus}
-          title={focusMode ? strings.focusModeOff : strings.focusModeOn}
-          type="button"
-        >
-          <FocusIcon />
-          <span className={classes.buttonLabel}>{strings.focusMode}</span>
-        </button>
+              <button
+                aria-current={node === last ? 'true' : undefined}
+                className={[classes.crumbButton, node.rowIDPath === focusRootPath ? classes.crumbRoot : '']
+                  .filter(Boolean)
+                  .join(' ')}
+                onClick={() => onSelect(node)}
+                title={node.summary ? `${node.label} · ${node.summary}` : node.label}
+                type="button"
+              >
+                {node.label}
+                {node === last && node.summary ? <span className={classes.crumbSummary}> · {node.summary}</span> : null}
+              </button>
+            </li>
+          ))}
+        </ol>
       )}
     </nav>
   )

@@ -4,25 +4,14 @@
  * and whatever a site configured - instead of bringing a look of their own.
  */
 
-/* ---- Toolbar in the document controls ---- */
-
-.toolbar {
-  align-items: center;
-  display: flex;
-  /*
-   * Never narrower than its buttons: shrunk in a crowded bar (a phone, German
-   * labels on Payload's own buttons) it drew them over Payload's eye toggle.
-   * What gives way is the hint inside, which has a width of its own to lose.
-   */
-  flex: 0 0 auto;
-  gap: calc(var(--base) / 4);
-}
-
-/* On a phone the bar has room for one button of ours: focus mode is in the path bar. */
-@media (max-width: 600px) {
-  .toolbar .toolbarFocus {
-    display: none;
-  }
+/*
+ * The editor's anchor in Payload's document controls. It shows nothing there:
+ * the controls hold Payload's status, dates and buttons, which did not fit
+ * beside ours. Everything visible is portalled to the bars above form and
+ * preview.
+ */
+.root {
+  display: contents;
 }
 
 .group {
@@ -77,7 +66,8 @@
   display: none;
 }
 
-@media (min-width: 1280px) {
+/* Spelled out where the form's column has the room (Payload makes it a container). */
+@container (min-width: 640px) {
   .buttonLabel {
     display: inline;
   }
@@ -87,11 +77,8 @@
   color: var(--theme-elevation-400, #8f8f8f);
   flex: 0 1 auto;
   font-size: 12px;
-  /* Yields before Payload's own dates do; the whole sentence is its title. */
-  max-width: clamp(0px, 22vw, 380px);
   min-width: 0;
   overflow: hidden;
-  padding: 0 calc(var(--base) / 4);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -101,34 +88,40 @@
   font-weight: 500;
 }
 
-/*
- * The standing sentence is for a wide screen only; where the document controls
- * are crowded it gives way to Payload's own dates. While a reveal runs, it
- * shows wherever it fits - that is when it says something new.
- */
-@media (max-width: 1699px) {
-  .hint:not(.hintActive) {
-    display: none;
-  }
+/* ---- The editor's part of the bar above the preview ---- */
+
+.previewTools {
+  align-items: center;
+  display: flex;
+  flex: 1 1 auto;
+  gap: calc(var(--base) / 2);
+  min-width: 0;
+  padding: 0 calc(var(--base) / 2);
 }
 
-/* The sentence's stand-in where it does not fit. */
+/*
+ * The sentence where the bar has room for it beside Payload's controls, an
+ * icon carrying it where not - measured on the bar itself (its host is a
+ * container), not on the window: the divider decides how wide it is.
+ */
+.hintSentence {
+  display: none;
+}
+
 .hintIcon {
   align-items: center;
   color: var(--theme-elevation-400, #8f8f8f);
   cursor: help;
-  display: none;
+  display: inline-flex;
   flex: 0 0 auto;
 }
 
-@media (min-width: 1025px) and (max-width: 1699px) {
-  .hintIcon {
-    display: inline-flex;
+@container (min-width: 600px) {
+  .hintSentence {
+    display: block;
   }
-}
 
-@media (max-width: 1024px) {
-  .hint {
+  .hintIcon {
     display: none;
   }
 }
@@ -218,6 +211,48 @@
   cursor: row-resize;
 }
 
+/* Where the divider lands, while it is dragged. */
+.ghostColumn,
+.ghostRow {
+  background: var(--theme-success-500);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--theme-success-500) 22%, transparent);
+  left: 0;
+  position: absolute;
+  top: 0;
+  will-change: transform;
+}
+
+.ghostColumn {
+  bottom: 0;
+  margin-left: -1px;
+  width: 2px;
+}
+
+.ghostRow {
+  height: 2px;
+  margin-top: -1px;
+  right: 0;
+}
+
+.ghostBadge {
+  background: var(--theme-success-500);
+  border-radius: 4px;
+  color: #fff;
+  font: 500 12px/1 system-ui, -apple-system, 'Segoe UI', sans-serif;
+  left: 10px;
+  padding: 5px 8px;
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  white-space: nowrap;
+}
+
+.ghostRow .ghostBadge {
+  left: 50%;
+  top: 10px;
+  transform: translateX(-50%);
+}
+
 /* ---- Outline ---- */
 
 .outline {
@@ -239,10 +274,14 @@
 .outlineHeader {
   align-items: center;
   border-bottom: 1px solid var(--theme-elevation-100);
+  box-sizing: border-box;
   display: flex;
+  flex: 0 0 auto;
   gap: 8px;
+  /* Level with the bars beside it. */
+  height: calc(var(--base) * 1.75);
   justify-content: space-between;
-  padding: calc(var(--base) * 0.5) calc(var(--base) * 0.5) calc(var(--base) * 0.5) calc(var(--base) * 0.75);
+  padding: 0 calc(var(--base) * 0.25) 0 calc(var(--base) * 0.75);
 }
 
 .outlineTitle {
@@ -393,27 +432,46 @@
   align-items: center;
   background: var(--theme-bg);
   border-bottom: 1px solid var(--theme-elevation-100);
+  box-sizing: border-box;
   display: flex;
   font-size: 13px;
-  gap: 2px;
-  min-height: 36px;
-  overflow-x: auto;
-  padding: 4px var(--gutter-h, calc(var(--base) * 2));
-  scrollbar-width: none;
+  gap: calc(var(--base) / 2);
+  /* Payload's bar above the preview is this high: the two read as one. */
+  height: calc(var(--base) * 1.75);
+  padding: 0 calc(var(--base) / 2) 0 var(--gutter-h, calc(var(--base) * 2));
   white-space: nowrap;
 }
 
-.pathBar::-webkit-scrollbar {
-  display: none;
+.pathBarSwitches {
+  align-items: center;
+  border-right: 1px solid var(--theme-elevation-100);
+  display: flex;
+  flex: 0 0 auto;
+  gap: 2px;
+  padding-right: calc(var(--base) / 2);
 }
 
 .crumbs {
   align-items: center;
   display: flex;
+  flex: 1 1 auto;
   gap: 2px;
   list-style: none;
   margin: 0;
+  min-width: 0;
+  overflow-x: auto;
   padding: 0;
+  scrollbar-width: none;
+}
+
+.crumbs::-webkit-scrollbar {
+  display: none;
+}
+
+@media (max-width: 1024px) {
+  .pathBar {
+    padding-left: calc(var(--base) / 2);
+  }
 }
 
 .crumb {
@@ -463,20 +521,7 @@
   font-weight: 400;
 }
 
-.pathFocus {
-  flex: 0 0 auto;
-  margin-left: auto;
-  position: sticky;
-  right: 0;
-  background: var(--theme-bg);
-}
 
-/* Where the document controls have room for it, the switch is there. */
-@media (min-width: 601px) {
-  .pathBar .pathFocus {
-    display: none;
-  }
-}
 
 /* ---- Screen widths ---- */
 

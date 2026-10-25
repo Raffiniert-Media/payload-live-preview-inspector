@@ -14,6 +14,9 @@ every part of it can be turned off (`editor` option, see `EditorFeatures`).
 - **A divider between form and preview.** Drag it, or use the arrow keys;
   double-click (or Enter) puts Payload's 40/60 back. Remembered per browser as
   a share, applied in pixels, and neither side gets narrower than 320 px.
+  While it is dragged only a line moves, with both widths on it; the panes are
+  resized once, on release - resizing them on every frame laid out the whole
+  site and the whole form each time, and the divider trailed the pointer.
 - **An outline of the document** beside the form: every Array and Blocks row
   as a tree, named the way the form names it (`Section 3`) and recognisable by
   what it holds (its block name, or the first words inside it), with rows that
@@ -21,13 +24,25 @@ every part of it can be turned off (`editor` option, see `EditorFeatures`).
   row closed three levels down is in it. A click goes there in the form and in
   the preview; hovering marks the row in the preview. Filter, and the arrow
   keys of an ARIA tree.
-- **A path bar** pinned above the form: `Section 3 › Row 1 › Column 2 › Text 1`,
-  every crumb a way back up.
+- **The editor's own bars.** Above the form: the outline and focus mode, and
+  the path - `Section 3 › Row 1 › Column 2 › Text 1`, every crumb a way back
+  up. In Payload's bar above the preview: the screen widths and the hint.
+  Both as high as Payload's preview bar and level with it, so they read as one
+  bar across the screen; Payload's document controls are left to Payload's
+  status, dates and buttons, which did not fit beside the editor's.
 - **Focus mode.** The form shows only the block chosen in the preview, the
-  outline or the path bar - everything else, including the frames of the rows
-  around it, is set aside (attributes on Payload's markup, nothing in the form
-  state, nothing saved). "All fields" in the path bar shows everything again.
-  Off by default on a wide screen, on by default on a narrow one.
+  outline or the path bar - everything else is set aside (attributes on
+  Payload's markup, nothing in the form state, nothing saved), and so is the
+  space around it: no frames, indents or margins of the rows and tabs it sits
+  in, so it starts right under the bar at full width. "All fields" shows
+  everything again. Off by default on a wide screen, on by default on a narrow
+  one.
+- **One change instead of stages, where the form jumps.** With
+  `scrollBehavior: 'instant'` a reveal that has to open rows or switch tabs
+  fades the form out, does all of it unseen, and fades it back in at the field
+  - instead of a header lighting up, a row sliding open empty, fields popping
+  in and the page leaping, one after the other. A field in plain view is
+  flashed where it is. With `'smooth'` the motion is the point and stays.
 - **A block toolbar in the preview.** The block the editor is at - clicked in
   the preview, or the one whose field has focus in the form - is framed, with
   its name and buttons to step out to the block around it, move it up or down,
@@ -57,9 +72,11 @@ finding nothing.
 
 ### Smaller changes
 
-- The hint in the document controls is in the admin's language and gives way
-  where the bar is crowded: as an icon carrying the sentence below 1700 px, not
-  at all on a phone, where it used to push Payload's own buttons off screen.
+- The hint is in the admin's language and in the bar above the preview: the
+  sentence where it fits, an icon carrying it where not. In the document
+  controls it used to push Payload's own buttons off screen on a phone.
+- A row that is not displayed is no longer taken for one Payload failed to
+  render: in focus mode every reveal spent 0.9 s healing hidden rows.
 - Nothing of the plugin runs in a document drawer opened on top of a document;
   two listeners answered every click twice there.
 - Choices remembered in the browser are read after hydration, so the document

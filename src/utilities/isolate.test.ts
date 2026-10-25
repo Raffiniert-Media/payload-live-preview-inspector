@@ -1,7 +1,14 @@
 // @vitest-environment happy-dom
 import { beforeEach, describe, expect, it } from 'vitest'
 
-import { AROUND_ATTRIBUTE, HIDDEN_ATTRIBUTE, HOST_ATTRIBUTE, isolate } from './isolate.js'
+import {
+  ABOVE_ATTRIBUTE,
+  AROUND_ATTRIBUTE,
+  FOCUSING_ATTRIBUTE,
+  HIDDEN_ATTRIBUTE,
+  HOST_ATTRIBUTE,
+  isolate,
+} from './isolate.js'
 
 /** The shape of a form with a tab bar, a sidebar, sections, rows and columns. */
 const FORM = `
@@ -107,6 +114,16 @@ describe('isolate, flattening the rows around', () => {
     isolate(byId('root'), byId('col-1'), byId('section-0'))
     isolate(byId('root'), null)
     expect(document.querySelectorAll(`[${AROUND_ATTRIBUTE}]`)).toHaveLength(0)
+  })
+
+  it('takes the vertical space out of everything above the outermost row, and marks the column', () => {
+    isolate(byId('root'), byId('col-1'), byId('section-0'))
+    const above = Array.from(document.querySelectorAll(`[${ABOVE_ATTRIBUTE}]`), (el) => el.id).sort()
+    expect(above).toEqual(['fields', 'sections', 'tab-content', 'tabs'])
+    expect(byId('root').hasAttribute(FOCUSING_ATTRIBUTE)).toBe(true)
+    isolate(byId('root'), null)
+    expect(document.querySelectorAll(`[${ABOVE_ATTRIBUTE}]`)).toHaveLength(0)
+    expect(byId('root').hasAttribute(FOCUSING_ATTRIBUTE)).toBe(false)
   })
 
   it('flattens nothing for an outermost row that is the target itself', () => {

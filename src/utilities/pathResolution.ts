@@ -690,7 +690,11 @@ export const findUnrenderedRows = (): UnrenderedRow[] =>
   Array.from(document.querySelectorAll<HTMLElement>('[id*="-row-"]')).flatMap((row) => {
     const match = row.id.startsWith(SCROLL_ID_PREFIX) ? null : ROW_ID_PATTERN.exec(row.id)
     const fields = match ? unrenderedRowFields(row) : null
-    return match && fields && isWithinRenderMargin(row)
+    // A row that is not displayed at all - one focus mode set aside - renders
+    // nothing because it cannot be seen, not because Payload missed it. Taken
+    // for stuck, it cost every reveal in focus mode 0.9 s of waiting and
+    // reopening rows nobody could see (measured on krc).
+    return match && fields && row.getClientRects().length > 0 && isWithinRenderMargin(row)
       ? [{ fields, index: Number(match[2]), path: match[1].replace(/-/g, '.'), row }]
       : []
   })

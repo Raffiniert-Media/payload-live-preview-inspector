@@ -35,6 +35,8 @@ export const PAYLOAD_CLASS = {
   /** The row holding the form's column and the live preview, side by side. */
   editMainWrapper: 'collection-edit__main-wrapper',
   livePreviewIframe: 'live-preview-iframe',
+  /** The bar above the preview with Payload's size, zoom and pop-out controls. */
+  livePreviewToolbar: 'live-preview-toolbar',
   livePreviewWindow: 'live-preview-window',
   livePreviewWindowMain: 'live-preview-window__main',
   /** The container a row renders its fields into. */
@@ -140,6 +142,10 @@ export const editMainWrapperEl = (doc: Document = document): HTMLElement | null 
 /** The live preview panel, when it is the inline one (not a popup). */
 export const livePreviewWindowEl = (doc: Document = document): HTMLElement | null =>
   doc.querySelector<HTMLElement>(selectorOf(PAYLOAD_CLASS.livePreviewWindow))
+
+/** The bar above the preview with Payload's own controls. */
+export const livePreviewToolbarEl = (doc: Document = document): HTMLElement | null =>
+  doc.querySelector<HTMLElement>(selectorOf(PAYLOAD_CLASS.livePreviewToolbar))
 
 /** The area inside the live preview panel the device frame sits in. */
 export const livePreviewMainEl = (doc: Document = document): HTMLElement | null =>

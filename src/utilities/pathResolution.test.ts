@@ -1082,4 +1082,16 @@ describe('findUnrenderedRows', () => {
 
     expect(findUnrenderedRows().map(({ index, path }) => `${path}.${index}`)).toEqual(['layout.4.rows.1'])
   })
+
+  it('leaves out a row that is not displayed - set aside by focus mode, not missed by Payload', () => {
+    document.body.innerHTML = `
+      <div id="layout-row-3"><div class="collapsible">
+        <div><div class="render-fields"></div></div>
+      </div></div>`
+    const hidden = document.getElementById('layout-row-3') as HTMLElement
+    // What a browser answers for an element under `display: none`.
+    hidden.getClientRects = () => [] as unknown as DOMRectList
+
+    expect(findUnrenderedRows()).toEqual([])
+  })
 })
