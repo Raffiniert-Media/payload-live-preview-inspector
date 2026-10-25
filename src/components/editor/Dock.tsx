@@ -30,7 +30,7 @@ export type DockAction = ({ href: string; onSelect?: never } | { href?: never; o
 
 type Props = {
   actions: DockAction[]
-  /** A line beside the closed button, until the editor has done what it says. */
+  /** A line above the closed button, until the editor has done what it says. */
   hint?: string
   strings: EditorStrings
   switches: DockSwitch[]
@@ -140,12 +140,17 @@ export const Dock: React.FC<Props> = ({ actions, hint, strings, switches }) => {
           )}
         </div>
       )}
+      {/*
+       * Above the button rather than beside it: the corner beside it is where
+       * another button of the admin's may stand - a site's assistant moves
+       * there to make room for this one.
+       */}
+      {hint && !open && (
+        <span className={classes.dockHint} role="note">
+          {hint}
+        </span>
+      )}
       <div className={classes.dockRow}>
-        {hint && !open && (
-          <span className={classes.dockHint} role="note">
-            {hint}
-          </span>
-        )}
         <button
           aria-controls={open ? menuId : undefined}
           aria-expanded={open}
