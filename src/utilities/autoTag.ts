@@ -12,7 +12,14 @@ import { findStegaPaths, hasStegaHint, stegaClean } from './stega.js'
 /** Text-bearing attributes also scanned for stega-encoded paths. */
 const STEGA_ATTRIBUTES = ['alt', 'aria-label', 'placeholder', 'title']
 
-/** Minimum normalized length for value matching - shorter values are too ambiguous. */
+/**
+ * Minimum normalized length for a value to be matched anywhere on the page.
+ * Shorter ones - "12", "98" - could be anything there: a date, a price, a
+ * step. They are matched only inside a tagged element that holds exactly one
+ * field with that value (`pathInside`): not anywhere, but in the stat that
+ * says 12. Measured on the first customer site: four numbers in a stats
+ * block, the two with two digits not clickable.
+ */
 const MIN_MATCH_LENGTH = 3
 
 const setAutoTag = (el: Element, path: string, source: 'container' | 'match' | 'stega'): void => {
@@ -116,7 +123,8 @@ const warnedAmbiguousValues = new Set<string>()
 /** Dev-only: say where a shared value can still be matched (scans rerun constantly, so log once). */
 const warnAmbiguousValues = (index: ValueIndex): void => {
   for (const [value, paths] of index) {
-    if (typeof paths === 'string' || warnedAmbiguousValues.has(value)) {
+    // A short value has its one path in a list too: matched by context only, nothing to report.
+    if (typeof paths === 'string' || paths.length < 2 || warnedAmbiguousValues.has(value)) {
       continue
     }
     warnedAmbiguousValues.add(value)
@@ -129,8 +137,10 @@ const warnAmbiguousValues = (index: ValueIndex): void => {
 }
 
 /**
- * Normalized field value → the one path it belongs to, or every path that
- * shares it. Built once per set of document values, not on every scan:
+ * Normalized field value → the one path it belongs to, or a list - of every
+ * path that shares it, or of the one path of a value too short to be matched
+ * outside its own block. A list is matched by context only (`pathInside`).
+ * Built once per set of document values, not on every scan:
  * normalizing every value is the expensive half of value matching, and the
  * values change far less often than the DOM does.
  */
@@ -141,12 +151,14 @@ export const buildValueIndex = (leaves: DocumentLeafValue[]): ValueIndex => {
 
   for (const { path, value } of leaves) {
     const normalized = normalizeText(value)
-    if (normalized.length < MIN_MATCH_LENGTH) {
+    if (normalized.length === 0) {
       continue
     }
     const existing = index.get(normalized)
-    if (existing === undefined || existing === path) {
-      index.set(normalized, path)
+    if (existing === undefined) {
+      index.set(normalized, normalized.length < MIN_MATCH_LENGTH ? [path] : path)
+    } else if (existing === path) {
+      continue
     } else {
       const paths = typeof existing === 'string' ? [existing] : existing
       if (!paths.includes(path)) {
@@ -195,7 +207,7 @@ const matchText = (text: null | string, index: ValueIndex, el: Element | null): 
     return null
   }
   const normalized = normalizeText(text)
-  if (normalized.length < MIN_MATCH_LENGTH) {
+  if (normalized.length === 0) {
     return null
   }
   const paths = index.get(normalized)
@@ -208,9 +220,10 @@ const matchText = (text: null | string, index: ValueIndex, el: Element | null): 
 /**
  * Tags elements under `root` whose entire text content equals a document
  * field's value - the zero-config layer that needs no frontend data changes
- * at all. A value several fields share is used only inside a tagged element
- * that holds exactly one of them (`pathInside`), and only whole-text-node
- * matches count. Never overwrites existing tags.
+ * at all. A value several fields share, or one shorter than three
+ * characters, is used only inside a tagged element that holds exactly one of
+ * them (`pathInside`), and only whole-text-node matches count. Never
+ * overwrites existing tags.
  */
 export const applyValueIndex = (root: Document | Element, index: ValueIndex): void => {
   if (index.size === 0) {

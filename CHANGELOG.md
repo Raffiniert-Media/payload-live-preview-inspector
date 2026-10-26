@@ -63,6 +63,11 @@ on by default, switched per browser):
   text, so it is encoded even when it is one word; and a value several fields
   share is matched inside the tagged block that holds exactly one of them -
   the price plan's name in its plan, the card's heading in its card.
+- **A two-digit number is clickable in its own block.** Value matching took
+  nothing shorter than three characters, so in a stats block "450" and "2018"
+  reached their fields and "12" and "98" did not. A short value is still never
+  matched anywhere on the page - "12" could be a date, a price, a step - but
+  inside a tagged block that holds exactly one field with that value, it is.
 
 ## 2.0.0
 

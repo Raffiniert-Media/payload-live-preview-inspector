@@ -149,6 +149,33 @@ describe('applyValueMatching', () => {
     expect(pathAttr(document.getElementById('el'))).toBeNull()
   })
 
+  it('matches a short value - a two-digit stat - inside the tagged block that holds it', () => {
+    document.body.innerHTML = `
+      <div data-payload-live-preview-path="layout.$stats">
+        <p id="years">12</p><p id="share">98</p>
+      </div>
+      <p id="loose">12</p>`
+    applyValueMatching(document, [
+      { path: 'layout.$stats.items.$a.value', value: '12' },
+      { path: 'layout.$stats.items.$b.value', value: '98' },
+    ])
+
+    expect(pathAttr(document.getElementById('years'))).toBe('layout.$stats.items.$a.value')
+    expect(pathAttr(document.getElementById('share'))).toBe('layout.$stats.items.$b.value')
+    // Outside the block, "12" could be anything: a date, a price, a step.
+    expect(pathAttr(document.getElementById('loose'))).toBeNull()
+  })
+
+  it('leaves a short value alone that two fields in the same block share', () => {
+    document.body.innerHTML = `<div data-payload-live-preview-path="layout.$stats"><p id="el">12</p></div>`
+    applyValueMatching(document, [
+      { path: 'layout.$stats.items.$a.value', value: '12' },
+      { path: 'layout.$stats.items.$b.value', value: '12' },
+    ])
+
+    expect(pathAttr(document.getElementById('el'))).toBeNull()
+  })
+
   it('requires the whole text node to match, not a substring', () => {
     document.body.innerHTML = '<p id="el">Hello Live Preview and more</p>'
     applyValueMatching(document, [{ path: 'title', value: 'Hello Live Preview' }])
