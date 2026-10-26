@@ -1,6 +1,7 @@
 import type { PreviewStrings } from './i18n.js'
 import type { PreviewRow } from './structure.js'
 
+import { markHost, raiseMarkHost, releaseMarkHost } from './markHost.js'
 import { LIVE_PREVIEW_PATH_ATTRIBUTE } from './pathAttribute.js'
 
 /** Class names the toolbar's parts take, from the client's CSS module. */
@@ -191,9 +192,12 @@ export const createBlockToolbar = (
   }
   layer.append(hover, selection, toolbar)
 
+  // In the top layer with the other marks - see `markHost.ts`.
   const attach = () => {
-    if (!layer.isConnected) {
-      doc.body.append(layer)
+    if (layer.isConnected) {
+      raiseMarkHost(layer.parentElement as HTMLElement)
+    } else {
+      markHost(doc).append(layer)
     }
   }
 
@@ -378,6 +382,7 @@ export const createBlockToolbar = (
       view.removeEventListener('resize', onViewChange)
       toolbar.removeEventListener('click', onToolbarClick)
       layer.remove()
+      releaseMarkHost(doc)
     },
     hover: (path) => {
       hovered = path

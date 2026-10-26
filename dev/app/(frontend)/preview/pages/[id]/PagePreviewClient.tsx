@@ -115,12 +115,23 @@ export const PagePreviewClient = ({ initialData }: Props) => {
           ))}
         </section>
 
-        {/* The page's picture, the way sites draw one: a box with rounded
-            corners and `overflow: hidden`, exactly its own size - which cuts
-            away an outline drawn around it. A swatch rather than the file, so
+        {/* The page's picture, the way the first customer site draws its
+            before/after pairs: the tagged block in a rounded box of its own
+            size with `overflow: hidden`, and two positioned pictures over
+            it. An outline around the block was cut away by the box, one
+            inside it covered by the pictures. Swatches rather than files, so
             no test waits on an image. */}
         <div style={{ borderRadius: 12, height: 90, overflow: 'hidden', width: 160 }}>
-          <div {...pathOf(page, 'image')} style={{ background: '#c33', height: 90, width: 160 }} />
+          <div
+            {...pathOf(page, 'image')}
+            style={{ display: 'grid', gap: 4, gridTemplateColumns: '1fr 1fr', height: 90, width: 160 }}
+          >
+            <div
+              data-testid="picture-before"
+              style={{ background: '#c33', borderRadius: 8, overflow: 'hidden', position: 'relative' }}
+            />
+            <div style={{ background: '#3c3', borderRadius: 8, overflow: 'hidden', position: 'relative' }} />
+          </div>
         </div>
 
         {/* What a preview rendered before a row was deleted in the admin: a

@@ -14,6 +14,7 @@ import { createBlockToolbar } from '../utilities/blockToolbar.js'
 import { caretHintFromPoint, parseCaretHint } from '../utilities/caret.js'
 import { createClickOverlay } from '../utilities/clickOverlay.js'
 import { LIVE_PREVIEW_HOVER_CLASS_NAME } from '../utilities/hoverClassName.js'
+import { createMarks, type Marks } from '../utilities/marks.js'
 import {
   CLICK_MESSAGE_TYPE,
   DOCUMENT_VALUES_MESSAGE_TYPE,
@@ -27,7 +28,6 @@ import {
   STRUCTURE_MESSAGE_TYPE,
   THEME_MESSAGE_TYPE,
 } from '../utilities/messageTypes.js'
-import { outlineIsClipped } from '../utilities/outlineClip.js'
 import { LIVE_PREVIEW_PATH_ATTRIBUTE, rowIDPathOf } from '../utilities/pathAttribute.js'
 import {
   flashElement,
@@ -52,8 +52,6 @@ const PENDING_MAX_MS = 8_000
 
 /** Custom property every mark in the preview takes its colour from. */
 const ACCENT_PROPERTY = '--payload-live-preview-inspector-accent'
-/** How far outside an element its hover and focus marks reach: a 2 px outline, 2 px out. */
-const MARK_REACH = 4
 
 export type LivePreviewInspectorClientProps = {
   /**
@@ -245,6 +243,8 @@ const PreviewInspector: React.FC<LivePreviewInspectorClientProps> = ({
   // The auto-tagger lives in its own effect; clicks and hovers flush it so
   // they never resolve against tags still waiting for an idle moment.
   const taggerRef = useRef<AutoTagger | null>(null)
+  // The hover frame and the flash, in the top layer - see `utilities/marks.ts`.
+  const marksRef = useRef<Marks | null>(null)
 
   useEffect(() => {
     // Not in the admin's live preview - viewed on its own, or framed by
@@ -272,6 +272,12 @@ const PreviewInspector: React.FC<LivePreviewInspectorClientProps> = ({
       layer: classes.layer,
       ripple: classes.ripple,
     })
+    const marks = createMarks(document, {
+      flash: classes.flashMark,
+      hover: classes.hoverMark,
+      layer: classes.markLayer,
+    })
+    marksRef.current = marks
 
     /** The admin's words for what the preview says, once it has sent them. */
     let strings: null | PreviewStrings = null
@@ -378,7 +384,7 @@ const PreviewInspector: React.FC<LivePreviewInspectorClientProps> = ({
     }
 
     const unhighlight = (el: HTMLElement) => {
-      el.classList.remove(classes.hovered, classes.inset, LIVE_PREVIEW_HOVER_CLASS_NAME)
+      el.classList.remove(classes.hovered, LIVE_PREVIEW_HOVER_CLASS_NAME)
     }
 
     const setHovered = (el: HTMLElement | null) => {
@@ -390,10 +396,9 @@ const PreviewInspector: React.FC<LivePreviewInspectorClientProps> = ({
       }
       if (el) {
         el.classList.add(classes.hovered, LIVE_PREVIEW_HOVER_CLASS_NAME)
-        // Drawn inside where the page would cut it away - see `outlineClip.ts`.
-        el.classList.toggle(classes.inset, outlineIsClipped(el, MARK_REACH))
       }
       hovered = el
+      marksRef.current?.hover(el)
     }
 
     // mousemove (not mouseover): beneath an overlay the event target never
@@ -555,6 +560,8 @@ const PreviewInspector: React.FC<LivePreviewInspectorClientProps> = ({
         cancelAnimationFrame(hoverFrame)
       }
       setHovered(null)
+      marks.destroy()
+      marksRef.current = null
     }
   }, [blockToolbar, disableInteractions, disableLinks, hoverColor, interactionModifier, targetOrigin])
 
@@ -611,18 +618,8 @@ const PreviewInspector: React.FC<LivePreviewInspectorClientProps> = ({
         // Only a safety net now: a header that changed height at the last
         // moment. Normally it finds nothing to do.
         await uncover(el)
-        if (outlineIsClipped(el, MARK_REACH) && !el.classList.contains(classes.inset)) {
-          el.classList.add(classes.inset)
-          // Unless the pointer is on it by then: the hover outline needs it too.
-          el.addEventListener(
-            'animationend',
-            () => {
-              if (!el.classList.contains(classes.hovered)) {el.classList.remove(classes.inset)}
-            },
-            { once: true },
-          )
-        }
         flashElement(el, { className: classes.focused })
+        marksRef.current?.flash(el)
       })()
     }
 

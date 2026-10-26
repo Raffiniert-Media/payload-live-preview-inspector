@@ -86,25 +86,51 @@ test('clicking a component in the live preview scrolls and highlights the matchi
   await expect(titleField).toHaveClass(/flash/)
 })
 
-test('a picture in a box of its own size that clips: the hover outline is drawn inside it, not cut away', async ({
+test('the hover frame shows whatever the page does to the element: cut by its box, covered by what is in it', async ({
   page,
 }) => {
   await login(page)
 
   const frame = await openLivePreview(page, 'pages')
-  const picture = frame.locator('[data-payload-live-preview-path="image"]')
-  await picture.scrollIntoViewIfNeeded()
-  await picture.hover()
+  const block = frame.locator('[data-payload-live-preview-path="image"]')
+  await block.scrollIntoViewIfNeeded()
+  // On a picture inside it, which is not tagged: the block is what is under the pointer.
+  await frame.getByTestId('picture-before').hover()
+  await expect(block).toHaveClass(/payload-live-preview-inspector-hovered/)
 
-  await expect(picture).toHaveClass(/payload-live-preview-inspector-hovered/)
-  await expect(picture).toHaveCSS('outline-offset', '-2px')
+  const mark = frame.locator('[data-payload-live-preview-inspector-marks] [class*="hoverMark"]')
+  await expect(mark).toBeVisible()
 
-  // With room around it, the outline stays outside, as it always was.
+  const seen = await block.evaluate((el) => {
+    const host = document.querySelector('[data-payload-live-preview-inspector-marks]') as HTMLElement
+    const hover = host.querySelector('[class*="hoverMark"]') as HTMLElement
+    const blockRect = el.getBoundingClientRect()
+    const markRect = hover.getBoundingClientRect()
+    // Hit testing follows paint order: let the mark take the pointer for one
+    // question, and ask what is on top at its left edge - over a picture.
+    host.style.setProperty('pointer-events', 'auto', 'important')
+    hover.style.pointerEvents = 'auto'
+    const onTop = document.elementFromPoint(markRect.left + 1, markRect.top + markRect.height / 2)
+    host.style.setProperty('pointer-events', 'none', 'important')
+    hover.style.removeProperty('pointer-events')
+    return {
+      around: [markRect.left - blockRect.left, markRect.top - blockRect.top, markRect.right - blockRect.right, markRect.bottom - blockRect.bottom].map(Math.round),
+      inTopLayer: host.matches(':popover-open'),
+      markOnTop: onTop === hover,
+    }
+  })
+
+  expect(seen.inTopLayer).toBe(true)
+  expect(seen.markOnTop).toBe(true)
+  // Around the block, a little outside it - not cut to nothing, not inside it.
+  expect(seen.around).toEqual([-3, -3, 3, 3])
+
+  // The pointer elsewhere: the frame goes.
   const title = frame.locator('h1[data-payload-live-preview-path="title"]')
   await title.scrollIntoViewIfNeeded()
   await title.hover()
-  await expect(title).toHaveCSS('outline-offset', '2px')
-  await expect(picture).not.toHaveClass(/payload-live-preview-inspector-hovered/)
+  await expect(block).not.toHaveClass(/payload-live-preview-inspector-hovered/)
+  await expect(title).toHaveClass(/payload-live-preview-inspector-hovered/)
 })
 
 test('focusing a field in the admin form scrolls to and flashes the matching element in the preview', async ({

@@ -1,3 +1,5 @@
+import { markHost, raiseMarkHost, releaseMarkHost } from './markHost.js'
+
 /** Class names the overlay's parts take, from the client's CSS module. */
 export type ClickOverlayClasses = {
   box: string
@@ -53,7 +55,10 @@ export const createClickOverlay = (doc: Document, classes: ClickOverlayClasses):
       layer.className = classes.layer
       layer.setAttribute(OVERLAY_ATTRIBUTE, '')
       layer.setAttribute('aria-hidden', 'true')
-      doc.body.append(layer)
+      // In the top layer with the other marks - see `markHost.ts`.
+      markHost(doc).append(layer)
+    } else {
+      raiseMarkHost(layer.parentElement as HTMLElement)
     }
     return layer
   }
@@ -86,6 +91,7 @@ export const createClickOverlay = (doc: Document, classes: ClickOverlayClasses):
       hide()
       layer?.remove()
       layer = undefined
+      releaseMarkHost(doc)
     },
     finish: (outcome) => {
       if (!box) {

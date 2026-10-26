@@ -42,12 +42,17 @@ on by default, switched per browser):
   and still loading, and its fields only arrived when the reveal opened it
   four seconds later - the cursor then landing in the block's name. Also in
   2.0.0, where focus mode started off on a wide screen and nobody met it.
-- **The hover outline shows on a picture in a box of its own size.** It was
-  drawn 2 px outside the element, and a rounded box with `overflow: hidden` -
-  cards, portraits, before/after pairs, a slide at the edge of a carousel -
-  cut it away completely: the click reached the field, the pointer saw
-  nothing to click. Where the page would cut it, the outline (and the flash
-  after a reveal) is drawn inside the element instead.
+- **Every mark is drawn in the browser's top layer** - the hover frame, the
+  click mark, the flash after a reveal, the block toolbar - where dialogs and
+  popovers are, above whatever the page draws. The hover outline used to sit
+  on the page's own element: on the first customer site a rounded box of a
+  before/after picture's own size cut it away with `overflow: hidden`, and
+  drawn inside instead, the two pictures in the block covered it. A page's
+  `overflow`, `z-index`, `transform` or a dialog it opened can no longer hide
+  a mark; the frame covers the part of the element the page shows, and follows
+  it while it moves. The hovered element keeps its classes
+  (`LIVE_PREVIEW_HOVER_CLASS_NAME`, the cursor) but draws nothing itself. A
+  browser without popovers gets the same layer at the highest `z-index`.
 
 ## 2.0.0
 
