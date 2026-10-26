@@ -10,8 +10,34 @@
   outline-offset: 2px;
 }
 
+/*
+ * Inside the element instead of around it, where the page would cut the
+ * outline away - a picture in a rounded box of its own size, a slide at the
+ * edge of its carousel. See `utilities/outlineClip.ts`.
+ */
+.hovered.inset {
+  outline-offset: -2px;
+}
+
 .focused {
   animation: payload-live-preview-inspector-focus-flash 1.2s ease-out;
+}
+
+.focused.inset {
+  animation-name: payload-live-preview-inspector-focus-flash-inset;
+}
+
+@keyframes payload-live-preview-inspector-focus-flash-inset {
+  0% {
+    box-shadow: inset 0 0 0 6px color-mix(in srgb, var(--payload-live-preview-inspector-accent, #1587ba) 25%, transparent);
+    outline: 2px solid var(--payload-live-preview-inspector-accent, #1587ba);
+    outline-offset: -2px;
+  }
+  100% {
+    box-shadow: inset 0 0 0 12px transparent;
+    outline-color: transparent;
+    outline-offset: -2px;
+  }
 }
 
 @keyframes payload-live-preview-inspector-focus-flash {

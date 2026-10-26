@@ -27,6 +27,7 @@ import {
   STRUCTURE_MESSAGE_TYPE,
   THEME_MESSAGE_TYPE,
 } from '../utilities/messageTypes.js'
+import { outlineIsClipped } from '../utilities/outlineClip.js'
 import { LIVE_PREVIEW_PATH_ATTRIBUTE, rowIDPathOf } from '../utilities/pathAttribute.js'
 import {
   flashElement,
@@ -51,6 +52,8 @@ const PENDING_MAX_MS = 8_000
 
 /** Custom property every mark in the preview takes its colour from. */
 const ACCENT_PROPERTY = '--payload-live-preview-inspector-accent'
+/** How far outside an element its hover and focus marks reach: a 2 px outline, 2 px out. */
+const MARK_REACH = 4
 
 export type LivePreviewInspectorClientProps = {
   /**
@@ -375,7 +378,7 @@ const PreviewInspector: React.FC<LivePreviewInspectorClientProps> = ({
     }
 
     const unhighlight = (el: HTMLElement) => {
-      el.classList.remove(classes.hovered, LIVE_PREVIEW_HOVER_CLASS_NAME)
+      el.classList.remove(classes.hovered, classes.inset, LIVE_PREVIEW_HOVER_CLASS_NAME)
     }
 
     const setHovered = (el: HTMLElement | null) => {
@@ -387,6 +390,8 @@ const PreviewInspector: React.FC<LivePreviewInspectorClientProps> = ({
       }
       if (el) {
         el.classList.add(classes.hovered, LIVE_PREVIEW_HOVER_CLASS_NAME)
+        // Drawn inside where the page would cut it away - see `outlineClip.ts`.
+        el.classList.toggle(classes.inset, outlineIsClipped(el, MARK_REACH))
       }
       hovered = el
     }
@@ -606,6 +611,17 @@ const PreviewInspector: React.FC<LivePreviewInspectorClientProps> = ({
         // Only a safety net now: a header that changed height at the last
         // moment. Normally it finds nothing to do.
         await uncover(el)
+        if (outlineIsClipped(el, MARK_REACH) && !el.classList.contains(classes.inset)) {
+          el.classList.add(classes.inset)
+          // Unless the pointer is on it by then: the hover outline needs it too.
+          el.addEventListener(
+            'animationend',
+            () => {
+              if (!el.classList.contains(classes.hovered)) {el.classList.remove(classes.inset)}
+            },
+            { once: true },
+          )
+        }
         flashElement(el, { className: classes.focused })
       })()
     }

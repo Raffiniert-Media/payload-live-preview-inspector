@@ -86,6 +86,27 @@ test('clicking a component in the live preview scrolls and highlights the matchi
   await expect(titleField).toHaveClass(/flash/)
 })
 
+test('a picture in a box of its own size that clips: the hover outline is drawn inside it, not cut away', async ({
+  page,
+}) => {
+  await login(page)
+
+  const frame = await openLivePreview(page, 'pages')
+  const picture = frame.locator('[data-payload-live-preview-path="image"]')
+  await picture.scrollIntoViewIfNeeded()
+  await picture.hover()
+
+  await expect(picture).toHaveClass(/payload-live-preview-inspector-hovered/)
+  await expect(picture).toHaveCSS('outline-offset', '-2px')
+
+  // With room around it, the outline stays outside, as it always was.
+  const title = frame.locator('h1[data-payload-live-preview-path="title"]')
+  await title.scrollIntoViewIfNeeded()
+  await title.hover()
+  await expect(title).toHaveCSS('outline-offset', '2px')
+  await expect(picture).not.toHaveClass(/payload-live-preview-inspector-hovered/)
+})
+
 test('focusing a field in the admin form scrolls to and flashes the matching element in the preview', async ({
   page,
 }) => {

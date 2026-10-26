@@ -115,6 +115,14 @@ export const PagePreviewClient = ({ initialData }: Props) => {
           ))}
         </section>
 
+        {/* The page's picture, the way sites draw one: a box with rounded
+            corners and `overflow: hidden`, exactly its own size - which cuts
+            away an outline drawn around it. A swatch rather than the file, so
+            no test waits on an image. */}
+        <div style={{ borderRadius: 12, height: 90, overflow: 'hidden', width: 160 }}>
+          <div {...pathOf(page, 'image')} style={{ background: '#c33', height: 90, width: 160 }} />
+        </div>
+
         {/* What a preview rendered before a row was deleted in the admin: a
             path whose row no longer exists. The click must say so rather
             than do nothing. */}

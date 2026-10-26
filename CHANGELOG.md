@@ -42,6 +42,12 @@ on by default, switched per browser):
   and still loading, and its fields only arrived when the reveal opened it
   four seconds later - the cursor then landing in the block's name. Also in
   2.0.0, where focus mode started off on a wide screen and nobody met it.
+- **The hover outline shows on a picture in a box of its own size.** It was
+  drawn 2 px outside the element, and a rounded box with `overflow: hidden` -
+  cards, portraits, before/after pairs, a slide at the edge of a carousel -
+  cut it away completely: the click reached the field, the pointer saw
+  nothing to click. Where the page would cut it, the outline (and the flash
+  after a reveal) is drawn inside the element instead.
 
 ## 2.0.0
 
