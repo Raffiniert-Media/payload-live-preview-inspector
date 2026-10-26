@@ -78,7 +78,7 @@ export const payloadLivePreviewInspector =
     // Own subpath (not /client): the listener imports @payloadcms/ui, which
     // must never be reachable from the frontend-facing /client barrel.
     const LISTENER_PATH =
-      '@raffiniert-media-ag/payload-visual-editor/listener#LivePreviewInspectorListener'
+      '@raffiniert-media-ag/payload-live-preview-inspector/listener#LivePreviewInspectorListener'
 
     const createComponentConfig = () => ({
       clientProps: {
@@ -166,12 +166,3 @@ export const payloadLivePreviewInspector =
 
     return config
   }
-
-/**
- * The plugin under the package's name since 2.0 - the same function. The
- * package grew from click-to-field into an editor and was renamed with it;
- * `payloadLivePreviewInspector` stays, so a 1.x config changes its import and
- * nothing else.
- */
-export const payloadVisualEditor = payloadLivePreviewInspector
-export type PayloadVisualEditorConfig = PayloadLivePreviewInspectorConfig

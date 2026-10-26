@@ -1,8 +1,8 @@
 'use client'
 
 import { useLivePreview } from '@payloadcms/live-preview-react'
-import { VisualEditorClient } from '@raffiniert-media-ag/payload-visual-editor/client'
-import { inspectable, pathOf } from '@raffiniert-media-ag/payload-visual-editor/path'
+import { LivePreviewInspectorClient } from '@raffiniert-media-ag/payload-live-preview-inspector/client'
+import { inspectable, pathOf } from '@raffiniert-media-ag/payload-live-preview-inspector/path'
 import { useEffect, useState } from 'react'
 
 import type { Page } from '../../../../../payload-types.js'
@@ -32,7 +32,7 @@ export const PagePreviewClient = ({ initialData }: Props) => {
 
   return (
     <div style={{ fontFamily: 'sans-serif' }}>
-      <VisualEditorClient />
+      <LivePreviewInspectorClient />
       <header
         style={{
           background: '#111',

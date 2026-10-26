@@ -1,6 +1,6 @@
-# payload-visual-editor
+# payload-live-preview-inspector
 
-A visual editor for [Payload CMS](https://payloadcms.com), built around Payload's own [Live Preview](https://payloadcms.com/docs/live-preview/overview) and its own form.
+Click-to-edit for [Payload CMS](https://payloadcms.com)'s own [Live Preview](https://payloadcms.com/docs/live-preview/overview) - click a component in the preview and land on its field - and an editing workspace around Payload's own form.
 
 - **Click to edit.** Hover a component in the preview to highlight it, click it, and the edit form goes straight to the matching field: tabs switched, accordions and rows opened, the field flashed and focused, the caret on the word you clicked. It works the other way round too: focusing a field in the form scrolls the preview to it.
 - **An editor around the form.** A divider between form and preview, an outline of the document, a path bar, focus mode, a block toolbar in the preview (move, duplicate, add, remove, with undo), screen widths for the preview, and a layout that works on a phone.
@@ -9,13 +9,11 @@ Everything is done through Payload's form API and saved the way any edit is: not
 
 This plugin does **not** set up Live Preview itself. It works on top of an already-working `admin.livePreview` configuration.
 
-> **Formerly `@raffiniert-media-ag/payload-live-preview-inspector`.** The package grew from click-to-field into an editor and was renamed for 2.0. See [Upgrading from 1.x](#upgrading-from-payload-live-preview-inspector-1x): the old export names still work.
-
 ![Hovering and clicking a component in Live Preview scrolls, expands, and flashes the matching field in the admin edit form](./docs/images/example.gif)
 
 ## How it works
 
-`VisualEditorClient` (in your frontend) highlights the tagged element under the pointer and, on click, posts its field path to the admin panel. `LivePreviewInspectorListener` (auto-registered by the plugin) resolves that path against the live form state and reveals the field. It reads the route there off the collection's field config rather than finding it by trial: which tabs to switch to (nested and named ones too), which collapsible fields to open, and which Array/Blocks rows to expand, all rows in one step through the form state. It then scrolls, flashes and focuses the field. A newer click cancels a reveal still in flight. Targeting is point-based and picks the smallest tagged element, so text stays clickable even beneath a full-card overlay link.
+`LivePreviewInspectorClient` (in your frontend) highlights the tagged element under the pointer and, on click, posts its field path to the admin panel. `LivePreviewInspectorListener` (auto-registered by the plugin) resolves that path against the live form state and reveals the field. It reads the route there off the collection's field config rather than finding it by trial: which tabs to switch to (nested and named ones too), which collapsible fields to open, and which Array/Blocks rows to expand, all rows in one step through the form state. It then scrolls, flashes and focuses the field. A newer click cancels a reveal still in flight. Targeting is point-based and picks the smallest tagged element, so text stays clickable even beneath a full-card overlay link.
 
 Clicking text also carries the **position within it**, so the cursor lands on the word you clicked rather than at the start of the field. Preview and admin never share the same markup, so the position travels as the surrounding text with an offset into it (invisible stega characters stripped, whitespace collapsed), which the listener maps back onto whichever text node holds it in the editor. Rich text (Lexical) gets a real caret; `text`/`textarea` inputs get their selection set. When the text can't be found (a stale preview, an edited value), focusing falls back to the start of the field.
 
@@ -32,15 +30,15 @@ From auto-tagged leaves, the client also **infers block containers**, so clickin
 ## Installation
 
 ```sh
-pnpm add @raffiniert-media-ag/payload-visual-editor
+pnpm add @raffiniert-media-ag/payload-live-preview-inspector
 ```
 
 Requires `react`/`react-dom` 19 and Payload 3.84.1 or newer; `payload` and `@payloadcms/ui` are optional peers only needed on the admin side. The package has four entry points, split so nothing heavy can leak into your frontend bundles:
 
 | Subpath     | Contains                                                               | Import it from                                  |
 | ----------- | ---------------------------------------------------------------------- | ------------------------------------------------ |
-| `.`         | `payloadVisualEditor()` plugin                                         | `payload.config.ts`                              |
-| `/client`   | `VisualEditorClient` (a `'use client'` component)                      | only the file that mounts the component          |
+| `.`         | `payloadLivePreviewInspector()` plugin                                         | `payload.config.ts`                              |
+| `/client`   | `LivePreviewInspectorClient` (a `'use client'` component)                      | only the file that mounts the component          |
 | `/path`     | `inspectable`, `pathOf`, `stegaClean`, constants: pure, no components | everywhere else: pages, blocks, Server Components |
 | `/listener` | admin-side listener (imports `@payloadcms/ui`)                         | nowhere: the plugin wires it up for you          |
 
@@ -53,7 +51,7 @@ Bundlers treat `'use client'` barrels as indivisible: importing helpers from `/c
 List the collections/globals to edit visually (each must already have Live Preview enabled):
 
 ```ts
-import { payloadVisualEditor } from '@raffiniert-media-ag/payload-visual-editor'
+import { payloadLivePreviewInspector } from '@raffiniert-media-ag/payload-live-preview-inspector'
 
 export default buildConfig({
   admin: {
@@ -63,7 +61,7 @@ export default buildConfig({
     },
   },
   plugins: [
-    payloadVisualEditor({
+    payloadLivePreviewInspector({
       collections: { posts: true },
       globals: { siteSettings: true },
     }),
@@ -77,27 +75,27 @@ After adding the plugin, regenerate Payload's import map (`payload generate:impo
 
 ### 2. Frontend
 
-Mount `VisualEditorClient` once, near the root of whatever page renders inside the Live Preview iframe:
+Mount `LivePreviewInspectorClient` once, near the root of whatever page renders inside the Live Preview iframe:
 
 ```tsx
-import { VisualEditorClient } from '@raffiniert-media-ag/payload-visual-editor/client'
+import { LivePreviewInspectorClient } from '@raffiniert-media-ag/payload-live-preview-inspector/client'
 
 export default function PreviewPage() {
   return (
     <>
-      <VisualEditorClient />
+      <LivePreviewInspectorClient />
       {/* ...your page... */}
     </>
   )
 }
 ```
 
-If Payload's admin runs on another origin than the site (say `cms.example.com` previewing `www.example.com`), name it: `<VisualEditorClient targetOrigin="https://cms.example.com" />`. Without it, the preview only talks to its own origin, which is right whenever Payload and the site are one app; see [Security](#security).
+If Payload's admin runs on another origin than the site (say `cms.example.com` previewing `www.example.com`), name it: `<LivePreviewInspectorClient targetOrigin="https://cms.example.com" />`. Without it, the preview only talks to its own origin, which is right whenever Payload and the site are one app; see [Security](#security).
 
 Then tag elements. The recommended way is `inspectable()` + `pathOf()`: wrap your document data once, and every nested node knows its own field path. Array/blocks rows are addressed by their stable `id`, so the mapping survives reordering. Plain JavaScript, no hooks, so it works in Server Components too:
 
 ```tsx
-import { inspectable, pathOf } from '@raffiniert-media-ag/payload-visual-editor/path'
+import { inspectable, pathOf } from '@raffiniert-media-ag/payload-live-preview-inspector/path'
 
 const page = inspectable(data)
 
@@ -117,7 +115,7 @@ const page = inspectable(data)
 Every part is on by default. Turn parts off, or change the screen widths, with the plugin's `editor` option:
 
 ```ts
-payloadVisualEditor({
+payloadLivePreviewInspector({
   collections: { pages: true },
   editor: {
     blockToolbar: true,
@@ -179,7 +177,7 @@ const page = inspectable(data, {
   },
 })
 
-import { stegaClean } from '@raffiniert-media-ag/payload-visual-editor/path'
+import { stegaClean } from '@raffiniert-media-ag/payload-live-preview-inspector/path'
 stegaClean(page.title) // raw string - use before ===, new Date(), APIs; also deep-cleans objects
 ```
 
@@ -216,7 +214,7 @@ Middle-clicks arrive as `auxclick` and are not intercepted. Pass `disableLinks={
 
 The admin and the preview talk through `postMessage`, and the preview can change the document (the block toolbar). Both directions are locked down:
 
-- **The preview talks only to the admin's origin.** `VisualEditorClient` listens to and posts to `targetOrigin`, which defaults to the page's own origin. Where the browser names the page framing the preview (`location.ancestorOrigins`) and it is another origin, the preview half does not start at all: no click capture, no tagging, no messages. Before 2.0 the origin was taken from whatever framed the page, so a page framing a public site could receive the paths and text of what was clicked there. `targetOrigin: '*'` restores that trust; avoid it.
+- **The preview talks only to the admin's origin.** `LivePreviewInspectorClient` listens to and posts to `targetOrigin`, which defaults to the page's own origin. Where the browser names the page framing the preview (`location.ancestorOrigins`) and it is another origin, the preview half does not start at all: no click capture, no tagging, no messages. Before 2.0 the origin was taken from whatever framed the page, so a page framing a public site could receive the paths and text of what was clicked there. `targetOrigin: '*'` restores that trust; avoid it.
 - **The admin listens only to its preview.** Messages are accepted only from the live preview iframe's own window and origin; nested frames inside the preview (a YouTube or Maps embed) are ignored.
 - **Changes need a person.** Block actions that change the document (move, duplicate, add, remove) are taken from the preview only right after a real click or key press there: a script the site loads could otherwise post as the preview. They run one at a time, each checked against the form as it is at that moment (`minRows`, `maxRows`, `isSortable`, a read-only form or field, and the user's field permissions); Payload enforces access again on save.
 - **Secrets stay in the admin.** Value matching sends the document's text values to the preview's origin only, and never an auth collection's `password`, `confirm-password` or `apiKey`.
@@ -265,21 +263,18 @@ const page = inspectable(data, { enabled: isEnabled, stega: true })
 
 In the admin, the editor stays out of the way of typing: only a small watcher re-renders per keystroke, the outline catches up 200 ms after a change and the preview's values 600 ms after typing pauses, and the preview's block toolbar rests while nothing moves.
 
-## Upgrading from payload-live-preview-inspector 1.x
+## Upgrading from 1.x
 
-1. Swap the package: `pnpm remove @raffiniert-media-ag/payload-live-preview-inspector && pnpm add @raffiniert-media-ag/payload-visual-editor`.
-2. Change the imports to the new package name. The old export names (`payloadLivePreviewInspector`, `LivePreviewInspectorClient`) still work beside the new ones (`payloadVisualEditor`, `VisualEditorClient`).
-3. Regenerate the import map (`payload generate:importmap`): the admin component is registered under the new package path, and an import map that still names the old one leaves the editor out.
-4. If your admin runs on another origin than the site, pass `targetOrigin` to the client (see [Security](#security)). Without it, the preview now only talks to its own origin.
-
-Data attributes (`data-payload-live-preview-*`), CSS custom properties, the console prefix and the choices the editor remembers in the browser keep their names, so nothing an editor set up is lost.
+1. `pnpm add @raffiniert-media-ag/payload-live-preview-inspector@^2`. Same package, same imports, same import map.
+2. If your admin runs on another origin than the site, pass `targetOrigin` to the client (see [Security](#security)). Without it, the preview now only talks to its own origin - the one change in 2.0 that can break a setup.
+3. Page mode and focus mode now start switched on, each a switch an editor can turn off; `editor: { pageMode: 'off', focusMode: 'off' }` makes the 1.x layout the default again. See the [CHANGELOG](./CHANGELOG.md).
 
 ## API reference
 
 From `.` (Payload config):
 
-- `payloadVisualEditor({ collections?, globals?, disabled?, editor?, flashColor?, flashDurationMs?, scrollOffset?, scrollBehavior?, accordionAnimationMs?, tabSwitchWaitMs? })`: see [Setup](#1-admin-payload-config) and [The editor](#the-editor). `payloadLivePreviewInspector` is the same function.
-- Types: `PayloadVisualEditorConfig` (= `PayloadLivePreviewInspectorConfig`), `EditorFeatures`, `Viewport`.
+- `payloadLivePreviewInspector({ collections?, globals?, disabled?, editor?, flashColor?, flashDurationMs?, scrollOffset?, scrollBehavior?, accordionAnimationMs?, tabSwitchWaitMs? })`: see [Setup](#1-admin-payload-config) and [The editor](#the-editor).
+- Types: `PayloadLivePreviewInspectorConfig`, `EditorFeatures`, `Viewport`.
 
 From `/path` (pure helpers, safe anywhere; also re-exported from `/client`):
 
@@ -291,7 +286,7 @@ From `/path` (pure helpers, safe anywhere; also re-exported from `/client`):
 
 From `/client` (import only where you mount it):
 
-- `VisualEditorClient({ blockToolbar?, disableInteractions?, disableLinks?, hoverColor?, interactionModifier?, stega?, targetOrigin?, valueMatching? })`, all optional; `LivePreviewInspectorClient` is the same component. `blockToolbar` (default `true`) shows the block toolbar in the preview. `disableInteractions` (default `true`) keeps a revealing click from also operating the page, and `interactionModifier` (default `'alt'`) is the key that turns it back into an ordinary click; see [What a click in the preview does](#what-a-click-in-the-preview-does). `targetOrigin` (default: the page's own origin) is the admin's origin, the only one the preview talks to; see [Security](#security).
+- `LivePreviewInspectorClient({ blockToolbar?, disableInteractions?, disableLinks?, hoverColor?, interactionModifier?, stega?, targetOrigin?, valueMatching? })`, all optional. `blockToolbar` (default `true`) shows the block toolbar in the preview. `disableInteractions` (default `true`) keeps a revealing click from also operating the page, and `interactionModifier` (default `'alt'`) is the key that turns it back into an ordinary click; see [What a click in the preview does](#what-a-click-in-the-preview-does). `targetOrigin` (default: the page's own origin) is the admin's origin, the only one the preview talks to; see [Security](#security).
 
 From `/listener`: `LivePreviewInspectorListener`, admin-side; the plugin registers it for you.
 

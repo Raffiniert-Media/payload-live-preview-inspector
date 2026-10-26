@@ -45,17 +45,10 @@ on by default, switched per browser):
 
 ## 2.0.0
 
-### Renamed: `@raffiniert-media-ag/payload-visual-editor`
+Not published on its own: it ships inside 2.1.0.
 
-The package grew from click-to-field into an editor and is renamed with it.
-What breaks, and what to do:
+### What breaks
 
-- **The package name.** Install `@raffiniert-media-ag/payload-visual-editor`
-  and change the imports. The export names of 1.x keep working beside the new
-  ones: `payloadLivePreviewInspector` = `payloadVisualEditor`,
-  `LivePreviewInspectorClient` = `VisualEditorClient`.
-- **The import map.** The admin component is registered under the new
-  package path; regenerate it (`payload generate:importmap`).
 - **`targetOrigin` defaults to the page's own origin.** The preview half used
   to take the origin of whatever framed it on its word - so a page that framed
   a public site could receive the paths and text of what was clicked there.
@@ -63,9 +56,6 @@ What breaks, and what to do:
   and does not start at all in a frame the browser says is another origin.
   Sites where Payload and the frontend are one app need nothing; a split
   setup passes `targetOrigin`.
-
-Data attributes, CSS custom properties, the console prefix and the choices
-remembered in the browser keep their names.
 
 ### From click-to-field to an editor around the form
 

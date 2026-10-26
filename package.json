@@ -1,8 +1,8 @@
 {
-  "name": "@raffiniert-media-ag/payload-visual-editor",
+  "name": "@raffiniert-media-ag/payload-live-preview-inspector",
   "version": "2.1.0",
   "homepage": "https://raffiniert.biz",
-  "description": "A visual editor around Payload's form: click in the Live Preview to reach any field, a resizable split, an outline, focus mode, a block toolbar in the preview, screen widths and a phone layout.",
+  "description": "Click-to-edit for Payload's Live Preview - click a component, land on its field - and a workspace around Payload's form: page mode, an outline, focus mode, a resizable split, a block toolbar in the preview, screen widths and a phone layout.",
   "keywords": [
     "payload",
     "payloadcms",
@@ -15,7 +15,8 @@
     "storyblok",
     "developer-tools",
     "visual-editing",
-    "visual-editor",
+    "click-to-edit",
+    "inspector",
     "click-to-scroll",
     "cms"
   ],
@@ -26,10 +27,10 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Raffiniert-Media/payload-visual-editor.git"
+    "url": "git+https://github.com/Raffiniert-Media/payload-live-preview-inspector.git"
   },
   "bugs": {
-    "url": "https://github.com/Raffiniert-Media/payload-visual-editor/issues"
+    "url": "https://github.com/Raffiniert-Media/payload-live-preview-inspector/issues"
   },
   "type": "module",
   "sideEffects": [

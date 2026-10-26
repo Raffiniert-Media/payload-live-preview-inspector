@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { payloadLivePreviewInspector } from './index.js'
 
 const LISTENER_PATH =
-  '@raffiniert-media-ag/payload-visual-editor/listener#LivePreviewInspectorListener'
+  '@raffiniert-media-ag/payload-live-preview-inspector/listener#LivePreviewInspectorListener'
 
 /** The minimum a `Config` needs for the plugin to find anything in it. */
 const configWith = (collections: { slug: string }[], globals: { slug: string }[] = []) =>
