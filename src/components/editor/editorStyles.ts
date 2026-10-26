@@ -5,7 +5,7 @@ import {
   HIDDEN_ATTRIBUTE,
   HOST_ATTRIBUTE,
 } from '../../utilities/isolate.js'
-import { PAYLOAD_CLASS, PAYLOAD_MID_BREAK_PX, PAYLOAD_PROPERTY } from '../../utilities/payloadAdmin.js'
+import { MODAL_CONTAINER_CLASS, PAYLOAD_CLASS, PAYLOAD_MID_BREAK_PX, PAYLOAD_PROPERTY } from '../../utilities/payloadAdmin.js'
 
 /**
  * The editor's rules for Payload's own markup - the preview's width, the
@@ -87,6 +87,15 @@ const page = `html[${PAGE_ATTRIBUTE}]`
 const topBar = `var(${EDITOR_PROPERTY.topBar}, ${controls})`
 const pagePanel = `html[${PAGE_ATTRIBUTE}][${PANEL_ATTRIBUTE}]`
 const pageNoPanel = `html[${PAGE_ATTRIBUTE}]:not([${PANEL_ATTRIBUTE}])`
+/**
+ * One of Payload's parts of the document being edited, never the same part in
+ * a modal: a document opened in a drawer is rendered with the same classes -
+ * its own form, its own buttons - and page mode is about the page. On a narrow
+ * screen it hid every `collection-edit__main` while the sheet was down, and a
+ * post opened from the page arrived as a drawer with nothing in it.
+ */
+const own = (name: (typeof PAYLOAD_CLASS)[keyof typeof PAYLOAD_CLASS]) =>
+  `${c(name)}:not(.${MODAL_CONTAINER_CLASS} *)`
 
 /**
  * Page mode: the page is where the editor works, and Payload's frame steps
@@ -104,12 +113,12 @@ const pageNoPanel = `html[${PAGE_ATTRIBUTE}]:not([${PANEL_ATTRIBUTE}])`
  */
 const pageModeStyles = ({ viewports }: { viewports: boolean }): string => `
 ${page} ${c(PAYLOAD_CLASS.appHeader)},
-${page} ${c(PAYLOAD_CLASS.docHeader)} {
+${page} ${own(PAYLOAD_CLASS.docHeader)} {
   display: none !important;
 }
 
 /* The dates make room for the title; the status and Payload's autosave note stay. */
-${page} ${c(PAYLOAD_CLASS.docControlsValueWrap)} {
+${page} ${own(PAYLOAD_CLASS.docControlsValueWrap)} {
   display: none;
 }
 
@@ -135,7 +144,7 @@ ${page} ${c(PAYLOAD_CLASS.livePreviewToolbarBreakpoint)} {
    * Payload sticks only the buttons on a narrow screen and lets the status
    * above them scroll away. Here there is no status, so nothing scrolls away.
    */
-  ${page} ${c(PAYLOAD_CLASS.docControls)} {
+  ${page} ${own(PAYLOAD_CLASS.docControls)} {
     top: 0;
   }
   ${page} ${c(PAYLOAD_CLASS.livePreviewToolbar)} {
@@ -146,15 +155,15 @@ ${page} ${c(PAYLOAD_CLASS.livePreviewToolbarBreakpoint)} {
    * published version, when there are changes - and the way to the versions:
    * one short line. The title and the way back to the list are in the bar.
    */
-  ${page} ${c(PAYLOAD_CLASS.docControlsContent)} {
+  ${page} ${own(PAYLOAD_CLASS.docControlsContent)} {
     padding-bottom: 4px;
     padding-top: 4px;
   }
-  ${page} ${c(PAYLOAD_CLASS.docControlsContent)} ${c(PAYLOAD_CLASS.docControlsListItem)}:not(${c(PAYLOAD_CLASS.docControlsStatus)}),
+  ${page} ${own(PAYLOAD_CLASS.docControlsContent)} ${c(PAYLOAD_CLASS.docControlsListItem)}:not(${c(PAYLOAD_CLASS.docControlsStatus)}),
   ${page} ${host(HOST.pageTitle)} {
     display: none;
   }
-  ${pageNoPanel} ${c(PAYLOAD_CLASS.editMain)},
+  ${pageNoPanel} ${own(PAYLOAD_CLASS.editMain)},
   ${pageNoPanel} ${host(HOST.split)} {
     display: none;
   }

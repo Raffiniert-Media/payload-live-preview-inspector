@@ -34,6 +34,17 @@ posts in a carousel and the click went to the carousel.
   yet, when the click is declined ("save first"). In a drawer of a registered
   collection the plugin's listener hands the drawer's form over, so the jump
   reads its state and its `modified` flag as in the page's own form.
+- **The document from its beginning**: the drawer opens at the first tab -
+  Payload would open the one its user had last ("Suchmaschinen", on the first
+  customer site) - unless the field clicked is behind another.
+- **The page stays where it was.** The drawer's document suspends while it
+  renders, and with no boundary of its own that hid the whole edit view for a
+  third of a second - the preview with it, which lost its scroll position and
+  came back at the top. The drawer has its own Suspense boundary, and Payload's
+  loading overlay stands in its place for that moment.
+- **On a narrow screen** page mode hid every `collection-edit__main` while its
+  sheet was down - the drawer's too, which opened empty. Page mode's rules now
+  stop at Payload's modal layer.
 - **A field in a drawer was taken for the page's.** Focus in any drawer - a
   relationship's, an upload's - was reported to the preview as the edited
   document's field of the same path: the title of a post in a drawer flashed

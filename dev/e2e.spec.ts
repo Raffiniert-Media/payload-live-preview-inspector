@@ -404,6 +404,42 @@ test.describe('another document the page shows', () => {
     await expect(field).toHaveValue(/\(edited\)$/)
   })
 
+  test('on a narrow screen the drawer is Payload’s own, over everything - and has the post in it', async ({ page }) => {
+    await page.setViewportSize({ height: 800, width: 1000 })
+    await login(page)
+    const frame = await openLivePreview(page, 'pages')
+    const card = frame.getByTestId('latest-post').first()
+    await card.scrollIntoViewIfNeeded()
+
+    await card.locator('h3').click()
+
+    // Page mode hides the page's form while its sheet is down - not the
+    // drawer's, which has the same classes.
+    const field = page.locator(DRAWER).locator('#field-title')
+    await expect(field).toBeVisible()
+    await expect(field).toBeFocused()
+  })
+
+  test('the drawer opens at the first tab, whichever tab Payload remembers from last time', async ({ page }) => {
+    await login(page)
+    const frame = await openLivePreview(page, 'pages')
+    // To the Meta tab first, which Payload then remembers for the next time.
+    const section = frame.getByTestId('latest-post-section').first()
+    await section.scrollIntoViewIfNeeded()
+    await section.click()
+    const drawer = page.locator(DRAWER)
+    await expect(drawer.locator('#field-metaSections__0__title')).toBeFocused()
+    await page.keyboard.press('Escape')
+    await expect(drawer).toHaveCount(0)
+
+    // The card itself - no field: the post from its beginning.
+    const card = frame.getByTestId('latest-post').first()
+    await card.click({ position: { x: 4, y: 4 } })
+
+    await expect(drawer.locator('.tabs-field__tab-button--active').first()).toHaveText('Content')
+    await expect(drawer.locator('#field-title')).toBeVisible()
+  })
+
   test('a document of a collection the admin does not have is nobody’s to open', async ({ page }) => {
     await login(page)
     const frame = await openLivePreview(page, 'pages')

@@ -1,7 +1,8 @@
 'use client'
 
-import { useDocumentDrawer } from '@payloadcms/ui'
-import React, { useEffect, useLayoutEffect, useRef } from 'react'
+import { LoadingOverlay, useDocumentDrawer } from '@payloadcms/ui'
+import React, { Suspense, useEffect, useLayoutEffect, useRef } from 'react'
+import { createPortal } from 'react-dom'
 
 import type { CaretHint } from '../../utilities/caret.js'
 import type { BlocksMap, SchemaField } from '../../utilities/revealPlan.js'
@@ -34,7 +35,6 @@ import {
   findTabsElement,
   formFieldPathOf,
   planReveal,
-  TAB_BUTTON_ACTIVE_CLASS,
   tabButtonsOf,
 } from '../../utilities/revealPlan.js'
 
@@ -199,15 +199,41 @@ const revealInDrawer = async (
   const reachable =
     (form ? resolveRowIDs(path, formState) : null) ??
     (rowIDAt === -1 ? segments : segments.slice(0, rowIDAt)).join('.')
-  if (!reachable) {
-    return 'done'
-  }
-  const fieldPath =
-    (form ? fieldPathFromFormState(reachable, formState) : null) ??
-    formFieldPathOf(fields, reachable, formState, blocksMap) ??
-    reachable
+  const fieldPath = reachable
+    ? ((form ? fieldPathFromFormState(reachable, formState) : null) ??
+      formFieldPathOf(fields, reachable, formState, blocksMap) ??
+      reachable)
+    : ''
+  const plan = fieldPath ? planReveal(fields, fieldPath, formState, blocksMap) : { complete: true, steps: [] }
 
-  const plan = planReveal(fields, fieldPath, formState, blocksMap)
+  // The document from its beginning: Payload opens a document at the tab its
+  // user had last - "Suchmaschinen", on the first customer site - and a
+  // document opened from the page is opened to be read, its content first.
+  // Every tabs field at the top of the document goes to its first tab, but
+  // the one the clicked field is behind.
+  //
+  // Clicked even where it is the active one already. A tabs field starts at
+  // its first tab and moves to the remembered one once the preferences have
+  // arrived - unless a tab was chosen by then, which is what a click is to
+  // Payload, active or not.
+  const toward = new Set(plan.steps.flatMap((step) => (step.kind === 'tab' ? [step.tabs] : [])))
+  for (const tabsField of fields) {
+    if (tabsField.type !== 'tabs' || toward.has(tabsField)) {
+      continue
+    }
+    const tabs = await waitForElement(
+      () => findTabsElement({ index: 0, kind: 'tab', parentPath: '', tabs: tabsField }, fields, formState, blocksMap, scope),
+      tabSwitchWaitMs,
+      { signal },
+    )
+    if (tabs) {
+      tabButtonsOf(tabs)[0]?.click()
+    }
+  }
+  if (!fieldPath || signal.aborted) {
+    return signal.aborted ? 'not-found' : 'done'
+  }
+
   // Every closed row on the way at once, through the form state that owns
   // the flag - one dispatch per field, so none overwrites another.
   if (form) {
@@ -242,9 +268,8 @@ const revealInDrawer = async (
       if (!button) {
         break
       }
-      if (!button.classList.contains(TAB_BUTTON_ACTIVE_CLASS)) {
-        button.click()
-      }
+      // Active or not, for the reason above.
+      button.click()
       continue
     }
     const holder = await waitForElement(
@@ -342,6 +367,58 @@ ${layer} > * { pointer-events: auto; }`
   }, [active, drawerSlug])
 }
 
+/** Where the drawer stands while it is open - for the moment it is hidden (see below). */
+const useDrawerBox = (drawerSlug: string, open: boolean) => {
+  const box = useRef<DOMRect | null>(null)
+  useEffect(() => {
+    const drawer = open ? document.getElementById(drawerSlug) : null
+    if (!drawer) {
+      return
+    }
+    const read = () => {
+      const rect = drawer.getBoundingClientRect()
+      if (rect.width > 0 && rect.height > 0) {
+        box.current = rect
+      }
+    }
+    read()
+    const observer = new ResizeObserver(read)
+    observer.observe(drawer)
+    return () => observer.disconnect()
+  }, [drawerSlug, open])
+  return box
+}
+
+/**
+ * The drawer's place while its content suspends: Payload's loading overlay
+ * where the drawer was, so the drawer does not blink out for the third of a
+ * second it takes. Above the page, as the drawer is (`drawerZBase` + 1).
+ */
+const DrawerPlaceholder: React.FC<{ box: React.RefObject<DOMRect | null> }> = ({ box }) => {
+  const rect = box.current
+  return rect
+    ? createPortal(
+        <div
+          aria-busy="true"
+          style={{
+            background: 'var(--theme-bg)',
+            height: rect.height,
+            left: rect.left,
+            position: 'fixed',
+            top: rect.top,
+            // The overlay is `position: fixed`; this keeps it in here.
+            transform: 'translateZ(0)',
+            width: rect.width,
+            zIndex: 101,
+          }}
+        >
+          <LoadingOverlay />
+        </div>,
+        document.body,
+      )
+    : null
+}
+
 /** Payload's document drawer for `target`, open from the moment it mounts; it reports when it closes. */
 export const RelatedDocumentDrawer: React.FC<Props> = ({
   besidePreview,
@@ -382,6 +459,7 @@ export const RelatedDocumentDrawer: React.FC<Props> = ({
   }, [drawerSlug, isDrawerOpen, onClose, onDrawer])
 
   useBesidePreview(drawerSlug, besidePreview && isDrawerOpen)
+  const box = useDrawerBox(drawerSlug, isDrawerOpen)
 
   // The latest of everything for the reveal, which runs once per click.
   const latest = useRef({ blocksMap, fields, flash, onReveal, quietly, tabSwitchWaitMs, target })
@@ -406,5 +484,18 @@ export const RelatedDocumentDrawer: React.FC<Props> = ({
     return () => controller.abort()
   }, [drawerSlug, isDrawerOpen, target.nonce])
 
-  return <DocumentDrawer />
+  /*
+   * Its own Suspense boundary. The drawer's document arrives from the server
+   * and, rendered, loads what its fields need - and something that suspends
+   * with no boundary of its own hides everything up to the nearest one: on a
+   * theme's admin, the whole edit view for a third of a second, the live
+   * preview with it. A frame hidden like that loses its scroll position, and
+   * the page an editor had scrolled to was back at its top. The wait is the
+   * drawer's alone now, and it waits where it stands.
+   */
+  return (
+    <Suspense fallback={<DrawerPlaceholder box={box} />}>
+      <DocumentDrawer />
+    </Suspense>
+  )
 }
