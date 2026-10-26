@@ -39,8 +39,9 @@ const sameIndex = (a: ValueIndex, b: ValueIndex): boolean => {
   if (a.size !== b.size) {
     return false
   }
-  for (const [value, path] of a) {
-    if (b.get(value) !== path || !b.has(value)) {
+  for (const [value, paths] of a) {
+    const other = b.get(value)
+    if (other === undefined || String(other) !== String(paths)) {
       return false
     }
   }

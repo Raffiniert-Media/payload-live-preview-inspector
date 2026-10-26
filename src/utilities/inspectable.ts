@@ -44,6 +44,17 @@ const STEGA_FORCE_KEYS = ['alt', 'ariaLabel', 'placeholder']
  */
 const looksLikeProse = (value: string): boolean => /\S\s+\S/.test(value)
 
+/**
+ * A rich-text text node's `text` (Lexical's `{ type: 'text', text }`): always
+ * display text, never a value code compares - so a single word is encoded
+ * too. The two-word rule left a one-word heading untagged and to value
+ * matching, which gives up on a word another field shares: measured on the
+ * first customer site, a card titled "Personaltraining" beside a price plan
+ * of the same name.
+ */
+const isRichTextText = (target: object, prop: string): boolean =>
+  prop === 'text' && (target as { type?: unknown }).type === 'text'
+
 export type StegaOptions = {
   /**
    * Field names that are always encoded, even when their value is a single
@@ -125,7 +136,7 @@ const createNode = (value: object, path: null | string, options: NodeOptions): o
           const defaultEncode =
             !options.stega.skipKeys.has(prop) &&
             !shouldSkipStega(result) &&
-            (options.stega.forceKeys.has(prop) || looksLikeProse(result))
+            (options.stega.forceKeys.has(prop) || isRichTextText(target, prop) || looksLikeProse(result))
           const encode = options.stega.filter
             ? options.stega.filter({ defaultEncode, key: prop, path: fieldPath, value: result })
             : defaultEncode

@@ -53,6 +53,16 @@ on by default, switched per browser):
   it while it moves. The hovered element keeps its classes
   (`LIVE_PREVIEW_HOVER_CLASS_NAME`, the cursor) but draws nothing itself. A
   browser without popovers gets the same layer at the highest `z-index`.
+- **A one-word heading in rich text is clickable, whatever else on the page
+  says the same.** Stega encodes only prose (two words or more), so single
+  words - which are what select values look like - were left to value
+  matching, and value matching gave up on a value two fields share: on the
+  first customer site a carousel card titled "Personaltraining" beside a price
+  plan of the same name, and a click on the card's title went to the
+  carousel. A rich-text text node (`{ type: 'text', text }`) is always display
+  text, so it is encoded even when it is one word; and a value several fields
+  share is matched inside the tagged block that holds exactly one of them -
+  the price plan's name in its plan, the card's heading in its card.
 
 ## 2.0.0
 

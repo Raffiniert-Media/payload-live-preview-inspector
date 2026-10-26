@@ -237,6 +237,22 @@ describe('inspectable / pathOf', () => {
       expect(urlAlt.alt).toBe('/media/acme-logo.svg')
     })
 
+    it('encodes a rich-text text node even when it is one word - a card titled "Personaltraining"', () => {
+      const card = inspectable(
+        {
+          richText: { root: { children: [{ type: 'heading', children: [{ type: 'text', text: 'Personaltraining' }] }] } },
+          variant: { text: 'primary' },
+        },
+        { stega: true },
+      )
+
+      const heading = card.richText.root.children[0].children[0].text
+      expect(findStegaPaths(heading)).toEqual(['richText.root.children.0.children.0.text'])
+      expect(stegaClean(heading)).toBe('Personaltraining')
+      // A `text` key that is not a Lexical text node keeps the single-token rule.
+      expect(card.variant.text).toBe('primary')
+    })
+
     it('supports custom encodeKeys for known single-word display fields', () => {
       const page = inspectable(
         { buttonLabel: 'Kontakt', variant: 'default' },

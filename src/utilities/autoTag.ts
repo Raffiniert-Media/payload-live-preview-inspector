@@ -110,42 +110,31 @@ export const scanStega = (root: Document | Element): void => {
 
 const normalizeText = (text: string): string => stegaClean(text).replace(/\s+/g, ' ').trim()
 
-/** Ambiguous values already reported, so the dev-only notice logs once per value. */
+/** Shared values already reported, so the dev-only notice logs once per value. */
 const warnedAmbiguousValues = new Set<string>()
 
-/** Dev-only: say *why* a value can never be matched (scans rerun constantly, so log once). */
-const warnAmbiguousValues = (leaves: DocumentLeafValue[], pathByValue: ValueIndex): void => {
-  const ambiguous = new Map<string, string[]>()
-
-  for (const { path, value } of leaves) {
-    const normalized = normalizeText(value)
-    if (pathByValue.get(normalized) !== null || warnedAmbiguousValues.has(normalized)) {
+/** Dev-only: say where a shared value can still be matched (scans rerun constantly, so log once). */
+const warnAmbiguousValues = (index: ValueIndex): void => {
+  for (const [value, paths] of index) {
+    if (typeof paths === 'string' || warnedAmbiguousValues.has(value)) {
       continue
     }
-    const paths = ambiguous.get(normalized) ?? []
-    if (!paths.includes(path)) {
-      paths.push(path)
-    }
-    ambiguous.set(normalized, paths)
-  }
-
-  for (const [value, paths] of ambiguous) {
     warnedAmbiguousValues.add(value)
     const excerpt = value.length > 80 ? `${value.slice(0, 80)}…` : value
     // eslint-disable-next-line no-console -- intentional dev-only diagnostic
     console.info(
-      `[payload-live-preview-inspector] Value matching skipped "${excerpt}": the fields ${paths.join(', ')} share this exact value, so a match would be ambiguous. Tag the element with pathOf() or render it through the stega proxy.`,
+      `[payload-live-preview-inspector] Value matching: the fields ${paths.join(', ')} share "${excerpt}", so it is matched only inside a tagged element that holds exactly one of them. Elsewhere, tag the element with pathOf() or render it through the stega proxy.`,
     )
   }
 }
 
 /**
- * Normalized field value → the one path it belongs to, or `null` when several
- * fields share it (ambiguous, never matched). Built once per set of document
- * values, not on every scan: normalizing every value is the expensive half of
- * value matching, and the values change far less often than the DOM does.
+ * Normalized field value → the one path it belongs to, or every path that
+ * shares it. Built once per set of document values, not on every scan:
+ * normalizing every value is the expensive half of value matching, and the
+ * values change far less often than the DOM does.
  */
-export type ValueIndex = Map<string, null | string>
+export type ValueIndex = Map<string, readonly string[] | string>
 
 export const buildValueIndex = (leaves: DocumentLeafValue[]): ValueIndex => {
   const index: ValueIndex = new Map()
@@ -156,30 +145,72 @@ export const buildValueIndex = (leaves: DocumentLeafValue[]): ValueIndex => {
       continue
     }
     const existing = index.get(normalized)
-    index.set(normalized, existing === undefined || existing === path ? path : null)
+    if (existing === undefined || existing === path) {
+      index.set(normalized, path)
+    } else {
+      const paths = typeof existing === 'string' ? [existing] : existing
+      if (!paths.includes(path)) {
+        index.set(normalized, [...paths, path])
+      }
+    }
   }
 
   if (process.env.NODE_ENV !== 'production') {
-    warnAmbiguousValues(leaves, index)
+    warnAmbiguousValues(index)
   }
 
   return index
 }
 
-/** The path a text node's whole (normalized) text matches, if exactly one field has that value. */
-const matchText = (text: null | string, index: ValueIndex): null | string => {
+/**
+ * Of several fields with the same value, the one the element is inside: the
+ * nearest tagged ancestor - a block, a row - that holds exactly one of them.
+ *
+ * Measured on the first customer site: "Personaltraining" was a card's
+ * heading in a carousel and a price plan's name on the same page, so the
+ * card's heading matched neither and a click on it went to the carousel.
+ * The card itself is tagged, and only one of the two paths lies inside it.
+ */
+const pathInside = (paths: readonly string[], el: Element | null): null | string => {
+  for (
+    let owner = el?.closest(`[${LIVE_PREVIEW_PATH_ATTRIBUTE}]`) ?? null;
+    owner;
+    owner = owner.parentElement?.closest(`[${LIVE_PREVIEW_PATH_ATTRIBUTE}]`) ?? null
+  ) {
+    const base = owner.getAttribute(LIVE_PREVIEW_PATH_ATTRIBUTE) ?? ''
+    const inside = paths.filter((path) => path === base || path.startsWith(`${base}.`))
+    if (inside.length === 1) {
+      return inside[0]
+    }
+    if (inside.length > 1) {
+      return null
+    }
+  }
+  return null
+}
+
+/** The path a text node's whole (normalized) text matches - one field's, or the one of several `el` is inside. */
+const matchText = (text: null | string, index: ValueIndex, el: Element | null): null | string => {
   if (!text) {
     return null
   }
   const normalized = normalizeText(text)
-  return normalized.length < MIN_MATCH_LENGTH ? null : (index.get(normalized) ?? null)
+  if (normalized.length < MIN_MATCH_LENGTH) {
+    return null
+  }
+  const paths = index.get(normalized)
+  if (paths === undefined) {
+    return null
+  }
+  return typeof paths === 'string' ? paths : pathInside(paths, el)
 }
 
 /**
  * Tags elements under `root` whose entire text content equals a document
  * field's value - the zero-config layer that needs no frontend data changes
- * at all. Only unambiguous values are used, and only whole-text-node matches
- * count. Never overwrites existing tags.
+ * at all. A value several fields share is used only inside a tagged element
+ * that holds exactly one of them (`pathInside`), and only whole-text-node
+ * matches count. Never overwrites existing tags.
  */
 export const applyValueIndex = (root: Document | Element, index: ValueIndex): void => {
   if (index.size === 0) {
@@ -187,13 +218,12 @@ export const applyValueIndex = (root: Document | Element, index: ValueIndex): vo
   }
 
   walkTextNodes(root, (node) => {
-    const path = matchText(node.nodeValue, index)
-    if (!path) {
+    const el = node.parentElement
+    if (!isTaggable(el)) {
       return
     }
-
-    const el = node.parentElement
-    if (isTaggable(el)) {
+    const path = matchText(node.nodeValue, index, el)
+    if (path) {
       setAutoTag(el, path, 'match')
     }
   })
@@ -249,7 +279,7 @@ export const retagElement = (el: Element, { index, stega }: { index: null | Valu
 
   if (index) {
     for (const node of texts) {
-      const path = matchText(node.nodeValue, index)
+      const path = matchText(node.nodeValue, index, el)
       if (path) {
         setAutoTag(el, path, 'match')
         return

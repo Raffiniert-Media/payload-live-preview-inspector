@@ -99,6 +99,32 @@ describe('applyValueMatching', () => {
     expect(pathAttr(document.getElementById('el'))).toBeNull()
   })
 
+  it('matches a shared value inside the tagged block that holds one of the fields - the card, not the price plan', () => {
+    document.body.innerHTML = `
+      <div data-payload-live-preview-path="layout.$a.slides.$card"><h3 id="card">Personaltraining</h3></div>
+      <ul><li data-payload-live-preview-path="layout.$b.plans.$plan"><h2 id="plan">Personaltraining</h2></li></ul>
+      <p id="loose">Personaltraining</p>`
+    applyValueMatching(document, [
+      { path: 'layout.$a.slides.$card.richText', value: 'Personaltraining' },
+      { path: 'layout.$b.plans.$plan.name', value: 'Personaltraining' },
+    ])
+
+    expect(pathAttr(document.getElementById('card'))).toBe('layout.$a.slides.$card.richText')
+    expect(pathAttr(document.getElementById('plan'))).toBe('layout.$b.plans.$plan.name')
+    // Inside neither: still too ambiguous to guess.
+    expect(pathAttr(document.getElementById('loose'))).toBeNull()
+  })
+
+  it('still skips a shared value when one tagged block holds both fields', () => {
+    document.body.innerHTML = `<div data-payload-live-preview-path="layout.$a"><h3 id="el">Twice here</h3></div>`
+    applyValueMatching(document, [
+      { path: 'layout.$a.title', value: 'Twice here' },
+      { path: 'layout.$a.subtitle', value: 'Twice here' },
+    ])
+
+    expect(pathAttr(document.getElementById('el'))).toBeNull()
+  })
+
   it('reports a skipped ambiguous value once, naming the colliding fields', () => {
     const info = vi.spyOn(console, 'info').mockImplementation(() => {})
     document.body.innerHTML = '<p id="el">Shared hero headline</p>'

@@ -553,17 +553,20 @@ test('rich text: the caret survives a click through a full-card overlay link', a
   expect(offset).toBeGreaterThan(0)
 })
 
-test('rich text: value matching covers text runs stega skips (single words)', async ({ page }) => {
+test('rich text: a single bolded word carries its own stega path, and the click reaches the field', async ({
+  page,
+}) => {
   await login(page)
 
   const frame = await openLivePreview(page)
 
-  // The bolded single word is skipped by stega's two-word prose rule - the
-  // admin's leaf collection now includes the rich-text value's text runs, so
-  // value matching tags it with the `body` field's path.
+  // A rich-text text run is display text, so stega encodes it even as one
+  // word - before 2.1 the two-word prose rule skipped it and value matching
+  // tagged it with the whole `body` field. Value matching for raw single
+  // words is the next test.
   const bold = frame.locator('[data-testid="rich-text-body"] strong')
-  await expect(bold).toHaveAttribute('data-payload-live-preview-path', 'body', { timeout: 15_000 })
-  await expect(bold).toHaveAttribute('data-payload-live-preview-auto', 'match')
+  await expect(bold).toHaveAttribute('data-payload-live-preview-path', /^body\.root\..+\.text$/, { timeout: 15_000 })
+  await expect(bold).toHaveAttribute('data-payload-live-preview-auto', 'stega')
 
   await bold.click()
 
