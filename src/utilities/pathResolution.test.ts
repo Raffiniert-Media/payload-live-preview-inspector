@@ -681,12 +681,15 @@ describe('scrollToElement', () => {
   })
 
   it('slows down over a frame the page spent rendering, instead of leaping to catch up', async () => {
-    const steps: number[] = []
+    // The largest step, kept as it comes: happy-dom runs a frame per
+    // `setImmediate`, so a scroll is tens of thousands of steps - too many to
+    // spread into `Math.max`, which overflowed the stack on CI.
+    let largestStep = 0
     let last = 0
     let stalled = false
     const sim = simulatePage({
       afterScroll: (y) => {
-        steps.push(Math.abs(y - last))
+        largestStep = Math.max(largestStep, Math.abs(y - last))
         last = y
         if (!stalled && y > 1000) {
           // The main thread busy for 200ms, like React mounting a row's fields.
@@ -704,7 +707,8 @@ describe('scrollToElement', () => {
 
     expect(sim.y()).toBeCloseTo(2920, 0)
     // Uncapped, the frame after the stall covered 200ms of the curve at once.
-    expect(Math.max(...steps)).toBeLessThan(700)
+    expect(largestStep).toBeLessThan(700)
+    sim.restore()
   })
 
   it('keeps clear of an offset that changes while the page moves (a header that shows up)', async () => {
