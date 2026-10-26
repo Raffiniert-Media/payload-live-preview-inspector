@@ -39,6 +39,12 @@ export const PAYLOAD_CLASS = {
   docControlsValueWrap: 'doc-controls__value-wrap',
   /** The document's title and its views (edit, versions, API), above the bar. Rendered by `@payloadcms/next`. */
   docHeader: 'doc-header',
+  /** Every drawer, open or on its way out - a document opened in one has a form of its own. */
+  drawer: 'drawer',
+  /** A drawer's panel. */
+  drawerContent: 'drawer__content',
+  /** What scrolls inside a drawer's panel. */
+  drawerContentChildren: 'drawer__content-children',
   /** A drawer while it is open - the block drawer among them. */
   drawerOpen: 'drawer--is-open',
   /** A field's description, under or beside its input. */
@@ -82,6 +88,14 @@ export const PAYLOAD_CLASS = {
 
 /** `.name` for a class above. */
 export const selectorOf = (name: (typeof PAYLOAD_CLASS)[keyof typeof PAYLOAD_CLASS]): string => `.${name}`
+
+/**
+ * What every modal and drawer is rendered into: a layer over the whole window
+ * while one is open. Not Payload's own name but `@faceless-ui/modal`'s
+ * (`modal-container`), under the prefix Payload gives it (`payload`) - so it
+ * is held against both in the tests, not with the names above.
+ */
+export const MODAL_CONTAINER_CLASS = 'payload__modal-container'
 
 /** Payload's custom properties, read for layout and colour. */
 export const PAYLOAD_PROPERTY = {

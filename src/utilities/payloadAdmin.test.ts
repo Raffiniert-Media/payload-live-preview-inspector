@@ -8,6 +8,7 @@ import {
   FIELD_ID_PREFIX,
   FIELD_PATH_ATTRIBUTE,
   fieldIDFromPath,
+  MODAL_CONTAINER_CLASS,
   pathFromRowID,
   PAYLOAD_CLASS,
   PAYLOAD_PROPERTY,
@@ -94,6 +95,15 @@ describe(`the Payload admin this plugin reads (@payloadcms/ui ${JSON.parse(fs.re
       usesClass(name),
       `".${name}" is gone from @payloadcms/ui and @payloadcms/next - update PAYLOAD_CLASS in payloadAdmin.ts`,
     ).toBe(true)
+  })
+
+  it(`still renders its modals into faceless-ui's layer, under Payload's prefix (${MODAL_CONTAINER_CLASS})`, () => {
+    const faceless = packageRoot('@faceless-ui/modal', require.resolve('@faceless-ui/modal', { paths: [root] }))
+    const container = fs.readFileSync(path.join(faceless, 'dist', 'ModalContainer', 'index.js'), 'utf8')
+    const [prefix, base] = MODAL_CONTAINER_CLASS.split('__')
+    expect(container).toMatch(new RegExp(`containerBaseClass = ['"]${escape(base)}['"]`))
+    expect(container).toContain('`${classPrefix}__${containerBaseClass}`')
+    expect(scripts.some((script) => new RegExp(`classPrefix: ['"]${escape(prefix)}['"]`).test(script))).toBe(true)
   })
 
   it.each(Object.entries(PAYLOAD_PROPERTY))('still sets the custom property %s (%s)', (_key, name) => {

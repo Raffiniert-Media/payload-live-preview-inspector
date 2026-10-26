@@ -5,10 +5,14 @@ import {
   Link,
   toast,
   useAllFormFields,
+  useAuth,
   useConfig,
+  useDocumentDrawerContext,
   useDocumentInfo,
   useEditDepth,
+  useEntityVisibility,
   useForm,
+  useFormModified,
   useLivePreviewContext,
   useModal,
   useTranslation,
@@ -35,7 +39,8 @@ import {
   tabContentOf,
   visibleRowsAfter,
 } from '../utilities/curtain.js'
-import { previewStringsOf, stringsFor, translateLabel } from '../utilities/i18n.js'
+import { drawerForm, registerDrawerForm } from '../utilities/drawerForms.js'
+import { humanize, previewStringsOf, stringsFor, translateLabel } from '../utilities/i18n.js'
 import { HOST_ATTRIBUTE, isolate } from '../utilities/isolate.js'
 import { DEFAULT_VIEWPORTS, isBoolean } from '../utilities/layout.js'
 import {
@@ -51,6 +56,7 @@ import {
   STRUCTURE_MESSAGE_TYPE,
   THEME_MESSAGE_TYPE,
 } from '../utilities/messageTypes.js'
+import { type DocumentRef, documentSegment, isRowIDSegment, parseDocumentPath } from '../utilities/pathAttribute.js'
 import {
   collectLeafValues,
   DEFAULT_COLLAPSIBLE_ANIMATION_MS,
@@ -100,6 +106,7 @@ import {
   findTabsElement,
   labelOfTarget,
   planReveal,
+  relatedDocumentAt,
   TAB_BUTTON_ACTIVE_CLASS,
   tabButtonsOf,
 } from '../utilities/revealPlan.js'
@@ -122,6 +129,7 @@ import { OutlinePanel } from './editor/OutlinePanel.js'
 import { PageTitle, PageVersions } from './editor/PageTitle.js'
 import { PathBar } from './editor/PathBar.js'
 import { PreviewTools } from './editor/PreviewTools.js'
+import { RelatedDocumentDrawer, type RelatedOutcome, type RelatedTarget } from './editor/RelatedDocument.js'
 import { duplicateRow, insertRowBelow, isRowAction, moveRow, removeRow, splitRowPath } from './editor/rowActions.js'
 import { SplitHandle } from './editor/SplitHandle.js'
 import { ReplaceButton, ReplaceDrawer, type UploadTarget } from './editor/UploadReplace.js'
@@ -291,6 +299,22 @@ const reportedMissing = new Set<string>()
 /** Where a selection came from - which decides what else it moves. */
 type SelectionSource = 'form' | 'outline' | 'path' | 'preview' | 'toolbar'
 
+/** A click in the preview on another document's field, and how to answer it. */
+type RelatedClick = {
+  caret?: CaretHint
+  /** The edited document's path around what was clicked - the block it is in. */
+  context: null | string
+  onStatus: (status: RevealStatus, label?: string) => void
+}
+
+/**
+ * Payload's save button that is enabled only while the form has changes:
+ * "Save draft" where there are drafts (`SaveDraftButton`) - "Publish" carries
+ * the other id there, and is enabled for an unpublished draft unchanged -
+ * and "Save" where there are none (`SaveButton`).
+ */
+const UNSAVED_SELECTOR = { drafts: '#action-save-draft:not([disabled])', plain: '#action-save:not([disabled])' }
+
 /**
  * Everything on the admin's side: click-to-field and its reverse, and the
  * editor around it - divider, outline, path bar, focus mode, screen widths and
@@ -298,12 +322,13 @@ type SelectionSource = 'form' | 'outline' | 'path' | 'preview' | 'toolbar'
  *
  * Mounted in the document controls by the plugin. Only for the document's own
  * form: a document opened in a drawer on top of it has a form of its own and
- * no live preview, and two of these would answer every click twice.
+ * no live preview, and two of these would answer every click twice. In a
+ * drawer it only makes the drawer's form reachable - see `drawerForms.ts`.
  */
 export const LivePreviewInspectorListener: React.FC<LivePreviewInspectorListenerProps> = (props) => {
   const editDepth = useEditDepth()
   if (editDepth > 1) {
-    return null
+    return <DrawerFormRegistration />
   }
   return (
     <Contained name="The editor">
@@ -330,6 +355,7 @@ const Inspector: React.FC<LivePreviewInspectorListenerProps> = ({
     outline: editor.outline !== false,
     pageMode: editor.pageMode !== false,
     pathBar: editor.pathBar !== false,
+    relatedDocuments: editor.relatedDocuments !== false,
     replaceUpload: editor.replaceUpload !== false,
     split: editor.split !== false,
     stacked: editor.stacked !== false,
@@ -391,6 +417,11 @@ const Inspector: React.FC<LivePreviewInspectorListenerProps> = ({
     : null
   const hasSavePermissionRef = useRef(hasSavePermission)
   hasSavePermissionRef.current = hasSavePermission
+  /** Which document this is - a page that lists itself is edited here, not in a drawer. */
+  const ownDocumentRef = useRef({ id: docID, collectionSlug })
+  ownDocumentRef.current = { id: docID, collectionSlug }
+  const relatedDocumentsRef = useRef(features.relatedDocuments)
+  relatedDocumentsRef.current = features.relatedDocuments
   // What the user may change, field by field - the outline offers no more.
   const fieldPermissionsRef = useRef<FieldPermissions | undefined>(undefined)
   fieldPermissionsRef.current = docPermissions?.fields as FieldPermissions | undefined
@@ -543,6 +574,18 @@ const Inspector: React.FC<LivePreviewInspectorListenerProps> = ({
   /** Shared with the focus listeners below; see `suppressFocusEcho` in the reveal. */
   const engineRef = useRef({ suppressFocusEcho: false })
   const revealRef = useRef<Reveal>(() => {})
+  /**
+   * A field of another document, clicked in the preview - see
+   * `RelatedDocumentDrawer`. `false` when that document is not the editor's to
+   * open: not shown to them, not theirs to read, or not their click.
+   */
+  const openRelatedRef = useRef<(target: { path: string } & DocumentRef, click: RelatedClick) => boolean>(
+    () => false,
+  )
+  /** Closes the drawer before the page's own form is travelled; `false` while it has unsaved changes. */
+  const closeRelatedRef = useRef<() => boolean>(() => true)
+  /** The drawer that document is open in, while it is - for the focus listener. */
+  const relatedDrawerRef = useRef<({ drawerSlug: string } & DocumentRef) | null>(null)
 
   /*
    * The veil: the form faded out while a reveal opens rows, switches tabs and
@@ -1740,30 +1783,81 @@ const Inspector: React.FC<LivePreviewInspectorListenerProps> = ({
       if (!hintKnownRef.current) {
         setHintKnownRef.current(true)
       }
+
+      let path: string = data.path
+      // A field of another document - a post the page shows, a document a
+      // relationship points at - is edited in that document, opened in a
+      // drawer. The edited document's own (a page listing itself) is edited
+      // here, like any of its fields.
+      const schemaNow = schemaRef.current
+      const tagged = parseDocumentPath(path)
+      const elsewhere =
+        tagged ??
+        (relatedDocumentsRef.current && schemaNow
+          ? relatedDocumentAt(schemaNow.fields, path, getFieldsRef.current(), schemaNow.blocksMap)
+          : null)
+      if (elsewhere) {
+        const own = ownDocumentRef.current
+        const isOwn =
+          elsewhere.collection === own.collectionSlug && own.id !== undefined && String(elsewhere.id) === String(own.id)
+        if (isOwn) {
+          if (!elsewhere.path) {
+            onStatus('done')
+            return
+          }
+          path = elsewhere.path
+        } else {
+          const opened =
+            relatedDocumentsRef.current &&
+            openRelatedRef.current(elsewhere, {
+              caret: parseCaretHint(data.caret),
+              context: typeof data.context === 'string' ? data.context : null,
+              onStatus,
+            })
+          if (opened) {
+            return
+          }
+          // A document that is not the editor's to open: a relationship's
+          // goes to the relationship field, as it did before there were
+          // drawers; one tagged by the site has no field here.
+          if (tagged) {
+            onStatus('not-found')
+            return
+          }
+        }
+      }
+
+      // The page's own field, with a document open in the drawer over the
+      // form: the drawer goes, or the form would move unseen beneath it.
+      if (!closeRelatedRef.current()) {
+        onStatus('not-found', stringsRef.current.saveFirst)
+        return
+      }
+
       // Page mode on a phone: the form comes up for what was tapped - before
       // anything below measures it - and the preview, now shorter, keeps the
       // tapped element in what is left of it.
       if (raisePanelRef.current()) {
-        keepInPreviewOnceSettledRef.current(data.path)
+        keepInPreviewOnceSettledRef.current(path)
       }
 
       // The block the clicked field is in is where the editor is now - and,
       // in focus mode, all the form shows.
       const formState = getFieldsRef.current()
-      const resolvedPath = resolveRowIDs(data.path, formState)
+      const resolvedPath = resolveRowIDs(path, formState)
       const rowPath = resolvedPath ? rowPathOf(resolvedPath, formState) : null
       const rowIDPath = rowPath ? toRowIDPath(rowPath, formState) : null
       // Down before focus mode moves: what it hides and shows is part of the
       // change the editor sees only the end of.
       const veil = beginTravelRef.current(
-        data.path,
+        path,
         focusModeRef.current && rowIDPath ? rowIDPath : isolationRef.current,
       )
       if (rowIDPath) {
         selectRef.current(rowIDPath, 'preview')
       }
 
-      revealRef.current(data.path, { caret: parseCaretHint(data.caret), onStatus, veil })
+      revealRef.current(path, { caret: parseCaretHint(data.caret), onStatus, veil })
     }
 
     window.addEventListener('message', handleMessage)
@@ -1783,6 +1877,24 @@ const Inspector: React.FC<LivePreviewInspectorListenerProps> = ({
     // there reveals the field here. And wherever it is, that is where the
     // editor is: the selection follows.
     const onFieldFocus = (el: HTMLElement) => {
+      // A drawer has a form of its own, and its fields are not this
+      // document's, however alike their paths: the title of a post in a drawer
+      // is `title` too. Only the drawer a document from the page is open in
+      // speaks, and for that document's part of the page.
+      const drawer = el.closest(selectorOf(PAYLOAD_CLASS.drawer))
+      if (drawer) {
+        const related = relatedDrawerRef.current
+        const inside = related && drawer.id === related.drawerSlug ? pathFromFieldElement(el) : null
+        if (related && inside) {
+          postToPreview({
+            type: FOCUS_MESSAGE_TYPE,
+            caret: caretHintFromSelection(el),
+            path: `${documentSegment(related)}.${inside}`,
+          })
+        }
+        return
+      }
+
       const path = pathFromFieldElement(el)
       if (!path) {
         return
@@ -2096,6 +2208,168 @@ const Inspector: React.FC<LivePreviewInspectorListenerProps> = ({
     />
   ) : null
 
+  /* ------------------------------------------- another document, in a drawer */
+
+  const { permissions } = useAuth()
+  const permissionsRef = useRef(permissions)
+  permissionsRef.current = permissions
+  const { isEntityVisible } = useEntityVisibility()
+  const [related, setRelated] = useState<null | RelatedTarget>(null)
+  const relatedRef = useRef(related)
+  relatedRef.current = related
+  /** How the click being revealed in the drawer ends - the preview is waiting to hear. */
+  const relatedStatusRef = useRef<null | RelatedClick['onStatus']>(null)
+  const relatedLabelTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  useEffect(() => () => clearTimeout(relatedLabelTimerRef.current), [])
+  /**
+   * Whether the document open in the drawer has changes that are not saved -
+   * its form says, where it is registered; otherwise the save button that is
+   * enabled only then.
+   */
+  const relatedUnsaved = (): boolean => {
+    const open = relatedDrawerRef.current
+    if (!open) {
+      return false
+    }
+    const form = drawerForm(open.drawerSlug)
+    if (form) {
+      return form.isModified()
+    }
+    const versions = (getEntityConfig({ collectionSlug: open.collection }) as { versions?: { drafts?: unknown } } | undefined)
+      ?.versions
+    const selector = versions?.drafts ? UNSAVED_SELECTOR.drafts : UNSAVED_SELECTOR.plain
+    return Boolean(document.getElementById(open.drawerSlug)?.querySelector(selector))
+  }
+
+  openRelatedRef.current = (target, { caret, context, onStatus }) => {
+    const entity = getEntityConfig({ collectionSlug: target.collection })
+    const visible =
+      typeof isEntityVisible === 'function'
+        ? isEntityVisible({ collectionSlug: target.collection })
+        : (entity?.admin as { hidden?: unknown } | undefined)?.hidden !== true
+    // Only what the editor may read, of a collection the admin shows them -
+    // and only on their click: a script on the page posts as the preview too.
+    // Payload checks access again for everything the drawer loads and saves.
+    if (
+      !entity ||
+      !('slug' in entity) ||
+      !visible ||
+      !permissionsRef.current?.collections?.[target.collection]?.read ||
+      !followsAGesture()
+    ) {
+      return false
+    }
+
+    const open = relatedRef.current
+    const another = open && (open.collection !== target.collection || String(open.id) !== String(target.id))
+    // Switching documents closes the open one; with changes not saved yet -
+    // a collection without autosave - that would be them gone.
+    if (another && relatedUnsaved()) {
+      onStatus('not-found', stringsRef.current.saveFirst)
+      return true
+    }
+
+    const language = languageRef.current
+    const name = translateLabel(entity.labels?.singular, language) ?? humanize(target.collection)
+    const blocksMap = (config.blocksMap ?? {}) as unknown as BlocksMap
+    // As far as the drawer can be followed - see `revealInDrawer`.
+    const segments = target.path.split('.')
+    const rowIDAt = segments.findIndex(isRowIDSegment)
+    const reachable = (rowIDAt === -1 ? segments : segments.slice(0, rowIDAt)).join('.')
+    const field = reachable
+      ? describeTarget(entity.fields as unknown as SchemaField[], reachable, {}, blocksMap)
+      : null
+    const label = field ? `${name} › ${labelOfTarget(field, language)}` : name
+    onStatus('started', label)
+    clearTimeout(relatedLabelTimerRef.current)
+    setRevealLabel(label)
+
+    // The block the document is shown in is where the editor is on the page.
+    if (context) {
+      const formState = getFieldsRef.current()
+      const resolved = resolveRowIDs(context, formState)
+      const rowPath = resolved ? rowPathOf(resolved, formState) : null
+      const rowIDPath = rowPath ? toRowIDPath(rowPath, formState) : null
+      if (rowIDPath) {
+        selectRef.current(rowIDPath, 'preview')
+      }
+    }
+
+    relatedStatusRef.current?.('done')
+    relatedStatusRef.current = onStatus
+    setRelated((current) => ({
+      id: target.id,
+      caret,
+      collection: target.collection,
+      nonce: (current?.nonce ?? 0) + 1,
+      path: target.path,
+    }))
+    return true
+  }
+
+  closeRelatedRef.current = () => {
+    if (!relatedRef.current) {
+      return true
+    }
+    if (relatedUnsaved()) {
+      return false
+    }
+    relatedStatusRef.current?.('done')
+    relatedStatusRef.current = null
+    relatedDrawerRef.current = null
+    setRelated(null)
+    return true
+  }
+
+  const onRelatedReveal = useCallback((outcome: RelatedOutcome) => {
+    relatedStatusRef.current?.(outcome)
+    relatedStatusRef.current = null
+    clearTimeout(relatedLabelTimerRef.current)
+    relatedLabelTimerRef.current = setTimeout(() => setRevealLabel(undefined), 1_500)
+  }, [])
+  const onRelatedClose = useCallback(() => {
+    // Closed before it got there: the preview stops waiting.
+    relatedStatusRef.current?.('done')
+    relatedStatusRef.current = null
+    relatedDrawerRef.current = null
+    setRelated(null)
+  }, [])
+  const onRelatedDrawer = useCallback((drawerSlug: null | string) => {
+    const current = relatedRef.current
+    relatedDrawerRef.current =
+      drawerSlug && current ? { id: current.id, collection: current.collection, drawerSlug } : null
+  }, [])
+  const quietly = useCallback((focus: () => void) => {
+    engineRef.current.suppressFocusEcho = true
+    focus()
+    setTimeout(() => {
+      engineRef.current.suppressFocusEcho = false
+    })
+  }, [])
+  const flashInDrawer = useCallback(
+    (el: HTMLElement) =>
+      sharedFlashElement(el, { className: classes.flash, color: flashColor, durationMs: flashDurationMs }),
+    [flashColor, flashDurationMs],
+  )
+
+  const relatedEntity = related ? getEntityConfig({ collectionSlug: related.collection }) : undefined
+  const relatedDrawer =
+    related && relatedEntity ? (
+      <RelatedDocumentDrawer
+        besidePreview={previewOpen && !stacked}
+        blocksMap={(config.blocksMap ?? {}) as unknown as BlocksMap}
+        fields={relatedEntity.fields as unknown as SchemaField[]}
+        flash={flashInDrawer}
+        key={documentSegment(related)}
+        onClose={onRelatedClose}
+        onDrawer={onRelatedDrawer}
+        onReveal={onRelatedReveal}
+        quietly={quietly}
+        tabSwitchWaitMs={tabSwitchWaitMs}
+        target={related}
+      />
+    ) : null
+
   /* -------------------------------------------------- adding a block below */
 
   const { closeModal, openModal } = useModal()
@@ -2383,8 +2657,34 @@ const Inspector: React.FC<LivePreviewInspectorListenerProps> = ({
       )}
       {replaceDrawer}
       {insertDrawer}
+      {relatedDrawer}
     </div>
   )
+}
+
+/** In a drawer: its form, for a jump into the drawer from the preview. */
+const DrawerFormRegistration: React.FC = () => {
+  const { drawerSlug } = useDocumentDrawerContext() as { drawerSlug?: string }
+  const form = useForm()
+  const formRef = useRef(form)
+  formRef.current = form
+  const modified = useFormModified()
+  const modifiedRef = useRef(modified)
+  modifiedRef.current = modified
+  // In the commit that renders the drawer's fields: a jump waiting for them
+  // looks once a frame, before the effects of that commit would have run.
+  useLayoutEffect(
+    () =>
+      drawerSlug
+        ? registerDrawerForm(drawerSlug, {
+            dispatchFields: (action) => formRef.current.dispatchFields(action as never),
+            getFields: () => formRef.current.getFields(),
+            isModified: () => modifiedRef.current,
+          })
+        : undefined,
+    [drawerSlug],
+  )
+  return null
 }
 
 /**

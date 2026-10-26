@@ -202,6 +202,12 @@ export interface Page {
    */
   intro?: string | null;
   image?: (number | null) | Media;
+  featured?:
+    | {
+        relationTo: 'posts';
+        value: number | Post;
+      }[]
+    | null;
   sections?:
     | (
         | {
@@ -466,6 +472,7 @@ export interface PagesSelect<T extends boolean = true> {
   title?: T;
   intro?: T;
   image?: T;
+  featured?: T;
   sections?:
     | T
     | {

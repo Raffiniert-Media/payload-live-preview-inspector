@@ -2,6 +2,44 @@
 
 ## 2.1.0
 
+### Another document, at the field clicked
+
+A click on what another document puts on the page - a post in a carousel, a
+person in a team grid, a document a relationship points at - opens that
+document in Payload's own drawer, at the field clicked (`editor.relatedDocuments`,
+on by default). Asked for on the first customer site, where testimonials are
+posts in a carousel and the click went to the carousel.
+
+- **Where the form was**, wherever the preview stands beside it: the preview
+  stays in view and clickable - another field, another post, one click - and a
+  field focused in the drawer scrolls the preview to it. Payload renders every
+  modal into one layer over the whole window; while the drawer is beside the
+  preview, that layer lets the pointer through to it.
+- **Saved by Payload**: the drawer is Payload's document view - locking,
+  validation, autosave, publishing - and every save in it is reported to the
+  live preview by Payload, which refreshes.
+- **A relationship's document needs nothing**: its populated value is part of
+  the page's data, and the admin follows the path through the relationship
+  field into it. **A document the page queried itself** is wrapped with the new
+  `inspectableDocument(within, { collection, id }, doc)`, which encodes it like
+  the page - in the preview only - and keeps its own path for `pathOf()` after
+  it reached a client component. `isInspecting(node)` asks a node whether the
+  preview is on.
+- **Only for its reader**: after a real click, for a collection the admin shows
+  the user and they may read; Payload's access control for everything in the
+  drawer. A relationship's document they may not open goes to the relationship
+  field, as before.
+- **One thing at a time**: another document, or the page's own content,
+  clicked while a document is open closes it - unless it has changes not saved
+  yet, when the click is declined ("save first"). In a drawer of a registered
+  collection the plugin's listener hands the drawer's form over, so the jump
+  reads its state and its `modified` flag as in the page's own form.
+- **A field in a drawer was taken for the page's.** Focus in any drawer - a
+  relationship's, an upload's - was reported to the preview as the edited
+  document's field of the same path: the title of a post in a drawer flashed
+  the page's title. A drawer's fields now speak only for the document the
+  drawer belongs to, and only when it is one the page shows.
+
 ### Page mode: the page is where the editor works
 
 While the live preview is open, Payload's frame steps back (`editor.pageMode`,

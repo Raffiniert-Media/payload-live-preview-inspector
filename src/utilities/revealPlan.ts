@@ -1,6 +1,8 @@
+import type { DocumentRef } from './pathAttribute.js'
 import type { MinimalFormState } from './pathResolution.js'
 
 import { humanize, translateLabel as translate } from './i18n.js'
+import { isRowIDSegment, rowIDFromSegment } from './pathAttribute.js'
 import { pathFromFieldElement } from './pathResolution.js'
 import { collapsibleIDFromPath, FIELD_ID_PREFIX, FIELD_PATH_ATTRIBUTE, PAYLOAD_CLASS, selectorOf } from './payloadAdmin.js'
 
@@ -14,11 +16,13 @@ export type SchemaField = {
   blockReferences?: (SchemaBlock | string)[]
   blocks?: SchemaBlock[]
   fields?: SchemaField[]
+  hasMany?: boolean
   label?: unknown
   labels?: { plural?: unknown; singular?: unknown }
   maxRows?: number
   minRows?: number
   name?: string
+  relationTo?: string | string[]
   tabs?: SchemaTab[]
   type: string
 }
@@ -201,7 +205,11 @@ export const describeTarget = (
   blocksMap: BlocksMap = {},
 ): null | RevealTarget => walk(fields, path, formState, blocksMap).target
 
-type Walk = { target: null | RevealTarget } & RevealPlan
+type Walk = {
+  /** How many of the path's segments the form accounts for - the rest point into a value. */
+  consumed: number
+  target: null | RevealTarget
+} & RevealPlan
 
 const walk = (fields: SchemaField[], path: string, formState: MinimalFormState, blocksMap: BlocksMap): Walk => {
   const segments = path.split('.')
@@ -214,7 +222,7 @@ const walk = (fields: SchemaField[], path: string, formState: MinimalFormState, 
   while (i < segments.length) {
     const located = locate(currentFields, segments[i], prefix)
     if (!located) {
-      return { complete: false, steps, target }
+      return { complete: false, consumed: i, steps, target }
     }
 
     steps.push(...located.steps)
@@ -229,7 +237,7 @@ const walk = (fields: SchemaField[], path: string, formState: MinimalFormState, 
         break
       }
       if (!/^\d+$/.test(segment)) {
-        return { complete: false, steps, target }
+        return { complete: false, consumed: i, steps, target }
       }
 
       const index = Number(segment)
@@ -246,7 +254,7 @@ const walk = (fields: SchemaField[], path: string, formState: MinimalFormState, 
       const row = formState[fieldPath]?.rows?.[index]
       const block = findBlock(field, row?.blockType ?? formState[`${prefix}.blockType`]?.value, blocksMap)
       if (!block) {
-        return { complete: false, steps, target }
+        return { complete: false, consumed: i, steps, target }
       }
       target = { field, row: { block, index } }
       currentFields = block.fields
@@ -263,9 +271,149 @@ const walk = (fields: SchemaField[], path: string, formState: MinimalFormState, 
     break
   }
 
-  return { complete: true, steps, target }
+  return { complete: true, consumed: i, steps, target }
 }
 
+/**
+ * The part of `path` that is a field in the form - `content` of
+ * `content.root.children.0.text`, the whole path when it ends at a field -
+ * read off the schema alone, for a form whose state is out of reach (one in a
+ * drawer). `null` when the schema cannot account for all of it - a block row
+ * whose type only the form state knows: cut there, the path would name the
+ * row instead of the field in it.
+ */
+export const formFieldPathOf = (
+  fields: SchemaField[],
+  path: string,
+  formState: MinimalFormState = {},
+  blocksMap: BlocksMap = {},
+): null | string => {
+  const { complete, consumed, target } = walk(fields, path, formState, blocksMap)
+  return complete && target && consumed > 0 ? path.split('.').slice(0, consumed).join('.') : null
+}
+
+
+/** A document a path leads into, and the path inside it (`''` for the document itself). */
+export type RelatedDocumentTarget = { path: string } & DocumentRef
+
+const idOf = (value: unknown): number | string | undefined => {
+  const id = value !== null && typeof value === 'object' ? (value as { id?: unknown }).id : value
+  return typeof id === 'number' || typeof id === 'string' ? id : undefined
+}
+
+/**
+ * Where `path` runs through a relationship field into the document it points
+ * at - `featured.0.value.title` is the title of whatever the first entry of
+ * `featured` is - that document and the path inside it; `null` for a path
+ * that stays in this one.
+ *
+ * Such paths come from data a page renders through a relationship: the
+ * populated document is part of the page's data, so its strings carry their
+ * path into it. The form holds only the reference, so the field there is not
+ * where that text is edited; the referenced document is.
+ *
+ * Reads both shapes a relationship holds (an id, or `{ relationTo, value }`
+ * when it may point into several collections), one or many, and a row segment
+ * of either kind - an index, or a `$id` where the populated documents carried
+ * string ids. Takes the path as clicked, row ids and all.
+ */
+export const relatedDocumentAt = (
+  fields: SchemaField[],
+  path: string,
+  formState: MinimalFormState,
+  blocksMap: BlocksMap = {},
+): null | RelatedDocumentTarget => {
+  const segments = path.split('.')
+  let currentFields = fields
+  let prefix = ''
+  let i = 0
+
+  while (i < segments.length) {
+    const located = locate(currentFields, segments[i], prefix)
+    if (!located) {
+      return null
+    }
+    const { field } = located
+    const fieldPath = join(prefix, segments[i])
+    i++
+
+    if (field.type === 'array' || field.type === 'blocks') {
+      const segment = segments[i]
+      const rows = formState[fieldPath]?.rows
+      const index =
+        segment === undefined
+          ? -1
+          : isRowIDSegment(segment)
+            ? (rows?.findIndex((row) => row.id === rowIDFromSegment(segment)) ?? -1)
+            : /^\d+$/.test(segment)
+              ? Number(segment)
+              : -1
+      if (index < 0) {
+        return null
+      }
+      prefix = join(fieldPath, String(index))
+      i++
+      if (field.type === 'array') {
+        currentFields = field.fields ?? []
+        continue
+      }
+      const block = findBlock(field, rows?.[index]?.blockType ?? formState[`${prefix}.blockType`]?.value, blocksMap)
+      if (!block) {
+        return null
+      }
+      currentFields = block.fields
+      continue
+    }
+
+    if (field.type === 'group' && field.fields) {
+      currentFields = field.fields
+      prefix = fieldPath
+      continue
+    }
+
+    if (field.type !== 'relationship' || i >= segments.length || !field.relationTo) {
+      return null
+    }
+
+    let value = formState[fieldPath]?.value
+    if (field.hasMany) {
+      const entry = segments[i++]
+      if (!Array.isArray(value) || entry === undefined) {
+        return null
+      }
+      value = isRowIDSegment(entry)
+        ? value.find((item) => {
+            const id = idOf(
+              Array.isArray(field.relationTo) && item && typeof item === 'object' ? (item as { value?: unknown }).value : item,
+            )
+            return id !== undefined && String(id) === rowIDFromSegment(entry)
+          })
+        : /^\d+$/.test(entry)
+          ? value[Number(entry)]
+          : undefined
+    }
+
+    let collection: string | undefined
+    let id: number | string | undefined
+    if (Array.isArray(field.relationTo)) {
+      // `{ relationTo, value }`: the path goes on through `value` into the document.
+      if (segments[i] !== 'value' || !value || typeof value !== 'object') {
+        return null
+      }
+      i++
+      const { relationTo, value: reference } = value as { relationTo?: unknown; value?: unknown }
+      collection = typeof relationTo === 'string' && field.relationTo.includes(relationTo) ? relationTo : undefined
+      id = idOf(reference)
+    } else {
+      collection = field.relationTo
+      id = idOf(value)
+    }
+
+    return collection !== undefined && id !== undefined ? { id, collection, path: segments.slice(i).join('.') } : null
+  }
+
+  return null
+}
 
 /**
  * The name an editor knows the target by - the label the admin itself shows

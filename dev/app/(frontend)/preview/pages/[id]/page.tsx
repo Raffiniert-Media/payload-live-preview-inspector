@@ -20,7 +20,11 @@ const Page = async ({ params }: Args) => {
     return <p>Not found</p>
   }
 
-  return <PagePreviewClient initialData={doc} />
+  // Documents the page does not hold but shows - what a "latest posts" block
+  // queries by itself.
+  const { docs: posts } = await payload.find({ collection: 'posts', depth: 0, draft: true, limit: 3, sort: 'createdAt' })
+
+  return <PagePreviewClient initialData={doc} posts={posts} />
 }
 
 export default Page

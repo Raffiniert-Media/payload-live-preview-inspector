@@ -43,6 +43,68 @@ export const rowIDPathOf = (path: string): null | string => {
 }
 
 /**
+ * A path's first segment when what it names is not in the edited document but
+ * in another one the page shows - a post a block queried by itself - as
+ * `@<collection>:<id>`: `@posts:12.title` is the title of post 12, `@posts:12`
+ * the post.
+ *
+ * In front of the path rather than beside it, so everything that reads a path
+ * by its prefixes - the smallest tagged element, the element for a focused
+ * field, a row's container - treats a document as the container of its own
+ * fields without knowing about documents at all. The edited document's own
+ * paths never start with `@`.
+ *
+ * A string id is marked (`~`) so it stays a string: `"12"` and `12` are two
+ * documents in a collection with custom ids. Whatever in an id could pass for
+ * a separator (`.`, `:`) is percent-encoded, and so is everything else outside
+ * `[A-Za-z0-9_-]` - a slug never has it, an id may.
+ */
+const DOCUMENT_MARKER = '@'
+const STRING_ID_MARKER = '~'
+
+export type DocumentRef = { collection: string; id: number | string }
+
+const encodeIDText = (text: string): string =>
+  encodeURIComponent(text).replace(/[!'()*.~]/g, (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`)
+
+export const documentSegment = ({ id, collection }: DocumentRef): string =>
+  `${DOCUMENT_MARKER}${collection}:${typeof id === 'number' ? String(id) : `${STRING_ID_MARKER}${encodeIDText(id)}`}`
+
+/**
+ * The document a path starts in and the path inside it (`''` for the
+ * document itself), or `null` for a path in the edited document - and for
+ * anything malformed, which is then simply nobody's.
+ */
+export const parseDocumentPath = (path: string): ({ path: string } & DocumentRef) | null => {
+  if (!path.startsWith(DOCUMENT_MARKER)) {
+    return null
+  }
+  const dot = path.indexOf('.')
+  const head = path.slice(DOCUMENT_MARKER.length, dot === -1 ? undefined : dot)
+  const colon = head.indexOf(':')
+  const collection = head.slice(0, Math.max(colon, 0))
+  const idText = head.slice(colon + 1)
+  if (colon <= 0 || !idText || !/^[\w-]+$/.test(collection)) {
+    return null
+  }
+  let id: number | string
+  if (idText.startsWith(STRING_ID_MARKER)) {
+    try {
+      id = decodeURIComponent(idText.slice(STRING_ID_MARKER.length))
+    } catch {
+      return null
+    }
+  } else if (/^\d+$/.test(idText)) {
+    id = Number(idText)
+  } else {
+    return null
+  }
+  return { id, collection, path: dot === -1 ? '' : path.slice(dot + 1) }
+}
+
+export const isDocumentPath = (path: string): boolean => parseDocumentPath(path) !== null
+
+/**
  * `value` as the inside of a quoted CSS string: quotes and backslashes
  * escaped, and line breaks too - unescaped, one ends the string and the
  * selector throws.

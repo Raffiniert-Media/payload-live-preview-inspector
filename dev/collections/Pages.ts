@@ -31,6 +31,9 @@ export const Pages: CollectionConfig = {
             },
             // An upload with a file: exercises "Replace" and the pencil it stands beside.
             { name: 'image', type: 'upload', relationTo: 'media' },
+            // Posts the page shows through a relationship, the shape a "chosen by
+            // hand" carousel has: a click on one opens the post in a drawer.
+            { name: 'featured', type: 'relationship', hasMany: true, relationTo: ['posts'] },
           ],
           label: 'Content',
         },

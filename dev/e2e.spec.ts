@@ -202,6 +202,222 @@ test('moving the caret within an already-focused rich text follows along in the 
   await expect(paragraphs.first()).toHaveClass(/focused/)
 })
 
+test.describe('another document the page shows', () => {
+  const DRAWER = '.doc-drawer.drawer--is-open'
+
+  test('a post the page queried opens in a drawer beside the preview, at the field clicked', async ({ page }) => {
+    await login(page)
+    const frame = await openLivePreview(page, 'pages')
+    const card = frame.getByTestId('latest-post').first()
+    await card.scrollIntoViewIfNeeded()
+    await expect(card).toHaveAttribute('data-payload-live-preview-path', /^@posts:\d+$/)
+    const title = card.locator('h3')
+    await expect(title).toHaveAttribute('data-payload-live-preview-path', /^@posts:\d+\.title$/)
+
+    await title.click()
+
+    // Named the way the admin names it: the document, then the field.
+    const mark = frame.locator('[data-payload-live-preview-inspector-overlay] [data-state]')
+    await expect(mark).toContainText('Post › Title')
+
+    const drawer = page.locator(DRAWER)
+    await expect(drawer).toBeVisible()
+    const field = drawer.locator('#field-title')
+    await expect(field).toBeFocused()
+    await expect(field).toHaveClass(/flash/)
+
+    // Where the form was: the preview stays in view, and takes the pointer.
+    const iframe = page.locator('#live-preview-iframe')
+    const drawerBox = (await drawer.boundingBox())!
+    const previewBox = (await iframe.boundingBox())!
+    expect(drawerBox.x + drawerBox.width).toBeLessThanOrEqual(previewBox.x + 1)
+    const onTop = await page.evaluate(
+      ({ x, y }) => document.elementFromPoint(x, y)?.id,
+      { x: previewBox.x + previewBox.width / 2, y: previewBox.y + previewBox.height / 2 },
+    )
+    expect(onTop).toBe('live-preview-iframe')
+
+    // Closed, the page is the page again: its own title goes to its own field.
+    await page.keyboard.press('Escape')
+    await expect(drawer).toHaveCount(0)
+    const pageTitle = frame.locator('h1[data-payload-live-preview-path="title"]')
+    await pageTitle.scrollIntoViewIfNeeded()
+    await pageTitle.click()
+    await expect(page.locator('#field-title').first()).toHaveClass(/flash/)
+  })
+
+  test('a field of the post behind a tab and in a row: the drawer opens both on the way', async ({ page }) => {
+    await login(page)
+    const frame = await openLivePreview(page, 'pages')
+    const section = frame.getByTestId('latest-post-section').first()
+    await section.scrollIntoViewIfNeeded()
+    await expect(section).toHaveAttribute('data-payload-live-preview-path', /^@posts:\d+\.metaSections\.0\.title$/)
+
+    await section.click()
+
+    const field = page.locator(DRAWER).locator('#field-metaSections__0__title')
+    await expect(field).toBeFocused()
+    await expect(field).toHaveClass(/flash/)
+  })
+
+  test('with the drawer open the preview is still the way in: the next field of the post is one click away', async ({
+    page,
+  }) => {
+    await login(page)
+    const frame = await openLivePreview(page, 'pages')
+    const card = frame.getByTestId('latest-post').first()
+    await card.scrollIntoViewIfNeeded()
+    await card.locator('h3').click()
+    const drawer = page.locator(DRAWER)
+    await expect(drawer.locator('#field-title')).toBeFocused()
+
+    await frame.getByTestId('latest-post-section').first().click()
+
+    // The same drawer, gone on to the field behind the other tab.
+    await expect(drawer).toHaveCount(1)
+    await expect(drawer.locator('#field-metaSections__0__title')).toBeFocused()
+  })
+
+  test('a field in a block of the post: the drawer’s own form says which block it is', async ({ page }) => {
+    await login(page)
+    const frame = await openLivePreview(page, 'pages')
+    const text = frame.getByTestId('latest-post-block').first()
+    await text.scrollIntoViewIfNeeded()
+    await expect(text).toHaveAttribute('data-payload-live-preview-path', /^@posts:\d+\.layout\.1\.text$/)
+
+    await text.click()
+
+    const field = page.locator(DRAWER).locator('#field-layout__1__text')
+    await expect(field).toBeFocused()
+    await expect(field).toHaveClass(/flash/)
+  })
+
+  test('a post chosen through a relationship opens the same way, with nothing tagged by hand', async ({ page }) => {
+    await login(page)
+    const frame = await openLivePreview(page, 'pages')
+    const featured = frame.getByTestId('featured-post').first()
+    await featured.scrollIntoViewIfNeeded()
+    // The page's own path through the relationship - stega, as for any text.
+    await expect(featured).toHaveAttribute('data-payload-live-preview-path', 'featured.0.value.title')
+
+    await featured.click()
+
+    await expect(page.locator(DRAWER).locator('#field-title')).toBeFocused()
+  })
+
+  test('a row of the post named by its id - through a relationship - is found by the drawer’s own form', async ({
+    page,
+  }) => {
+    await login(page)
+    const frame = await openLivePreview(page, 'pages')
+    const section = frame.getByTestId('featured-post-section').first()
+    await section.scrollIntoViewIfNeeded()
+    await expect(section).toHaveAttribute(
+      'data-payload-live-preview-path',
+      /^featured\.0\.value\.metaSections\.\$[^.]+\.title$/,
+    )
+
+    await section.click()
+
+    // The field itself lights up - not the array around it, which is as far as
+    // the drawer's markup alone could follow a row named by id.
+    const field = page.locator(DRAWER).locator('#field-metaSections__0__title')
+    await expect(field).toBeFocused()
+    await expect(field).toHaveClass(/flash/)
+  })
+
+  test('focus in the drawer is the post’s: the preview goes to the post, never to the page’s field of the same name', async ({
+    page,
+  }) => {
+    await login(page)
+    const frame = await openLivePreview(page, 'pages')
+    const title = frame.getByTestId('latest-post').first().locator('h3')
+    await title.scrollIntoViewIfNeeded()
+    await title.click()
+    const field = page.locator(DRAWER).locator('#field-title')
+    await expect(field).toBeFocused()
+
+    await frame.locator('body').evaluate((body) => {
+      const { defaultView: view, documentElement } = body.ownerDocument
+      view!.__focusFlashes = []
+      new MutationObserver((mutations) => {
+        for (const mutation of mutations) {
+          const el = mutation.target as HTMLElement
+          if (/focused/.test(el.className)) {
+            view!.__focusFlashes?.push(el.getAttribute('data-payload-live-preview-path') ?? el.tagName)
+          }
+        }
+      }).observe(documentElement, { attributeFilter: ['class'], subtree: true })
+    })
+
+    // The editor's own click into the field, after the reveal's focus.
+    await field.click()
+
+    await expect
+      .poll(() => frame.locator('body').evaluate((body) => body.ownerDocument.defaultView!.__focusFlashes))
+      .toContainEqual(expect.stringMatching(/^@posts:\d+\.title$/))
+    const flashes = await frame.locator('body').evaluate((body) => body.ownerDocument.defaultView!.__focusFlashes)
+    expect(flashes).not.toContain('title')
+  })
+
+  test('a field of the page itself, clicked with the drawer open: the drawer goes and the form goes there', async ({
+    page,
+  }) => {
+    await login(page)
+    const frame = await openLivePreview(page, 'pages')
+    const card = frame.getByTestId('latest-post').first()
+    await card.scrollIntoViewIfNeeded()
+    await card.locator('h3').click()
+    const drawer = page.locator(DRAWER)
+    await expect(drawer.locator('#field-title')).toBeFocused()
+
+    const pageTitle = frame.locator('h1[data-payload-live-preview-path="title"]')
+    await pageTitle.scrollIntoViewIfNeeded()
+    await pageTitle.click()
+
+    await expect(drawer).toHaveCount(0)
+    await expect(page.locator('#field-title')).toHaveClass(/flash/)
+  })
+
+  test('changes not saved in the drawer are not thrown away by the next click', async ({ page }) => {
+    await login(page)
+    const frame = await openLivePreview(page, 'pages')
+    const card = frame.getByTestId('latest-post').first()
+    await card.scrollIntoViewIfNeeded()
+    await card.locator('h3').click()
+    const drawer = page.locator(DRAWER)
+    const field = drawer.locator('#field-title')
+    await expect(field).toBeFocused()
+    // The dev posts have drafts without autosave: typing leaves the form changed.
+    await field.press('End')
+    await field.pressSequentially(' (edited)')
+    await expect(drawer.locator('#action-save-draft:not([disabled]), #action-save:not([disabled])').first()).toBeVisible()
+
+    const pageTitle = frame.locator('h1[data-payload-live-preview-path="title"]')
+    await pageTitle.scrollIntoViewIfNeeded()
+    await pageTitle.click()
+
+    const mark = frame.locator('[data-payload-live-preview-inspector-overlay] [data-state]')
+    await expect(mark).toHaveAttribute('data-state', 'not-found')
+    await expect(mark).toContainText('Save the document that is open first')
+    await expect(drawer).toHaveCount(1)
+    await expect(field).toHaveValue(/\(edited\)$/)
+  })
+
+  test('a document of a collection the admin does not have is nobody’s to open', async ({ page }) => {
+    await login(page)
+    const frame = await openLivePreview(page, 'pages')
+    const unknown = frame.getByTestId('unknown-document')
+    await unknown.scrollIntoViewIfNeeded()
+
+    await unknown.click()
+
+    const mark = frame.locator('[data-payload-live-preview-inspector-overlay] [data-state]')
+    await expect(mark).toHaveAttribute('data-state', 'not-found')
+    await expect(page.locator(DRAWER)).toHaveCount(0)
+  })
+})
+
 test('clicking in the preview never scrolls the preview back (the reveal\'s own focus is not echoed)', async ({
   page,
 }) => {

@@ -2,13 +2,14 @@
 
 import { useLivePreview } from '@payloadcms/live-preview-react'
 import { LivePreviewInspectorClient } from '@raffiniert-media-ag/payload-live-preview-inspector/client'
-import { inspectable, pathOf } from '@raffiniert-media-ag/payload-live-preview-inspector/path'
+import { inspectable, inspectableDocument, pathOf } from '@raffiniert-media-ag/payload-live-preview-inspector/path'
 import { useEffect, useState } from 'react'
 
-import type { Page } from '../../../../../payload-types.js'
+import type { Page, Post } from '../../../../../payload-types.js'
 
 type Props = {
   initialData: Page
+  posts: Post[]
 }
 
 /**
@@ -16,13 +17,15 @@ type Props = {
  * plus stega), and under a sticky site header - what a real site looks like,
  * and what the reveal budgets in the e2e suite are measured against.
  */
-export const PagePreviewClient = ({ initialData }: Props) => {
+export const PagePreviewClient = ({ initialData, posts }: Props) => {
   // For the e2e suite: set once hydrated. Effects run child-first, so the
   // inspector (a child) is listening by the time this is.
   const [hydrated, setHydrated] = useState(false)
   useEffect(() => setHydrated(true), [])
 
   const { data } = useLivePreview<Page>({
+    // The posts in `featured` stay populated as the form changes.
+    depth: 1,
     initialData,
     // Admin and preview share this dev server, whatever port it runs on.
     serverURL: typeof window === 'undefined' ? 'http://localhost:3000' : window.location.origin,
@@ -133,6 +136,43 @@ export const PagePreviewClient = ({ initialData }: Props) => {
             <div style={{ background: '#3c3', borderRadius: 8, overflow: 'hidden', position: 'relative' }} />
           </div>
         </div>
+
+        {/* Posts the page shows but does not hold: queried by themselves, and
+            chosen through a relationship. A click on one opens the post. */}
+        <section data-testid="latest-posts" style={{ borderTop: '1px solid #ddd', padding: '2rem 0' }}>
+          <h2>Latest posts</h2>
+          {posts.map((raw) => {
+            const post = inspectableDocument(page, { id: raw.id, collection: 'posts' }, raw)
+            return (
+              <article key={raw.id} {...pathOf(post)} data-testid="latest-post" style={{ border: '1px solid #ddd', padding: '1rem' }}>
+                <h3>{post.title}</h3>
+                <p data-testid="latest-post-section">{post.metaSections?.[0]?.title}</p>
+                {post.layout?.map((block, index) =>
+                  block.blockType === 'contentBlock' ? (
+                    <p data-testid="latest-post-block" key={index}>
+                      {block.text}
+                    </p>
+                  ) : null,
+                )}
+              </article>
+            )
+          })}
+          {/* Another document of a collection this admin does not have: a
+              path from a stale build, or one a script on the page made up. */}
+          <p data-payload-live-preview-path="@secrets:1.title" data-testid="unknown-document">
+            A document from nowhere
+          </p>
+          {page.featured?.map((entry, index) =>
+            entry.value && typeof entry.value === 'object' ? (
+              <div key={index}>
+                <p data-testid="featured-post">{entry.value.title}</p>
+                {/* A row of the post, named by its id through the page's own
+                    data - only the drawer's form knows where it is now. */}
+                <p data-testid="featured-post-section">{entry.value.metaSections?.[0]?.title}</p>
+              </div>
+            ) : null,
+          )}
+        </section>
 
         {/* What a preview rendered before a row was deleted in the admin: a
             path whose row no longer exists. The click must say so rather

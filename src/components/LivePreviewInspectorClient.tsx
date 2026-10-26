@@ -28,7 +28,7 @@ import {
   STRUCTURE_MESSAGE_TYPE,
   THEME_MESSAGE_TYPE,
 } from '../utilities/messageTypes.js'
-import { LIVE_PREVIEW_PATH_ATTRIBUTE, rowIDPathOf } from '../utilities/pathAttribute.js'
+import { isDocumentPath, LIVE_PREVIEW_PATH_ATTRIBUTE, rowIDPathOf } from '../utilities/pathAttribute.js'
 import {
   flashElement,
   scrollToElement,
@@ -230,6 +230,21 @@ const isPreviewRow = (value: unknown): value is PreviewRow =>
 const isPreviewStrings = (value: unknown): value is PreviewStrings =>
   Boolean(value) && typeof value === 'object' && typeof (value as PreviewStrings).moveUp === 'string'
 
+/** The nearest path around `el` that is the edited document's own - the block a shown post sits in. */
+const editedPathAround = (el: Element): null | string => {
+  for (
+    let node = el.parentElement?.closest(`[${LIVE_PREVIEW_PATH_ATTRIBUTE}]`);
+    node;
+    node = node.parentElement?.closest(`[${LIVE_PREVIEW_PATH_ATTRIBUTE}]`)
+  ) {
+    const path = node.getAttribute(LIVE_PREVIEW_PATH_ATTRIBUTE)
+    if (path && !isDocumentPath(path)) {
+      return path
+    }
+  }
+  return null
+}
+
 const PreviewInspector: React.FC<LivePreviewInspectorClientProps> = ({
   blockToolbar = true,
   disableInteractions = true,
@@ -364,7 +379,9 @@ const PreviewInspector: React.FC<LivePreviewInspectorClientProps> = ({
       }
 
       if (data.status === 'not-found') {
-        overlay.setLabel(strings?.notInForm ?? 'Not in this form')
+        // The admin's reason when it has one - another document still open
+        // with changes - and otherwise the usual one.
+        overlay.setLabel(typeof data.label === 'string' ? data.label : (strings?.notInForm ?? 'Not in this form'))
       }
       endPending(data.status === 'not-found' ? 'not-found' : 'done')
     }
@@ -491,15 +508,18 @@ const PreviewInspector: React.FC<LivePreviewInspectorClientProps> = ({
       hoverFrame = 0
       setHovered(null)
       overlay.show(el, { x: event.clientX, y: event.clientY })
+      // A field of another document - a post in a carousel - sits in a block
+      // of this one all the same, and that block is where the editor is now.
+      const context = isDocumentPath(path) ? editedPathAround(el) : null
       // The block the click landed in is the one the editor is at now.
-      toolbar?.select(rowIDPathOf(path))
+      toolbar?.select(rowIDPathOf(context ?? path))
       pendingID = id
       // An admin that never acknowledges runs a version without reveal
       // status - the mark then goes quietly instead of lingering.
       clearTimeout(pendingTimer)
       pendingTimer = setTimeout(() => endPending(), ACK_TIMEOUT_MS)
 
-      window.parent.postMessage({ id, type: CLICK_MESSAGE_TYPE, caret, path }, resolvedOrigin)
+      window.parent.postMessage({ id, type: CLICK_MESSAGE_TYPE, caret, context, path }, resolvedOrigin)
     }
 
     /*

@@ -3,7 +3,15 @@ import { beforeEach, describe, expect, it } from 'vitest'
 
 import type { SchemaField } from './revealPlan.js'
 
-import { describeTarget, findTabsElement, labelOfTarget, planReveal, tabButtonsOf } from './revealPlan.js'
+import {
+  describeTarget,
+  findTabsElement,
+  formFieldPathOf,
+  labelOfTarget,
+  planReveal,
+  relatedDocumentAt,
+  tabButtonsOf,
+} from './revealPlan.js'
 
 beforeEach(() => {
   document.body.innerHTML = ''
@@ -221,5 +229,92 @@ describe('labelOfTarget', () => {
 
   it('names a field inside a row by the field, not the row', () => {
     expect(label(fields, 'layout.1.heading')).toBe('Heading')
+  })
+})
+
+describe('relatedDocumentAt', () => {
+  const fields: SchemaField[] = [
+    text('title'),
+    { name: 'author', type: 'relationship', relationTo: 'people' },
+    { name: 'image', type: 'upload', relationTo: 'media' },
+    {
+      name: 'layout',
+      type: 'blocks',
+      blocks: [
+        {
+          slug: 'carousel',
+          fields: [
+            {
+              name: 'query',
+              type: 'group',
+              fields: [{ name: 'selectedDocs', type: 'relationship', hasMany: true, relationTo: ['posts', 'pages'] }],
+            },
+          ],
+        },
+      ],
+    },
+    { name: 'team', type: 'relationship', hasMany: true, relationTo: 'people' },
+  ]
+  const formState = {
+    author: { value: 7 },
+    image: { value: 3 },
+    layout: { rows: [{ id: 'row-1', blockType: 'carousel' }] },
+    'layout.0.query.selectedDocs': {
+      value: [
+        { relationTo: 'posts', value: 12 },
+        { relationTo: 'pages', value: 4 },
+      ],
+    },
+    team: { value: ['p-1', 'p-2'] },
+  }
+
+  it('follows a path through a relationship into the document it points at', () => {
+    expect(relatedDocumentAt(fields, 'author.name', formState)).toEqual({ id: 7, collection: 'people', path: 'name' })
+  })
+
+  it('reads a polymorphic list - the carousel’s chosen documents - by position, through `value`', () => {
+    expect(relatedDocumentAt(fields, 'layout.$row-1.query.selectedDocs.1.value.meta.title', formState)).toEqual({
+      id: 4,
+      collection: 'pages',
+      path: 'meta.title',
+    })
+    expect(relatedDocumentAt(fields, 'layout.0.query.selectedDocs.0.value.title', formState)?.id).toBe(12)
+  })
+
+  it('reads a row segment that names the document by id, where its ids are strings', () => {
+    expect(relatedDocumentAt(fields, 'team.$p-2.name', formState)).toEqual({ id: 'p-2', collection: 'people', path: 'name' })
+  })
+
+  it('stays in this document for its own fields, an upload, and the relationship field itself', () => {
+    for (const path of ['title', 'image.alt', 'author', 'layout.$row-1.query', 'layout.$row-1.query.selectedDocs', 'team.5.name', 'nothing.here']) {
+      expect(relatedDocumentAt(fields, path, formState)).toBeNull()
+    }
+  })
+
+  it('does not take a collection the field does not point into', () => {
+    const forged = { ...formState, 'layout.0.query.selectedDocs': { value: [{ relationTo: 'users', value: 1 }] } }
+    expect(relatedDocumentAt(fields, 'layout.0.query.selectedDocs.0.value.email', forged)).toBeNull()
+  })
+})
+
+describe('formFieldPathOf', () => {
+  it('is the field a path ends in - the rich text, not the text run inside it', () => {
+    const fields: SchemaField[] = [
+      { type: 'tabs', tabs: [{ fields: [{ name: 'content', type: 'richText' }] }] },
+      { name: 'details', type: 'group', fields: [text('subtitle')] },
+      { name: 'links', type: 'array', fields: [text('label')] },
+    ]
+    expect(formFieldPathOf(fields, 'content.root.children.0.children.0.text')).toBe('content')
+    expect(formFieldPathOf(fields, 'details.subtitle')).toBe('details.subtitle')
+    expect(formFieldPathOf(fields, 'links.1.label')).toBe('links.1.label')
+    expect(formFieldPathOf(fields, 'nothing')).toBeNull()
+  })
+
+  it('does not cut a path at a block row whose type it cannot know - that would name the row', () => {
+    const fields: SchemaField[] = [{ name: 'layout', type: 'blocks', blocks: [{ slug: 'content', fields: [text('text')] }] }]
+    expect(formFieldPathOf(fields, 'layout.1.text')).toBeNull()
+    expect(formFieldPathOf(fields, 'layout.1.text', { layout: { rows: [{ id: 'a' }, { id: 'b', blockType: 'content' }] } })).toBe(
+      'layout.1.text',
+    )
   })
 })

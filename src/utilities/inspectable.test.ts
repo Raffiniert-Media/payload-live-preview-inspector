@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { inspectable, isInspectable, pathOf, SERIALIZED_PATH_KEY } from './inspectable.js'
+import { inspectable, inspectableDocument, isInspectable, isInspecting, pathOf, SERIALIZED_PATH_KEY } from './inspectable.js'
 import { LIVE_PREVIEW_PATH_ATTRIBUTE } from './pathAttribute.js'
 import { findStegaPaths, stegaClean } from './stega.js'
 
@@ -343,6 +343,53 @@ describe('inspectable / pathOf', () => {
     it('preserves array iteration', () => {
       const page = inspectable({ layout: [{ id: 'a' }, { id: 'b' }] }, { serializable: true })
       expect(page.layout.map((block) => block.id)).toEqual(['a', 'b'])
+    })
+  })
+
+  describe('inspectableDocument', () => {
+    const post = { id: 12, links: [{ id: 'row-a', label: 'Read the whole story' }], title: 'Thomas B. trains' }
+
+    it('wraps a document the page shows the way the page is wrapped, under the document’s own name', () => {
+      const page = inspectable({ layout: [{ id: 'b1', blockType: 'carousel' }] }, { stega: true })
+      const shown = inspectableDocument(page.layout[0], { id: 12, collection: 'posts' }, post)
+
+      expect(pathOf(shown)).toEqual(attr('@posts:12'))
+      expect(findStegaPaths(shown.title)).toEqual(['@posts:12.title'])
+      expect(stegaClean(shown.title)).toBe('Thomas B. trains')
+      // In the drawer the document opens straight from the database, in this
+      // order - its rows go by position.
+      expect(findStegaPaths(shown.links[0].label)).toEqual(['@posts:12.links.0.label'])
+    })
+
+    it('keeps the document’s own path through serialization - a card is a client component - and only that one', () => {
+      const page = inspectable({ block: { id: 'b1' } }, { stega: true })
+      const shown = inspectableDocument(page.block, { id: 12, collection: 'posts' }, post)
+      const parsed = JSON.parse(JSON.stringify(shown)) as { links: Record<string, unknown>[] } & Record<string, unknown>
+
+      expect(parsed[SERIALIZED_PATH_KEY]).toBe('@posts:12')
+      expect(pathOf(parsed)).toEqual(attr('@posts:12'))
+      expect(parsed.links[0]).not.toHaveProperty(SERIALIZED_PATH_KEY)
+    })
+
+    it('hands the data back untouched outside the preview - nothing for a visitor to pay for', () => {
+      const off = inspectable({ block: { id: 'b1' } }, { enabled: false, stega: true })
+      expect(inspectableDocument(off.block, { id: 12, collection: 'posts' }, post)).toBe(post)
+      expect(inspectableDocument({ id: 'b1' }, { id: 12, collection: 'posts' }, post)).toBe(post)
+      expect(inspectableDocument(off.block, { id: 12, collection: 'posts' }, null)).toBeNull()
+    })
+
+    it('rewraps a document that is already part of the page - a relationship’s value - without encoding twice', () => {
+      const page = inspectable({ featured: [{ relationTo: 'posts', value: post }] }, { stega: true })
+      const shown = inspectableDocument(page, { id: 12, collection: 'posts' }, page.featured[0].value)
+
+      expect(findStegaPaths(shown.title)).toEqual(['@posts:12.title'])
+    })
+
+    it('tells a tree that is switched on from one that is not', () => {
+      expect(isInspecting(inspectable({ block: { id: 'b1' } }).block)).toBe(true)
+      expect(isInspecting(inspectable({ block: { id: 'b1' } }, { enabled: false }).block)).toBe(false)
+      expect(isInspecting({ id: 'b1' })).toBe(false)
+      expect(isInspecting('text')).toBe(false)
     })
   })
 })

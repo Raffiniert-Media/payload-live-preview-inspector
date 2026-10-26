@@ -11,11 +11,17 @@
 export { LIVE_PREVIEW_HOVER_CLASS_NAME } from '../utilities/hoverClassName.js'
 export {
   inspectable,
+  inspectableDocument,
   type InspectableOptions,
   isInspectable,
+  isInspecting,
   pathOf,
   SERIALIZED_PATH_KEY,
   type StegaOptions,
 } from '../utilities/inspectable.js'
-export { LIVE_PREVIEW_AUTO_ATTRIBUTE, LIVE_PREVIEW_PATH_ATTRIBUTE } from '../utilities/pathAttribute.js'
+export {
+  type DocumentRef,
+  LIVE_PREVIEW_AUTO_ATTRIBUTE,
+  LIVE_PREVIEW_PATH_ATTRIBUTE,
+} from '../utilities/pathAttribute.js'
 export { stegaClean } from '../utilities/stega.js'

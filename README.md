@@ -127,6 +127,7 @@ payloadLivePreviewInspector({
     outline: true,
     pageMode: true, // the same three choices as focusMode
     pathBar: true,
+    relatedDocuments: true, // a post a page shows: opens beside the preview
     replaceUpload: true,
     split: true,
     stacked: true,
@@ -150,6 +151,7 @@ payloadLivePreviewInspector({
 - **Narrow screens (`stacked`).** At and below Payload's 1024 px break the preview sits above the form, with a divider between them (touch included), instead of the form disappearing. The outline opens as a sheet.
 - **The bar above the preview** carries the screen widths and the hint about what a click does - as a sentence until the editor has clicked their way to a field once, then as an icon. Where the preview is dragged narrow, it gives up, in this order, the hint's sentence, Payload's width and height fields, and Payload's breakpoint menu, so nothing overlaps.
 - **Replacing a file (`replaceUpload`, `editUploadInLibrary`).** An upload field with a file gets **Replace**: Payload's library opens, and the file chosen there takes the old one's place - one step, where Payload's own way is to remove the file and then choose. Payload's pencil beside it is off: it opens the file's own document, and a change there - alt text, focal point - changes the file wherever it is used, which on a page reads as "edit this image here". `editUploadInLibrary: true` brings it back. Single-file fields; a gallery keeps Payload's list.
+- **Another document (`relatedDocuments`).** A click on what another document puts on the page - a post in a carousel, a person in a team grid, a document a relationship points at - opens that document in Payload's own drawer, at the field clicked, where the form was: the preview stays beside it, and what is saved there shows on the page. See [Another document on the page](#another-document-on-the-page).
 - **Descriptions (`compactDescriptions`).** A field's description is one line until the editor is in that field, then whole: a form whose every field explains itself in two to four lines reads as a wall.
 
 Everything the editor says is in German or English, by the admin's language.
@@ -212,6 +214,36 @@ Links are the exception, and they split in two. `disableLinks` (default `true`) 
 
 Middle-clicks arrive as `auxclick` and are not intercepted. Pass `disableLinks={false}` to restore navigation.
 
+## Another document on the page
+
+A page shows more than its own fields: a carousel of posts, a team grid, a relationship's document rendered as a card. Their text is not edited in the page's form, it is edited in theirs, so a click on it opens **that** document in Payload's document drawer - the one the pencil beside a relationship opens - at the field clicked: tabs switched and rows opened on the way, the field focused and flashed, the caret on the word. The chip names both (`→ Post › Title`).
+
+Two ways a document's content gets there, and the plugin knows both:
+
+- **Through a relationship.** A populated relationship is part of the page's data, so its strings carry their path into it (`featured.0.value.title`) like any other. Nothing to tag: the admin sees the path runs through a relationship field into the document it points at.
+- **Queried by the page itself** - "the latest six posts". Wrap each document with `inspectableDocument(within, { collection, id }, doc)`, where `within` is any node of the page's wrapped tree (the block that queried them). Its strings are encoded the way the page's are (`@posts:12.title`), and `pathOf(doc)` tags the element that shows the whole document - the card - including after the document was handed to a client component. Outside the preview `within` is not switched on and `doc` comes back as it was.
+
+```tsx
+const { docs } = await payload.find({ collection: 'posts', limit: 6 })
+docs.map((raw) => {
+  const post = inspectableDocument(block, { collection: 'posts', id: raw.id }, raw)
+  return (
+    <article key={raw.id} {...pathOf(post)}>
+      <h3>{post.title}</h3>
+      <p>{post.excerpt}</p>
+    </article>
+  )
+})
+```
+
+**Beside the preview.** Where the preview stands beside the form, the drawer takes the form's place and the preview stays in view and clickable: another field of the post, or another post, is one click away, and focusing a field in the drawer scrolls the preview to it, as in the page's own form. On a narrow screen the drawer is Payload's own, over everything.
+
+**Saving is Payload's.** The drawer is Payload's document view: it loads, locks, validates, autosaves and publishes the document as anywhere else, and every save in it - an autosave too - is reported to the live preview by Payload itself, which refreshes. Whether the page then shows the post's draft or its published version is the site's query; a site that lists published documents can show their newest version in the preview only (the theme this plugin was written for does, keeping *which* posts are listed the published ones).
+
+**Switching documents** closes the open one, and so does a click on the page's own content: the page's form comes back and goes to the field. If the open document has changes not saved yet - a collection without autosave, or before its autosave ran - the click is declined and the mark says to save first. A relationship's document the editor may not open goes to the relationship field, as before.
+
+The edited document itself listed on its own page (a page in its own "related pages") is edited in its form, not a second time in a drawer. `editor: { relatedDocuments: false }` turns all of this off; a relationship's text then goes to the relationship field, as before.
+
 ## Security
 
 The admin and the preview talk through `postMessage`, and the preview can change the document (the block toolbar). Both directions are locked down:
@@ -220,6 +252,7 @@ The admin and the preview talk through `postMessage`, and the preview can change
 - **The admin listens only to its preview.** Messages are accepted only from the live preview iframe's own window and origin; nested frames inside the preview (a YouTube or Maps embed) are ignored.
 - **Changes need a person.** Block actions that change the document (move, duplicate, add, remove) are taken from the preview only right after a real click or key press there: a script the site loads could otherwise post as the preview. They run one at a time, each checked against the form as it is at that moment (`minRows`, `maxRows`, `isSortable`, a read-only form or field, and the user's field permissions); Payload enforces access again on save.
 - **Secrets stay in the admin.** Value matching sends the document's text values to the preview's origin only, and never an auth collection's `password`, `confirm-password` or `apiKey`.
+- **Another document opens only for its reader.** A click on another document's content opens it only after a real click in the preview, only for a collection that exists and that the admin shows this user, and only if they may read it - otherwise the mark says it is not in this form. What the drawer then loads and saves goes through Payload's own access control, field-level included, with the user's own session: no endpoint of this plugin is involved. The collection and id in the preview's markup are what a page's public URLs and API already say, and they exist only in the preview.
 - **No HTML from content.** Labels, block names and summaries are rendered as text, never as markup.
 
 Also send a `Content-Security-Policy: frame-ancestors` header on your preview routes naming your admin's origin, so no other site can frame them in the first place.
@@ -282,8 +315,11 @@ From `/path` (pure helpers, safe anywhere; also re-exported from `/client`):
 
 - `inspectable(data, options?)`: path-tracking proxy. Options: `enabled`, `stega: true | { encodeKeys?, skipKeys?, filter? }`, `serializable`.
 - `pathOf(node, subPath?)`: the path attribute for a wrapped node.
+- `inspectableDocument(within, { collection, id }, doc)`: wraps a document the page shows but does not hold the way `within`'s tree is wrapped - see [Another document on the page](#another-document-on-the-page). Untouched outside the preview.
+- `isInspecting(node)`: whether `node` came out of an `inspectable()` tree that is switched on - the preview's question, asked of the data instead of a cookie.
 - `isInspectable(node)`: whether `node` came out of `inspectable()`, silently. `pathOf()` warns in development when handed unwrapped data, which is right for a component that expected a wrapped node and wrong for a shared renderer legitimately called with both. Ask first, then tag: `{...(isInspectable(block) ? pathOf(block) : undefined)}`. A tree wrapped with `enabled: false` counts as inspectable.
 - `stegaClean(value)`: strips stega characters from a string or a whole object tree.
+- Type `DocumentRef`: `{ collection, id }`.
 - `LIVE_PREVIEW_PATH_ATTRIBUTE`, `LIVE_PREVIEW_AUTO_ATTRIBUTE`, `SERIALIZED_PATH_KEY`, `LIVE_PREVIEW_HOVER_CLASS_NAME`: the raw attribute/class names, e.g. to tag manually. The hovered element carries `LIVE_PREVIEW_HOVER_CLASS_NAME` but draws nothing itself: the frame around it is a mark (see [How it works](#how-it-works)).
 
 From `/client` (import only where you mount it):
@@ -294,7 +330,8 @@ From `/listener`: `LivePreviewInspectorListener`, admin-side; the plugin registe
 
 ## Known limitations
 
-- Fields that only render inside a relationship's edit drawer aren't reachable: the click silently no-ops. Same for a row deleted after the preview was rendered.
+- A row deleted after the preview was rendered is not reachable: the mark says so.
+- In another document's drawer, the jump reads the drawer's form where the document's collection is registered with the plugin: the plugin's listener inside the drawer hands it over. For a collection that is not, it goes by the collection's field config and the drawer's markup - rows by position, which is how `inspectableDocument` addresses them, and a row a relationship's value names by id only as far as its array. Nothing deeper than one drawer: a relationship inside the drawer's document goes to its field there.
 - `scrollBehavior: 'instant'` trades the scroll animation for responsiveness; the flash and the caret land once the form has stopped moving. A `prefers-reduced-motion` preference is honoured regardless of this setting.
 - The route to a field comes from the field config. Where the config can't tell it (a field rendered by a custom component, a tab with nothing identifiable in it), the reveal falls back to clicking through the form's tabs, restoring the originals when nothing is found. Fields that mount slower than `tabSwitchWaitMs` can make the reveal settle on the nearest parent; raise the option for very heavy forms.
 - Multi-locale setups or drawer-duplicated fields can get suffixed DOM ids; the `field-<path>` lookup may occasionally miss there.

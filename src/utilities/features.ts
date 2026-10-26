@@ -62,6 +62,17 @@ export type EditorFeatures = {
    */
   pathBar?: boolean
   /**
+   * A click on what another document puts on the page - a post in a carousel,
+   * the document a relationship points at - opens that document in Payload's
+   * drawer, at the field clicked, beside the preview. Only documents the
+   * editor may read, of collections the admin shows; in the drawer Payload's
+   * access control applies as anywhere. Tag such content with
+   * `inspectableDocument()`; a relationship's populated value needs nothing.
+   * `false`: a relationship's text goes to the relationship field, as before.
+   * @default true
+   */
+  relatedDocuments?: boolean
+  /**
    * "Replace" on an upload field that has a file: another one from the
    * library, in one step - where Payload's own way is to remove the file and
    * then choose. Single-file fields; a gallery keeps Payload's list.

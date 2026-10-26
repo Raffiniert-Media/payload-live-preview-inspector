@@ -144,13 +144,19 @@ export const seed = async (payload: Payload) => {
   }
 
   const { docs: pages } = await payload.find({ collection: 'pages', limit: 1 })
-  const expected = { ...seedPage(), image: media[0].id }
+  const [post] = (await payload.find({ collection: 'posts', depth: 0, limit: 1, sort: 'createdAt' })).docs
+  const expected = {
+    ...seedPage(),
+    featured: post ? [{ relationTo: 'posts' as const, value: post.id }] : [],
+    image: media[0].id,
+  }
 
   if (pages.length === 0) {
     await payload.create({ collection: 'pages', data: expected })
   } else if (
     pages[0].sections?.length !== expected.sections.length ||
-    (typeof pages[0].image === 'object' ? pages[0].image?.id : pages[0].image) !== media[0].id
+    (typeof pages[0].image === 'object' ? pages[0].image?.id : pages[0].image) !== media[0].id ||
+    (pages[0].featured?.length ?? 0) !== expected.featured.length
   ) {
     // A dev database from before the fixture grew - bring it up to date.
     await payload.update({ id: pages[0].id, collection: 'pages', data: expected })

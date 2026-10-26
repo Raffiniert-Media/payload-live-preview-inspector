@@ -1,7 +1,11 @@
-import { LIVE_PREVIEW_PATH_ATTRIBUTE, rowIDSegment } from './pathAttribute.js'
+import { type DocumentRef, documentSegment, LIVE_PREVIEW_PATH_ATTRIBUTE, rowIDSegment } from './pathAttribute.js'
 import { encodeStegaPath, shouldSkipStega } from './stega.js'
 
 const PATH_META = Symbol.for('payload-live-preview-inspector:path')
+/** The options a tree was wrapped with - so a document it shows can be wrapped the same way. */
+const OPTIONS_META = Symbol.for('payload-live-preview-inspector:options')
+/** The object under a proxy - so wrapping it again does not encode twice. */
+const RAW_META = Symbol.for('payload-live-preview-inspector:raw')
 
 /**
  * With `serializable: true`, each object node also carries its path under
@@ -92,6 +96,13 @@ type ResolvedStegaOptions = {
 }
 
 type NodeOptions = {
+  /**
+   * Rows by their `id` (`$abc`) rather than their index. Off for a document
+   * the page only shows: it opens in a drawer straight from the database, in
+   * the order the page rendered it, and a drawer's rows are found by
+   * position - the drawer's form is out of reach here.
+   */
+  rowIDs?: boolean
   serializable: boolean
   stega: false | ResolvedStegaOptions
 }
@@ -102,7 +113,12 @@ type NodeOptions = {
  * without generating any path attributes, stega characters, or serialized
  * markers.
  */
-const createNode = (value: object, path: null | string, options: NodeOptions): object => {
+const createNode = (
+  value: object,
+  path: null | string,
+  options: NodeOptions,
+  { carriesPath = options.serializable }: { carriesPath?: boolean } = {},
+): object => {
   // Cache child proxies so repeated access to the same property returns the
   // same reference (keeps e.g. React memo/dependency comparisons stable).
   const childCache = new Map<PropertyKey, { proxy: object; raw: unknown }>()
@@ -112,8 +128,14 @@ const createNode = (value: object, path: null | string, options: NodeOptions): o
       if (prop === PATH_META) {
         return path
       }
+      if (prop === OPTIONS_META) {
+        return options
+      }
+      if (prop === RAW_META) {
+        return target
+      }
 
-      if (prop === SERIALIZED_PATH_KEY && options.serializable && path !== null) {
+      if (prop === SERIALIZED_PATH_KEY && carriesPath && path !== null) {
         return path
       }
 
@@ -156,7 +178,7 @@ const createNode = (value: object, path: null | string, options: NodeOptions): o
       let childPath: null | string = null
       if (path !== null) {
         let segment = prop
-        if (Array.isArray(target) && /^\d+$/.test(prop)) {
+        if (options.rowIDs !== false && Array.isArray(target) && /^\d+$/.test(prop)) {
           // Array/Blocks rows in Payload data carry a stable `id` - address the
           // row by it so the path survives reordering. Rows without an id fall
           // back to their (fragile) index.
@@ -175,7 +197,7 @@ const createNode = (value: object, path: null | string, options: NodeOptions): o
     getOwnPropertyDescriptor(target, prop) {
       if (
         prop === SERIALIZED_PATH_KEY &&
-        options.serializable &&
+        carriesPath &&
         path !== null &&
         !Array.isArray(target) &&
         !Reflect.has(target, SERIALIZED_PATH_KEY)
@@ -188,7 +210,7 @@ const createNode = (value: object, path: null | string, options: NodeOptions): o
       const keys = Reflect.ownKeys(target)
       // Arrays can't carry the marker through JSON - their object children
       // still do, which is what `pathOf()` gets called on anyway.
-      if (options.serializable && path !== null && !Array.isArray(target) && !keys.includes(SERIALIZED_PATH_KEY)) {
+      if (carriesPath && path !== null && !Array.isArray(target) && !keys.includes(SERIALIZED_PATH_KEY)) {
         keys.push(SERIALIZED_PATH_KEY)
       }
       return keys
@@ -309,6 +331,56 @@ export const isInspectable = (node: unknown): boolean => {
     (node as Record<symbol, unknown>)[PATH_META] !== undefined ||
     typeof (node as Record<string, unknown>)[SERIALIZED_PATH_KEY] === 'string'
   )
+}
+
+/**
+ * Whether `node` came out of an `inspectable()` tree that is switched on - the
+ * preview's question, asked of the data rather than of a cookie: a component
+ * that reads `draftMode()` to decide makes every page it is on dynamic, where
+ * the data it is handed already knows.
+ */
+export const isInspecting = (node: unknown): boolean =>
+  node !== null && typeof node === 'object' && typeof (node as Record<symbol, unknown>)[PATH_META] === 'string'
+
+/**
+ * A document the page shows but does not hold - a post a block queried by
+ * itself - wrapped the way `within` is: clickable in the preview exactly when
+ * the page is, its strings stega-encoded by the same rules. A click on one of
+ * them opens that document in a drawer beside the preview, at the field
+ * clicked; `pathOf(doc)` tags the element that shows the document as a whole
+ * (a card).
+ *
+ * ```tsx
+ * const { docs } = await payload.find({ collection: 'posts', ... })
+ * docs.map((raw) => {
+ *   const post = inspectableDocument(block, { collection: 'posts', id: raw.id }, raw)
+ *   return <article key={raw.id} {...pathOf(post)}><h3>{post.title}</h3></article>
+ * })
+ * ```
+ *
+ * `within` is any node of the page's tree - usually the block that queried
+ * the documents. Outside the preview (a tree wrapped with `enabled: false`, or
+ * no tree at all) `data` comes back untouched, so public rendering pays
+ * nothing.
+ *
+ * The document's own node keeps its path through serialization - `pathOf()`
+ * still finds it after the document was handed to a client component as a
+ * prop - which is what a card, nearly always a client component, needs; the
+ * nodes inside it carry theirs only with `serializable: true`, as anywhere.
+ */
+export const inspectableDocument = <T>(within: unknown, document: DocumentRef, data: T): T => {
+  if (data === null || typeof data !== 'object' || !isInspecting(within)) {
+    return data
+  }
+  const options = (within as Record<symbol, unknown>)[OPTIONS_META] as NodeOptions | undefined
+  if (!options) {
+    return data
+  }
+  // Already wrapped - a relationship's value inside the page, say: its
+  // strings carry that path, and a second proxy around it would encode a
+  // second one after it.
+  const raw = ((data as Record<symbol, unknown>)[RAW_META] as object | undefined) ?? (data as object)
+  return createNode(raw, documentSegment(document), { ...options, rowIDs: false }, { carriesPath: true }) as T
 }
 
 /**

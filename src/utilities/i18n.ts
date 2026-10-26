@@ -56,6 +56,8 @@ export type EditorStrings = {
   replace: string
   replaceHelp: string
   resizeSplit: string
+  /** A click on another document while the one open in the drawer has unsaved changes. */
+  saveFirst: string
   selectParent: string
   /** Page mode on a narrow screen, until the first tap: what tapping does. */
   tapHint: string
@@ -112,6 +114,7 @@ const en: EditorStrings = {
   replace: 'Replace',
   replaceHelp: 'Pick another file from the library',
   resizeSplit: 'Drag to resize form and preview, double-click to reset',
+  saveFirst: 'Save the document that is open first',
   selectParent: 'Select the block around it',
   tapHint: 'Tap anything on the page to edit it',
   undo: 'Undo',
@@ -161,6 +164,7 @@ const de: EditorStrings = {
   replace: 'Ersetzen',
   replaceHelp: 'Eine andere Datei aus der Mediathek wählen',
   resizeSplit: 'Ziehen, um Formular und Vorschau zu verteilen, Doppelklick setzt zurück',
+  saveFirst: 'Erst das offene Dokument speichern',
   selectParent: 'Den umgebenden Block wählen',
   tapHint: 'Tippe auf etwas auf der Seite, um es zu bearbeiten',
   undo: 'Rückgängig',
