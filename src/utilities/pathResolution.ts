@@ -4,6 +4,7 @@ import { applyCaretHint } from './caret.js'
 import { escapeAttributeValue, isRowIDSegment, rowIDFromSegment, rowIDSegment } from './pathAttribute.js'
 import {
   collapsibleOf,
+  elementID,
   FIELD_ID_PREFIX,
   FIELD_PATH_ATTRIBUTE,
   fieldIDFromPath,
@@ -59,8 +60,9 @@ export const pathFromFieldElement = (el: HTMLElement): null | string => {
     if (dataFieldPath) {
       return dataFieldPath
     }
-    if (node.id.startsWith(FIELD_ID_PREFIX)) {
-      return node.id.slice(FIELD_ID_PREFIX.length).replace(/__/g, '.')
+    const id = elementID(node)
+    if (id.startsWith(FIELD_ID_PREFIX)) {
+      return id.slice(FIELD_ID_PREFIX.length).replace(/__/g, '.')
     }
     // A row's header (its toggle, its label) sits inside the row but inside
     // none of its fields. Climbing on would reach the whole Array/Blocks
@@ -68,7 +70,7 @@ export const pathFromFieldElement = (el: HTMLElement): null | string => {
     // the page, whichever row was opened.
     // (An Array row's header carries a second id of that shape, `scroll-<react
     // id>-row-<index>`, for Payload's own scroll-to-new-row - not a path.)
-    const rowPath = pathFromRowID(node.id)
+    const rowPath = pathFromRowID(id)
     if (rowPath) {
       return rowPath
     }
@@ -729,7 +731,8 @@ export type UnrenderedRow = { fields: HTMLElement; index: number; path: string; 
  */
 export const findUnrenderedRows = (): UnrenderedRow[] =>
   Array.from(document.querySelectorAll<HTMLElement>('[id*="-row-"]')).flatMap((row) => {
-    const match = row.id.startsWith(SCROLL_ID_PREFIX) ? null : ROW_ID_PATTERN.exec(row.id)
+    const id = elementID(row)
+    const match = id.startsWith(SCROLL_ID_PREFIX) ? null : ROW_ID_PATTERN.exec(id)
     const fields = match ? unrenderedRowFields(row) : null
     // A row that is not displayed at all - one focus mode set aside - renders
     // nothing because it cannot be seen, not because Payload missed it. Taken

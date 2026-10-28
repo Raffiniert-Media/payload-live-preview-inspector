@@ -119,6 +119,19 @@ export const FIELD_PATH_ATTRIBUTE = 'data-field-path'
 /** Prefix of every non-rich-text field's `id`, set on whichever element is its actual control. */
 export const FIELD_ID_PREFIX = 'field-'
 
+/**
+ * An element's `id`, read as the attribute.
+ *
+ * Not `el.id`: on a `<form>` that property is shadowed by any control *named*
+ * `id` (DOM named-control access). Every Lexical block inside a rich-text field
+ * renders a hidden `<input name="id">` into Payload's edit form, so with one
+ * block `form.id` is that input and with two it is a `RadioNodeList` — and a walk
+ * up from a control outside every field reached the form and called
+ * `.startsWith` on it: `TypeError: t.id.startsWith is not a function` on each
+ * focus or click, measured in the theme-7 admin on 2026-10-28.
+ */
+export const elementID = (el: Element): string => el.getAttribute('id') ?? ''
+
 /** `field-<path, dots doubled into underscores>` - the id Payload gives a field's control. */
 export const fieldIDFromPath = (path: string): string => `${FIELD_ID_PREFIX}${path.replace(/\./g, '__')}`
 

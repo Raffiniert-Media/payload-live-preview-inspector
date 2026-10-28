@@ -1,5 +1,23 @@
 # Changelog
 
+## 2.1.1
+
+### A rich-text block no longer breaks the focus sync
+
+With a block inside a rich-text field — a note, a code listing, a picture in
+the text — every focus or click on a control outside the fields (a tab, the
+outline button, the publish button) threw `TypeError: t.id.startsWith is not a
+function` in the admin console, and the preview did not follow that focus.
+
+The cause was a property, not the plugin's logic: each Lexical block renders a
+hidden `<input name="id">` into Payload's edit form, and a form's named
+controls shadow its own properties, so `form.id` was that input (or a list of
+them). The upward walk from the focused control reached the form and called a
+string method on an element. Ids are now read as the attribute everywhere the
+plugin walks the admin's DOM (`elementID` in `utilities/payloadAdmin.ts`).
+Found while testing theme 7 of `@raffiniert-media-ag/payload-theme`, whose Text
+component holds such blocks on every page.
+
 ## 2.1.0
 
 ### Another document, at the field clicked

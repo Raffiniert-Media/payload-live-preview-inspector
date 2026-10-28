@@ -90,6 +90,7 @@ import {
   docControlsEl,
   editMainEl,
   editMainWrapperEl,
+  elementID,
   isCollapsedCollapsible,
   livePreviewToolbarEl,
   livePreviewWindowEl,
@@ -1185,7 +1186,7 @@ const Inspector: React.FC<LivePreviewInspectorListenerProps> = ({
           // set (Lexical does) can move focus again in a microtask. Real user
           // focus cannot land inside that window, so nothing legitimate is lost.
           engineRef.current.suppressFocusEcho = true
-          const caretEl = focusElement(el, caret, { inFields: el.id === rowIDFromPath(resolvedPath) })
+          const caretEl = focusElement(el, caret, { inFields: elementID(el) === rowIDFromPath(resolvedPath) })
           echoTimer = setTimeout(() => {
             engineRef.current.suppressFocusEcho = false
           })

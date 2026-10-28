@@ -1119,3 +1119,36 @@ describe('findUnrenderedRows', () => {
     expect(findUnrenderedRows()).toEqual([])
   })
 })
+
+describe('pathFromFieldElement on a form whose controls shadow its id', () => {
+  /*
+   * Every Lexical block inside a rich-text field renders a hidden
+   * `<input name="id">` into Payload's edit form, and a form's named controls
+   * shadow its properties: `form.id` is that input, or a `RadioNodeList` for
+   * two. A walk up from a control outside every field reached the form and
+   * threw `t.id.startsWith is not a function` (theme-7 admin, 2026-10-28).
+   */
+  const formWith = (blocks: number) => {
+    document.body.innerHTML = `<form class="collection-edit__form">${'<input type="hidden" name="id" value="x">'.repeat(blocks)}<div class="doc-tabs"><button type="button">In Listen</button></div></form>`
+    const form = document.querySelector('form') as HTMLFormElement
+    const inputs = form.querySelectorAll('input[name="id"]')
+    /*
+     * happy-dom does not implement named-control access, so the shadowing is
+     * set up the way a browser has it: the input itself for one, a list of
+     * them for two.
+     */
+    Object.defineProperty(form, 'id', { configurable: true, value: blocks === 1 ? inputs[0] : inputs })
+    return document.querySelector('button') as HTMLElement
+  }
+
+  it('is shadowed in the first place, or this proves nothing', () => {
+    formWith(1)
+    expect(typeof (document.querySelector('form') as { id: unknown } & HTMLFormElement).id).not.toBe('string')
+  })
+
+  it.each([1, 2])('walks past it with %i block(s) and finds no field', (blocks) => {
+    const button = formWith(blocks)
+    expect(() => pathFromFieldElement(button)).not.toThrow()
+    expect(pathFromFieldElement(button)).toBeNull()
+  })
+})

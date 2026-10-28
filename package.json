@@ -1,6 +1,6 @@
 {
   "name": "@raffiniert-media-ag/payload-live-preview-inspector",
-  "version": "2.1.0",
+  "version": "2.1.1",
   "homepage": "https://raffiniert.biz",
   "description": "Click-to-edit for Payload's Live Preview - click a component, land on its field - and a workspace around Payload's form: page mode, an outline, focus mode, a resizable split, a block toolbar in the preview, screen widths and a phone layout.",
   "keywords": [

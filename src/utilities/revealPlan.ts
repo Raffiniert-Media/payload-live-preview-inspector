@@ -4,7 +4,14 @@ import type { MinimalFormState } from './pathResolution.js'
 import { humanize, translateLabel as translate } from './i18n.js'
 import { isRowIDSegment, rowIDFromSegment } from './pathAttribute.js'
 import { pathFromFieldElement } from './pathResolution.js'
-import { collapsibleIDFromPath, FIELD_ID_PREFIX, FIELD_PATH_ATTRIBUTE, PAYLOAD_CLASS, selectorOf } from './payloadAdmin.js'
+import {
+  collapsibleIDFromPath,
+  elementID,
+  FIELD_ID_PREFIX,
+  FIELD_PATH_ATTRIBUTE,
+  PAYLOAD_CLASS,
+  selectorOf,
+} from './payloadAdmin.js'
 
 /**
  * The slice of Payload's client field config the planner reads - structurally
@@ -469,7 +476,7 @@ const firstFieldsIn = (content: Element, max: number): HTMLElement[] => {
   const walker = content.ownerDocument.createTreeWalker(content, NodeFilter.SHOW_ELEMENT)
   for (let node = walker.nextNode(); node && found.length < max; node = walker.nextNode()) {
     const el = node as HTMLElement
-    if (el.id.startsWith(FIELD_ID_PREFIX) || el.hasAttribute(FIELD_PATH_ATTRIBUTE)) {
+    if (elementID(el).startsWith(FIELD_ID_PREFIX) || el.hasAttribute(FIELD_PATH_ATTRIBUTE)) {
       found.push(el)
     }
   }
