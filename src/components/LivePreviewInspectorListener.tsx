@@ -126,6 +126,7 @@ import { useHost, useMaxWidth, useStored, watchDom } from './editor/dom.js'
 import editorClasses from './editor/Editor.module.css'
 import { EDITOR_PROPERTY, editorStyles, HOST, PAGE_ATTRIBUTE, PANEL_ATTRIBUTE } from './editor/editorStyles.js'
 import { BackIcon, FocusIcon, FormIcon, OutlineIcon, PageIcon } from './editor/icons.js'
+import { holdOpenDescription } from './editor/openDescription.js'
 import { OutlinePanel } from './editor/OutlinePanel.js'
 import { PageTitle, PageVersions } from './editor/PageTitle.js'
 import { PathBar } from './editor/PathBar.js'
@@ -1988,6 +1989,14 @@ const Inspector: React.FC<LivePreviewInspectorListenerProps> = ({
   }, [postToPreview])
 
   /* ----------------------------------------------------------- focus mode */
+
+  // The whole description of the field in use, closed only after a click - see `openDescription.ts`.
+  useEffect(() => {
+    if (!features.compactDescriptions) {
+      return
+    }
+    return holdOpenDescription(document)
+  }, [features.compactDescriptions])
 
   // What focus mode shows, kept true as Payload renders: the row once it
   // mounts, what the form adds beside it later.

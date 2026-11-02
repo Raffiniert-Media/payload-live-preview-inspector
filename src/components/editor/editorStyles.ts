@@ -6,6 +6,7 @@ import {
   HOST_ATTRIBUTE,
 } from '../../utilities/isolate.js'
 import { MODAL_CONTAINER_CLASS, PAYLOAD_CLASS, PAYLOAD_MID_BREAK_PX, PAYLOAD_PROPERTY } from '../../utilities/payloadAdmin.js'
+import { DESCRIPTION_OPEN_ATTRIBUTE } from './openDescription.js'
 
 /**
  * The editor's rules for Payload's own markup - the preview's width, the
@@ -196,7 +197,8 @@ ${page} ${c(PAYLOAD_CLASS.livePreviewToolbarBreakpoint)} {
 
 /**
  * Descriptions one line long in the form, whole in the field the editor is in
- * - see `EditorFeatures.compactDescriptions`. Only a field's own description:
+ * - see `EditorFeatures.compactDescriptions`. Which field that is, is set by
+ * `holdOpenDescription`, not `:focus-within`: that closed it under a click. Only a field's own description:
  * Payload puts it beside the input, or inside the input's wrapper, so a group
  * with a focused field inside does not open every description it holds.
  */
@@ -208,8 +210,8 @@ ${c(PAYLOAD_CLASS.editMain)} ${c(PAYLOAD_CLASS.fieldDescription)} {
   overflow: hidden;
 }
 
-${c(PAYLOAD_CLASS.editMain)} ${c(PAYLOAD_CLASS.fieldType)}:focus-within > ${c(PAYLOAD_CLASS.fieldDescription)},
-${c(PAYLOAD_CLASS.editMain)} ${c(PAYLOAD_CLASS.fieldType)}:focus-within > ${c(PAYLOAD_CLASS.fieldTypeWrap)} > ${c(PAYLOAD_CLASS.fieldDescription)} {
+${c(PAYLOAD_CLASS.editMain)} [${DESCRIPTION_OPEN_ATTRIBUTE}] > ${c(PAYLOAD_CLASS.fieldDescription)},
+${c(PAYLOAD_CLASS.editMain)} [${DESCRIPTION_OPEN_ATTRIBUTE}] > ${c(PAYLOAD_CLASS.fieldTypeWrap)} > ${c(PAYLOAD_CLASS.fieldDescription)} {
   display: block;
   -webkit-line-clamp: unset;
   overflow: visible;

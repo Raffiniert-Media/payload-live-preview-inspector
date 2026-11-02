@@ -1,5 +1,18 @@
 # Changelog
 
+## 2.1.2
+
+### A click below a field's description reaches what was clicked
+
+The whole description of the field in use (`editor.compactDescriptions`)
+closed on mousedown, where focus moves, so everything below a long description
+moved up before the mouse came back up and the click landed on whatever was
+now under the pointer. In the theme's admin: type a new page's title, click
+the first section - nothing; the second click opened it. The description now
+closes only after the click (`editor/openDescription.ts`); measured in the
+theme's playground, the first click opened the section three times out of
+three, where it had failed every time.
+
 ## 2.1.1
 
 ### A rich-text block no longer breaks the focus sync
