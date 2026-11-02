@@ -7,7 +7,9 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    # Not ubuntu-latest: that became 26.04, for which Playwright 1.58 has no
+    # browsers ("does not support chromium on ubuntu26.04-x64"). Move on with Playwright.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
 
@@ -49,7 +51,7 @@ jobs:
     # The oldest Payload the peer range admits, beside the one the dev app
     # runs: the names in src/utilities/payloadAdmin.ts are Payload's internals,
     # and each has to be in every version a site may have installed.
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
 
