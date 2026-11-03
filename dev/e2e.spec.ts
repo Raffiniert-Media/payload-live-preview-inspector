@@ -26,14 +26,14 @@ const login = async (page: Page) => {
 const openLivePreview = async (page: Page, collection: 'pages' | 'posts' = 'posts') => {
   await page.goto(`/admin/collections/${collection}`)
 
-  // The row link exists in the DOM before React hydration finishes, so an
-  // early click can be swallowed - retry until the edit view actually loads.
-  // Unlike the toggle button below, re-clicking here is always safe: it's
-  // plain forward navigation, not something that flips back off.
-  await expect(async () => {
-    await page.click('.table tbody tr:first-child a')
-    await expect(page).toHaveURL(new RegExp(`/admin/collections/${collection}/(?!create)[^/]+$`), { timeout: 3_000 })
-  }).toPass({ timeout: 30_000 })
+  // Go to the first row's edit view by its address instead of clicking it.
+  // A click is a client navigation, and its URL only changes once the edit
+  // view has compiled - on a cold CI server that took longer than a retry's
+  // 3 s, so every retry clicked again, restarted the navigation, and the
+  // edit view never arrived (CI, 2026-11-02: 1 failed, 7 flaky, all here).
+  const href = await page.locator('.table tbody tr:first-child a').first().getAttribute('href')
+  expect(href).toMatch(new RegExp(`/admin/collections/${collection}/(?!create)[^/]+$`))
+  await page.goto(href!)
 
   const toggler = page.locator('#live-preview-toggler')
   const iframe = page.locator('#live-preview-iframe')
