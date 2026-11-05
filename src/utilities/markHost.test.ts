@@ -49,7 +49,7 @@ describe('markHost', () => {
     const order: string[] = []
     host.showPopover = () => order.push('show')
     host.hidePopover = () => order.push('hide')
-    host.matches = () => true
+    host.matches = (() => true) as unknown as typeof host.matches
     vi.spyOn(document, 'querySelector').mockReturnValue(document.createElement('dialog'))
     raiseMarkHost(host)
     expect(order).toEqual(['hide', 'show'])

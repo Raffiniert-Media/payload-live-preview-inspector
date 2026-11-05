@@ -153,14 +153,15 @@ export const payloadLivePreviewInspector =
 
         global.admin ??= {}
         global.admin.components ??= {}
-        global.admin.components.elements ??= {}
-        global.admin.components.elements.beforeDocumentControls ??= []
+        // Payload 4: globals take the same `edit` slots as collections (was `elements`).
+        global.admin.components.edit ??= {}
+        global.admin.components.edit.beforeDocumentControls ??= []
 
-        if (alreadyRegistered(global.admin.components.elements.beforeDocumentControls)) {
+        if (alreadyRegistered(global.admin.components.edit.beforeDocumentControls)) {
           continue
         }
 
-        global.admin.components.elements.beforeDocumentControls.push(createComponentConfig())
+        global.admin.components.edit.beforeDocumentControls.push(createComponentConfig())
       }
     }
 

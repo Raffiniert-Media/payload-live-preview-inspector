@@ -109,7 +109,7 @@ describe('planReveal', () => {
   })
 
   it('resolves block references through the blocks map', () => {
-    const referencing: SchemaField[] = [{ name: 'layout', type: 'blocks', blockReferences: ['hero'] }]
+    const referencing: SchemaField[] = [{ name: 'layout', type: 'blocks', blocks: ['hero'] }]
     const plan = planReveal(
       referencing,
       'layout.0.heading',

@@ -175,6 +175,8 @@ export const Pages: CollectionConfig = {
       ],
     },
   ],
+  versions: false,
+  authorship: false,
 }
 
 /** Forty sections cycling through the three block types, every text unique so value matching can't collide. */

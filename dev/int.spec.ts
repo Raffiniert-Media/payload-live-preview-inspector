@@ -37,7 +37,7 @@ describe('Plugin integration tests', () => {
 
   test('registers LivePreviewInspectorListener on configured globals', () => {
     const siteSettings = payload.globals.config.find((global) => global.slug === 'siteSettings')
-    const beforeDocumentControls = siteSettings?.admin?.components?.elements?.beforeDocumentControls
+    const beforeDocumentControls = siteSettings?.admin?.components?.edit?.beforeDocumentControls
 
     expect(beforeDocumentControls).toContainEqual(
       expect.objectContaining({

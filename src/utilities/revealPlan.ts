@@ -20,8 +20,10 @@ import {
  */
 export type SchemaField = {
   admin?: { disabled?: boolean; hidden?: boolean; isSortable?: boolean; readOnly?: boolean }
+  /** Payload 3; Payload 4 lists references in `blocks`. */
   blockReferences?: (SchemaBlock | string)[]
-  blocks?: SchemaBlock[]
+  /** Inline blocks and, since Payload 4, slugs of blocks in `config.blocks`. */
+  blocks?: (SchemaBlock | string)[]
   fields?: SchemaField[]
   hasMany?: boolean
   label?: unknown

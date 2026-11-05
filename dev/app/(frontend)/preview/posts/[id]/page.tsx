@@ -21,6 +21,7 @@ const Page = async ({ params }: Args) => {
       id,
       collection: 'posts',
       draft: true,
+      overrideAccess: true,
     })
     .catch(() => null)
 

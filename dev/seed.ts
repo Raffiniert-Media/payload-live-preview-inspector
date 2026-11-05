@@ -68,18 +68,21 @@ export const seed = async (payload: Payload) => {
         equals: devUser.email,
       },
     },
+    overrideAccess: true,
   })
 
   if (!totalDocs) {
     await payload.create({
       collection: 'users',
       data: devUser,
+      overrideAccess: true,
     })
   }
 
   const { docs: posts } = await payload.find({
     collection: 'posts',
     limit: 1,
+    overrideAccess: true,
   })
 
   if (posts.length === 0) {
@@ -103,6 +106,7 @@ export const seed = async (payload: Payload) => {
         metaSections: [{ title: 'A section title behind the Meta tab' }],
         title: 'Hello Live Preview',
       },
+      overrideAccess: true,
     })
   } else {
     // Backfill for a dev database created before the rich-text demos existed.
@@ -122,6 +126,7 @@ export const seed = async (payload: Payload) => {
             ? post.metaSections
             : [{ title: 'A section title behind the Meta tab' }],
         },
+        overrideAccess: true,
       })
     }
   }
@@ -131,7 +136,7 @@ export const seed = async (payload: Payload) => {
   for (const [name, png] of SEED_IMAGES) {
     // By its stem: a file left on disk from an earlier database makes Payload number the next one (seed-red-1.png).
     const stem = name.replace(/\.png$/, '')
-    const { docs } = await payload.find({ collection: 'media', limit: 1, where: { filename: { contains: stem } } })
+    const { docs } = await payload.find({ collection: 'media', limit: 1, where: { filename: { contains: stem } }, overrideAccess: true })
     const data = Buffer.from(png, 'base64')
     media.push(
       docs[0] ??
@@ -139,12 +144,13 @@ export const seed = async (payload: Payload) => {
           collection: 'media',
           data: {},
           file: { name, data, mimetype: 'image/png', size: data.length },
+          overrideAccess: true,
         })),
     )
   }
 
-  const { docs: pages } = await payload.find({ collection: 'pages', limit: 1 })
-  const [post] = (await payload.find({ collection: 'posts', depth: 0, limit: 1, sort: 'createdAt' })).docs
+  const { docs: pages } = await payload.find({ collection: 'pages', limit: 1, overrideAccess: true })
+  const [post] = (await payload.find({ collection: 'posts', depth: 0, limit: 1, sort: 'createdAt', overrideAccess: true })).docs
   const expected = {
     ...seedPage(),
     featured: post ? [{ relationTo: 'posts' as const, value: post.id }] : [],
@@ -152,14 +158,14 @@ export const seed = async (payload: Payload) => {
   }
 
   if (pages.length === 0) {
-    await payload.create({ collection: 'pages', data: expected })
+    await payload.create({ collection: 'pages', data: expected, overrideAccess: true })
   } else if (
     pages[0].sections?.length !== expected.sections.length ||
     (typeof pages[0].image === 'object' ? pages[0].image?.id : pages[0].image) !== media[0].id ||
     (pages[0].featured?.length ?? 0) !== expected.featured.length
   ) {
     // A dev database from before the fixture grew - bring it up to date.
-    await payload.update({ id: pages[0].id, collection: 'pages', data: expected })
+    await payload.update({ id: pages[0].id, collection: 'pages', data: expected, overrideAccess: true })
   }
 }
 

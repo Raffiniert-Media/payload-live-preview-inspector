@@ -348,7 +348,9 @@ const Inspector: React.FC<LivePreviewInspectorListenerProps> = ({
   scrollOffset,
   tabSwitchWaitMs = DEFAULT_TAB_SWITCH_WAIT_MS,
 }) => {
-  const { iframeRef, isLivePreviewing, loadedURL, previewWindowType, url } = useLivePreviewContext()
+  const { iframeRef, isLivePreviewing, isPopupOpen, loadedURL, url } = useLivePreviewContext()
+  // Payload 4 has no `previewWindowType`; the preview is the iframe unless the popup is open.
+  const previewWindowType = isPopupOpen ? 'popup' : 'iframe'
   const features = {
     blockToolbar: editor.blockToolbar !== false,
     compactDescriptions: editor.compactDescriptions !== false,

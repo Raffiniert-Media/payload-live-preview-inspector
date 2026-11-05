@@ -3,12 +3,12 @@ import { lexicalEditor } from '@payloadcms/richtext-lexical'
 import { payloadLivePreviewInspector } from '@raffiniert-media-ag/payload-live-preview-inspector'
 import path from 'path'
 import { buildConfig } from 'payload'
-import sharp from 'sharp'
 import { fileURLToPath } from 'url'
 
 import { Pages } from './collections/Pages.js'
 import { testEmailAdapter } from './helpers/testEmailAdapter.js'
 import { seed } from './seed.js'
+import { sharpTransformer } from '@payloadcms/transformer-sharp'
 
 const filename = fileURLToPath(import.meta.url)
 const dirname = path.dirname(filename)
@@ -125,6 +125,7 @@ export default buildConfig({
         },
       ],
       versions: { drafts: true },
+      authorship: false,
     },
     Pages,
     {
@@ -133,6 +134,7 @@ export default buildConfig({
       upload: {
         staticDir: path.resolve(dirname, 'media'),
       },
+      authorship: false,
     },
   ],
   db: sqliteAdapter({
@@ -151,6 +153,7 @@ export default buildConfig({
           type: 'text',
         },
       ],
+      authorship: false,
     },
   ],
   onInit: async (payload) => {
@@ -168,8 +171,9 @@ export default buildConfig({
     }),
   ],
   secret: process.env.PAYLOAD_SECRET || 'test-secret_key',
-  sharp,
   typescript: {
     outputFile: path.resolve(dirname, 'payload-types.ts'),
   },
+  // The transformer bundles sharp; no own copy to pass.
+  upload: { transformers: [sharpTransformer()] },
 })

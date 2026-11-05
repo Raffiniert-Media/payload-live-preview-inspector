@@ -14,7 +14,7 @@ const Page = async ({ params }: Args) => {
   const payload = await getPayload({ config })
 
   // Dev-only shortcut, like the posts preview: no auth check on drafts.
-  const doc = await payload.findByID({ id, collection: 'pages', draft: true }).catch(() => null)
+  const doc = await payload.findByID({ id, collection: 'pages', draft: true, overrideAccess: true }).catch(() => null)
 
   if (!doc) {
     return <p>Not found</p>
@@ -22,7 +22,7 @@ const Page = async ({ params }: Args) => {
 
   // Documents the page does not hold but shows - what a "latest posts" block
   // queries by itself.
-  const { docs: posts } = await payload.find({ collection: 'posts', depth: 0, draft: true, limit: 3, sort: 'createdAt' })
+  const { docs: posts } = await payload.find({ collection: 'posts', depth: 0, draft: true, limit: 3, sort: 'createdAt', overrideAccess: true })
 
   return <PagePreviewClient initialData={doc} posts={posts} />
 }
