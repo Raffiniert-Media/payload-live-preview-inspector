@@ -67,7 +67,6 @@ export const PAYLOAD_CLASS = {
   livePreviewToolbarBreakpoint: 'live-preview-toolbar-controls__breakpoint',
   /** Payload's controls in that bar, as one element. */
   livePreviewToolbarControls: 'live-preview-toolbar-controls',
-  livePreviewToolbarSize: 'live-preview-toolbar-controls__device-size',
   /** In that bar: the zoom menu. */
   livePreviewToolbarZoom: 'live-preview-toolbar-controls__zoom',
   livePreviewWindow: 'live-preview-window',
@@ -99,10 +98,10 @@ export const MODAL_CONTAINER_CLASS = 'payload__modal-container'
 
 /** Payload's custom properties, read for layout and colour. */
 export const PAYLOAD_PROPERTY = {
-  /** The admin's accent colour, resolved in its current light/dark theme. */
-  accent: '--theme-success-500',
-  /** Payload's spacing unit. */
-  base: '--base',
+  /** The admin's accent colour, resolved in its current light/dark theme (`--theme-success-500` on Payload 3). */
+  accent: '--color-bg-success',
+  /** Payload 4's 40px step, twice the 3.x `--base` the editor was laid out with. */
+  spacerWide: '--spacer-6',
   /** Height of the sticky document controls. */
   docControlsHeight: '--doc-controls-height',
 } as const

@@ -69,7 +69,7 @@ export const ViewportControls: React.FC<Props> = ({ language, strings, viewports
       return
     }
     // Payload pads the frame by one unit on every side once a size is set.
-    const pad = payloadPropertyPx(PAYLOAD_PROPERTY.base, 20) * 2
+    const pad = payloadPropertyPx(PAYLOAD_PROPERTY.spacerWide, 40)
     const rect = main.getBoundingClientRect()
     const { height, width, zoom } = fitDevice(viewport.width, { height: rect.height - pad, width: rect.width - pad })
     applied.current = CUSTOM

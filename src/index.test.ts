@@ -15,7 +15,7 @@ const controlsOf = (collection: Record<string, never>): unknown[] =>
 
 const globalControlsOf = (global: Record<string, never>): unknown[] =>
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- reading into a config we just built
-  (global as any).admin?.components?.elements?.beforeDocumentControls ?? []
+  (global as any).admin?.components?.edit?.beforeDocumentControls ?? []
 
 describe('payloadLivePreviewInspector', () => {
   it('registers the listener on the named collection and global', () => {

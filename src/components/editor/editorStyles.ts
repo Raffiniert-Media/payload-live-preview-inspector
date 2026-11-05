@@ -126,7 +126,6 @@ ${page} ${own(PAYLOAD_CLASS.docControlsValueWrap)} {
 ${
   viewports
     ? `
-${page} ${c(PAYLOAD_CLASS.livePreviewToolbarSize)},
 ${page} ${c(PAYLOAD_CLASS.livePreviewToolbarZoom)},
 ${page} ${c(PAYLOAD_CLASS.livePreviewToolbarBreakpoint)} {
   display: none !important;
@@ -256,11 +255,11 @@ export const editorStyles = ({
 }
 
 [${FOCUSING_ATTRIBUTE}] {
-  padding-bottom: calc(var(--base) * 2);
+  padding-bottom: var(--spacer-6);
 }
 
 [${FOCUSING_ATTRIBUTE}] > ${host(HOST.pathBar)} {
-  margin-bottom: var(--base);
+  margin-bottom: var(--spacer-3);
 }
 
 ${host(HOST.outline)} {
@@ -292,7 +291,7 @@ ${host(HOST.previewTools)} {
 /* Payload's controls, pushed to the right by ours, off the edge. */
 ${bar}:has(> ${host(HOST.previewTools)}) {
   justify-content: flex-start;
-  padding-right: calc(var(--base) / 2);
+  padding-right: var(--spacer-2);
 }
 
 /*
@@ -301,7 +300,6 @@ ${bar}:has(> ${host(HOST.previewTools)}) {
  */
 ${host(HOST.previewTools)} [${HINT_ICON_ATTRIBUTE}],
 ${folded('hint')} [${HINT_SENTENCE_ATTRIBUTE}],
-${folded('size')} ${c(PAYLOAD_CLASS.livePreviewToolbarSize)},
 ${folded('breakpoint')} ${c(PAYLOAD_CLASS.livePreviewToolbarBreakpoint)} {
   display: none;
 }
