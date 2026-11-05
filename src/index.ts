@@ -26,7 +26,7 @@ export type PayloadLivePreviewInspectorConfig = {
   editor?: EditorFeatures
   /**
    * Flash outline/background color shown when scrolling to a field.
-   * Defaults to the admin's accent colour (Payload's `--theme-success-500`).
+   * Defaults to the admin's accent colour (Payload's `--color-bg-success`).
    */
   flashColor?: string
   /**

@@ -76,7 +76,13 @@ describe('pathFromFieldElement', () => {
     expect(pathFromFieldElement(document.querySelector('input')!)).toBe('layout.0.heading')
   })
 
-  it('climbs from a nested element up to the ancestor that carries the id', () => {
+  it('reads a field of a document in a drawer, whose id carries the form\'s edit depth', () => {
+    document.body.innerHTML = '<input id="field-title-2" /><textarea id="field-layout__1__text"></textarea>'
+    expect(pathFromFieldElement(document.querySelector('input')!, 2)).toBe('title')
+    expect(pathFromFieldElement(document.querySelector('textarea')!, 2)).toBe('layout.1.text')
+  })
+
+    it('climbs from a nested element up to the ancestor that carries the id', () => {
     // RadioGroup renders its id on the <ul>, focus lands on a nested <input>.
     document.body.innerHTML = '<ul id="field-visibility"><li><input type="radio" /></li></ul>'
     const nested = document.querySelector('input')!

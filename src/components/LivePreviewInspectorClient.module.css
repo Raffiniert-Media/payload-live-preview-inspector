@@ -1,6 +1,6 @@
 /*
  * Every colour here is the admin's accent, which the admin sends on load
- * (Payload's `--theme-success-500`), or `hoverColor` when configured. The
+ * (Payload's `--color-bg-success`), or `hoverColor` when configured. The
  * fallback is Payload's default accent, so the first paint already matches.
  */
 

@@ -92,7 +92,7 @@ export type LivePreviewInspectorClientProps = {
   /**
    * Colour of every mark in the preview - hover outline, click frame, label
    * chip, focus flash. Defaults to the admin's accent colour, which the admin
-   * sends when the preview loads (Payload's `--theme-success-500`).
+   * sends when the preview loads (Payload's `--color-bg-success`).
    */
   hoverColor?: string
   /**

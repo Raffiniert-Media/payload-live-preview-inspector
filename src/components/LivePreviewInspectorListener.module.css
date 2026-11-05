@@ -15,16 +15,16 @@
      */
     background-color: color-mix(
       in srgb,
-      var(--payload-live-preview-inspector-flash-color, var(--theme-success-500, #1587ba)) 15%,
-      var(--theme-input-bg, transparent)
+      var(--payload-live-preview-inspector-flash-color, var(--color-bg-success)) 15%,
+      var(--field-color-bg, transparent)
     );
     box-shadow: 0 0 0 6px
-      color-mix(in srgb, var(--payload-live-preview-inspector-flash-color, var(--theme-success-500, #1587ba)) 25%, transparent);
-    outline: 2px solid var(--payload-live-preview-inspector-flash-color, var(--theme-success-500, #1587ba));
+      color-mix(in srgb, var(--payload-live-preview-inspector-flash-color, var(--color-bg-success)) 25%, transparent);
+    outline: 2px solid var(--payload-live-preview-inspector-flash-color, var(--color-bg-success));
     outline-offset: 2px;
   }
   100% {
-    background-color: var(--theme-input-bg, transparent);
+    background-color: var(--field-color-bg, transparent);
     box-shadow: 0 0 0 12px transparent;
     outline-color: transparent;
   }

@@ -80,7 +80,11 @@ const c = (name: (typeof PAYLOAD_CLASS)[keyof typeof PAYLOAD_CLASS]) => `.${name
 const host = (name: (typeof HOST)[keyof typeof HOST]) => `[${HOST_ATTRIBUTE}="${name}"]`
 
 const previewing = c(PAYLOAD_CLASS.editViewLivePreviewing)
+/** Previewing, and not over the form's whole width (Payload 4's expand). */
+const sharing = `${previewing}:not(:has(${c(PAYLOAD_CLASS.livePreviewWindowExpanded)}))`
 const bar = c(PAYLOAD_CLASS.livePreviewToolbar)
+/** Payload's width and height fields in that bar. */
+const sizeInputs = `${c(PAYLOAD_CLASS.livePreviewToolbarCenter)} > ${c(PAYLOAD_CLASS.livePreviewToolbarSizeInput)}`
 const folded = (part: BarFold) => `${bar}[${FOLDED_ATTRIBUTE}~="${part}"]`
 const controls = `var(${PAYLOAD_PROPERTY.docControlsHeight}, 56px)`
 const page = `html[${PAGE_ATTRIBUTE}]`
@@ -126,7 +130,7 @@ ${page} ${own(PAYLOAD_CLASS.docControlsValueWrap)} {
 ${
   viewports
     ? `
-${page} ${c(PAYLOAD_CLASS.livePreviewToolbarZoom)},
+${page} ${c(PAYLOAD_CLASS.livePreviewToolbarCenter)},
 ${page} ${c(PAYLOAD_CLASS.livePreviewToolbarBreakpoint)} {
   display: none !important;
 }`
@@ -288,10 +292,21 @@ ${host(HOST.previewTools)} {
   flex: 1 1 auto;
 }
 
-/* Payload's controls, pushed to the right by ours, off the edge. */
+/*
+ * Payload's controls, pushed to the right by ours, off the edge: one row, as
+ * the bar was before Payload 4 laid it out in three columns - where ours,
+ * one more column's worth, slid under Payload's. Its controls are
+ * display: contents, so their parts are the row's, each its own width.
+ */
 ${bar}:has(> ${host(HOST.previewTools)}) {
+  align-items: center;
+  display: flex;
+  gap: var(--spacer-2);
   justify-content: flex-start;
   padding-right: var(--spacer-2);
+}
+${bar}:has(> ${host(HOST.previewTools)}) ${c(PAYLOAD_CLASS.livePreviewToolbarControls)} > * {
+  flex: none;
 }
 
 /*
@@ -300,6 +315,7 @@ ${bar}:has(> ${host(HOST.previewTools)}) {
  */
 ${host(HOST.previewTools)} [${HINT_ICON_ATTRIBUTE}],
 ${folded('hint')} [${HINT_SENTENCE_ATTRIBUTE}],
+${folded('size')} ${sizeInputs},
 ${folded('breakpoint')} ${c(PAYLOAD_CLASS.livePreviewToolbarBreakpoint)} {
   display: none;
 }
@@ -312,7 +328,7 @@ ${
   split
     ? `
 @media (min-width: ${PAYLOAD_MID_BREAK_PX + 1}px) {
-  ${previewing} ${c(PAYLOAD_CLASS.livePreviewWindow)} {
+  ${sharing} ${c(PAYLOAD_CLASS.livePreviewWindow)} {
     width: var(${EDITOR_PROPERTY.previewWidth}, 60%);
   }
   ${host(HOST.split)} {
@@ -321,6 +337,10 @@ ${
     top: ${controls};
     height: calc(100vh - ${controls});
     z-index: 4;
+  }
+  /* Nothing to share while Payload's expand gives the preview the whole width. */
+  ${previewing}:has(${c(PAYLOAD_CLASS.livePreviewWindowExpanded)}) ${host(HOST.split)} {
+    display: none;
   }
 }`
     : ''
@@ -339,11 +359,15 @@ ${
     height: var(${EDITOR_PROPERTY.previewHeight}, 42vh);
     top: ${controls};
     z-index: 4;
-    box-shadow: 0 1px 0 var(--theme-elevation-100);
+    box-shadow: 0 1px 0 var(--color-border);
   }
   ${previewing} ${c(PAYLOAD_CLASS.editMain)} {
     width: 100%;
     min-height: 60vh;
+  }
+  /* Payload 4 shows the preview instead of the form here; this layout has both. */
+  ${sharing} ${own(PAYLOAD_CLASS.documentFields)} {
+    display: flex;
   }
   ${previewing} ${host(HOST.split)} {
     order: -1;

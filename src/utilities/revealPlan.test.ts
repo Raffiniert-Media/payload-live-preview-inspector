@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import type { SchemaField } from './revealPlan.js'
 
 import {
+  clickableTabButton,
   describeTarget,
   findTabsElement,
   formFieldPathOf,
@@ -133,18 +134,24 @@ describe('planReveal', () => {
 })
 
 describe('findTabsElement', () => {
-  /** Payload's tabs markup: no id or path on the tabs field itself, only on the fields inside. */
-  const tabsMarkup = (labels: string[], active: number, content: string) => `
-    <div class="tabs-field">
-      <div class="tabs-field__tabs-wrap"><div class="tabs-field__tabs">
+  /**
+   * Payload 4's tabs markup (`fields/Tabs`, `elements/Tabs`): no id or path on
+   * the tabs field itself, only on the fields inside; the bar inside a
+   * `TabsList`, the active tab's fields in its panel.
+   */
+  const tabsMarkup = (labels: string[], active: number, content: string, { disabled = false } = {}) => `
+    <div class="field-type tabs-field">
+      <div class="tabs"><div class="tabs__tabs-wrap tabs-field__tabs-wrap"><div class="tabs__tabs tabs-field__tabs" role="tablist">
         ${labels
           .map(
             (label, index) =>
-              `<button class="tabs-field__tab-button${index === active ? ' tabs-field__tab-button--active' : ''}">${label}</button>`,
+              `<button role="tab" class="tabs__tab-button tabs-field__tab-button${index === active ? ' tabs-field__tab-button--active' : ''}"${disabled ? ' disabled' : ''}>${label}</button>`,
           )
           .join('')}
-      </div></div>
-      <div class="tabs-field__content-wrap">${content}</div>
+      </div></div></div>
+      <div class="tabs-field__content-wrap">${labels
+        .map((_, index) => `<div role="tabpanel"${index === active ? '' : ' hidden'}>${index === active ? content : ''}</div>`)
+        .join('')}</div>
     </div>`
 
   it('identifies a tabs field by the fields its active tab renders', () => {
@@ -184,6 +191,27 @@ describe('findTabsElement', () => {
     const step = planReveal(fields, 'layout.1.heading', state).steps.at(-1)!
 
     expect(step.kind === 'tab' && findTabsElement(step, fields, state)).toBe(second)
+  })
+
+  it('reads the ids of a form in a drawer, which carry its edit depth', () => {
+    document.body.innerHTML = tabsMarkup(['Content', 'Meta'], 0, '<input id="field-title-2" />')
+    const step = planReveal(fields, 'metaNote', formState).steps[0]
+
+    expect(step.kind === 'tab' && findTabsElement(step, fields, formState, {}, document, 2)).toBe(
+      document.querySelector('.tabs-field'),
+    )
+    expect(step.kind === 'tab' && findTabsElement(step, fields, formState)).toBeNull()
+  })
+
+  it('offers a tab to click only once its form has initialised', () => {
+    document.body.innerHTML = tabsMarkup(['Content', 'Meta'], 0, '<input id="field-title" />', { disabled: true })
+    const tabs = document.querySelector<HTMLElement>('.tabs-field')
+
+    expect(tabButtonsOf(tabs!).map((b) => b.textContent)).toEqual(['Content', 'Meta'])
+    expect(clickableTabButton(tabs, 1)).toBeNull()
+    tabButtonsOf(tabs!)[1].disabled = false
+    expect(clickableTabButton(tabs, 1)?.textContent).toBe('Meta')
+    expect(clickableTabButton(null, 1)).toBeNull()
   })
 
   it('returns null when no rendered tabs field can be identified', () => {

@@ -64,7 +64,7 @@ export const REVEAL_STATUS_MESSAGE_TYPE = 'payload-live-preview-inspector:reveal
 export type RevealStatus = 'done' | 'not-found' | 'started'
 
 /**
- * admin → iframe: the admin's accent colour (Payload's `--theme-success-500`,
+ * admin → iframe: the admin's accent colour (Payload's `--color-bg-success`,
  * resolved in its current light/dark theme), so the preview's hover, click
  * and focus marks look like part of the admin rather than of the plugin.
  * Sent in reply to `SETTINGS_MESSAGE_TYPE`, i.e. whenever a preview loads.

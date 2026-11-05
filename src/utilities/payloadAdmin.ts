@@ -39,6 +39,8 @@ export const PAYLOAD_CLASS = {
   docControlsValueWrap: 'doc-controls__value-wrap',
   /** The document's title and its views (edit, versions, API), above the bar. Rendered by `@payloadcms/next`. */
   docHeader: 'doc-header',
+  /** The form's fields (and sidebar) - on Payload 4 hidden on a narrow screen while the preview is open. */
+  documentFields: 'document-fields',
   /** Every drawer, open or on its way out - a document opened in one has a form of its own. */
   drawer: 'drawer',
   /** A drawer's panel. */
@@ -63,13 +65,19 @@ export const PAYLOAD_CLASS = {
   livePreviewIframe: 'live-preview-iframe',
   /** The bar above the preview with Payload's size, zoom and pop-out controls. */
   livePreviewToolbar: 'live-preview-toolbar',
-  /** In that bar: the menu of configured breakpoints, and the width and height fields. */
+  /** In that bar: the menu of configured breakpoints. */
   livePreviewToolbarBreakpoint: 'live-preview-toolbar-controls__breakpoint',
-  /** Payload's controls in that bar, as one element. */
+  /** In that bar: the width and height fields and the zoom menu. */
+  livePreviewToolbarCenter: 'live-preview-toolbar-controls__center',
+  /** Payload's controls in that bar - `display: contents` on Payload 4, its parts are the bar's own. */
   livePreviewToolbarControls: 'live-preview-toolbar-controls',
+  /** In that bar: the width field, and the height field (`PreviewFrameSizeInput`). */
+  livePreviewToolbarSizeInput: 'toolbar-input',
   /** In that bar: the zoom menu. */
   livePreviewToolbarZoom: 'live-preview-toolbar-controls__zoom',
   livePreviewWindow: 'live-preview-window',
+  /** The preview over the form's whole width - Payload 4's expand button in its bar. */
+  livePreviewWindowExpanded: 'live-preview-window--is-expanded',
   livePreviewWindowMain: 'live-preview-window__main',
   /** The container a row renders its fields into. */
   renderFields: 'render-fields',
@@ -77,6 +85,8 @@ export const PAYLOAD_CLASS = {
   tabButtonActive: 'tabs-field__tab-button--active',
   tabsContentWrap: 'tabs-field__content-wrap',
   tabsField: 'tabs-field',
+  /** Payload 4's bar of tabs (`TabsList`), first in a tabs field - around the wrap below. */
+  tabsList: 'tabs',
   tabsTabs: 'tabs-field__tabs',
   tabsTabsWrap: 'tabs-field__tabs-wrap',
   /** On an upload field's file card: the buttons - edit, remove. */
@@ -131,8 +141,33 @@ export const FIELD_ID_PREFIX = 'field-'
  */
 export const elementID = (el: Element): string => el.getAttribute('id') ?? ''
 
-/** `field-<path, dots doubled into underscores>` - the id Payload gives a field's control. */
+/** `field-<path, dots doubled into underscores>` - the id of a field's control in the document's own form. */
 export const fieldIDFromPath = (path: string): string => `${FIELD_ID_PREFIX}${path.replace(/\./g, '__')}`
+
+/**
+ * Every id the control of `path` can have in a form at `editDepth` - the
+ * document's own form is at 1, a document in a drawer over it at 2.
+ *
+ * Deeper than 1, Payload 4's text, select, checkbox, date, email and password
+ * fields append the depth (`generateFieldID`: `field-title-2`); every other
+ * field does not (`field-layout__1__text`). So both are asked for there.
+ */
+export const fieldIDsFromPath = (path: string, editDepth: number): string[] =>
+  editDepth > 1 ? [`${fieldIDFromPath(path)}-${editDepth}`, fieldIDFromPath(path)] : [fieldIDFromPath(path)]
+
+/** The path a field id stands for in a form at `editDepth` (`field-title-2` at 2: `title`), else `null`. */
+export const pathFromFieldID = (id: string, editDepth: number = 1): null | string => {
+  if (!id.startsWith(FIELD_ID_PREFIX)) {
+    return null
+  }
+  const depthSuffix = `-${editDepth}`
+  const name = editDepth > 1 && id.endsWith(depthSuffix) ? id.slice(0, -depthSuffix.length) : id
+  return name.slice(FIELD_ID_PREFIX.length).replace(/__/g, '.')
+}
+
+/** The key Payload keeps a document's remembered tabs and rows under (`DocumentInfo`'s `preferencesKey`). */
+export const documentPreferencesKey = (collection: string, id: number | string): string =>
+  `collection-${collection}-${id}`
 
 /** The id Payload's collapsible field renders: its unnamed path, dots doubled into underscores. */
 export const collapsibleIDFromPath = (path: string): string => `${FIELD_ID_PREFIX}collapsible-${path.replace(/\./g, '__')}`

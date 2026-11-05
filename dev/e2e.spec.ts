@@ -13,10 +13,17 @@ declare global {
 }
 
 const login = async (page: Page) => {
-  await page.goto('/admin')
+  // Straight to the login page: Payload 4 renders /admin first and sends a
+  // visitor without a session on in the browser, and a form filled before
+  // that second navigation was lost - the title still said "Dashboard", and
+  // the preferences below were deleted without a session (403, 2026-11-05).
+  await page.goto('/admin/login')
   await page.fill('#field-email', 'dev@payloadcms.com')
   await page.fill('#field-password', 'test')
-  await page.click('.form-submit button')
+  await Promise.all([
+    page.waitForResponse((response) => response.url().endsWith('/api/users/login') && response.ok()),
+    page.click('.form-submit button'),
+  ])
   await expect(page).toHaveTitle(/Dashboard/)
   // Every test starts with Payload's defaults: no remembered tab, no rows
   // left expanded or collapsed by an earlier test.
@@ -64,8 +71,11 @@ const openLivePreview = async (page: Page, collection: 'pages' | 'posts' = 'post
 }
 
 test('should render admin panel logo', async ({ page }) => {
+  // Payload 4 shows the logo on the login page; past it, the admin has no
+  // icon any more (`graphics.Icon` only goes into the share image).
+  await page.goto('/admin')
+  await expect(page.locator('.graphic-logo')).toBeVisible()
   await login(page)
-  await expect(page.locator('.graphic-icon')).toBeVisible()
 })
 
 test('clicking a component in the live preview scrolls and highlights the matching field', async ({ page }) => {
@@ -204,6 +214,15 @@ test('moving the caret within an already-focused rich text follows along in the 
 
 test.describe('another document the page shows', () => {
   const DRAWER = '.doc-drawer.drawer--is-open'
+  /**
+   * The control of the drawer's field at `path`. Its form is at edit depth 2,
+   * and Payload 4 appends that to the ids of text-like fields there
+   * (`field-title-2`) - not to the others (`field-layout__1__text`).
+   */
+  const inDrawer = (path: string) => {
+    const id = `field-${path.replace(/\./g, '__')}`
+    return `[id="${id}-2"], [id="${id}"]`
+  }
 
   test('a post the page queried opens in a drawer beside the preview, at the field clicked', async ({ page }) => {
     await login(page)
@@ -222,7 +241,7 @@ test.describe('another document the page shows', () => {
 
     const drawer = page.locator(DRAWER)
     await expect(drawer).toBeVisible()
-    const field = drawer.locator('#field-title')
+    const field = drawer.locator(inDrawer('title'))
     await expect(field).toBeFocused()
     await expect(field).toHaveClass(/flash/)
 
@@ -255,7 +274,7 @@ test.describe('another document the page shows', () => {
 
     await section.click()
 
-    const field = page.locator(DRAWER).locator('#field-metaSections__0__title')
+    const field = page.locator(DRAWER).locator(inDrawer('metaSections.0.title'))
     await expect(field).toBeFocused()
     await expect(field).toHaveClass(/flash/)
   })
@@ -269,13 +288,13 @@ test.describe('another document the page shows', () => {
     await card.scrollIntoViewIfNeeded()
     await card.locator('h3').click()
     const drawer = page.locator(DRAWER)
-    await expect(drawer.locator('#field-title')).toBeFocused()
+    await expect(drawer.locator(inDrawer('title'))).toBeFocused()
 
     await frame.getByTestId('latest-post-section').first().click()
 
     // The same drawer, gone on to the field behind the other tab.
     await expect(drawer).toHaveCount(1)
-    await expect(drawer.locator('#field-metaSections__0__title')).toBeFocused()
+    await expect(drawer.locator(inDrawer('metaSections.0.title'))).toBeFocused()
   })
 
   test('a field in a block of the post: the drawer’s own form says which block it is', async ({ page }) => {
@@ -287,7 +306,7 @@ test.describe('another document the page shows', () => {
 
     await text.click()
 
-    const field = page.locator(DRAWER).locator('#field-layout__1__text')
+    const field = page.locator(DRAWER).locator(inDrawer('layout.1.text'))
     await expect(field).toBeFocused()
     await expect(field).toHaveClass(/flash/)
   })
@@ -302,7 +321,7 @@ test.describe('another document the page shows', () => {
 
     await featured.click()
 
-    await expect(page.locator(DRAWER).locator('#field-title')).toBeFocused()
+    await expect(page.locator(DRAWER).locator(inDrawer('title'))).toBeFocused()
   })
 
   test('a row of the post named by its id - through a relationship - is found by the drawer’s own form', async ({
@@ -321,7 +340,7 @@ test.describe('another document the page shows', () => {
 
     // The field itself lights up - not the array around it, which is as far as
     // the drawer's markup alone could follow a row named by id.
-    const field = page.locator(DRAWER).locator('#field-metaSections__0__title')
+    const field = page.locator(DRAWER).locator(inDrawer('metaSections.0.title'))
     await expect(field).toBeFocused()
     await expect(field).toHaveClass(/flash/)
   })
@@ -334,7 +353,7 @@ test.describe('another document the page shows', () => {
     const title = frame.getByTestId('latest-post').first().locator('h3')
     await title.scrollIntoViewIfNeeded()
     await title.click()
-    const field = page.locator(DRAWER).locator('#field-title')
+    const field = page.locator(DRAWER).locator(inDrawer('title'))
     await expect(field).toBeFocused()
 
     await frame.locator('body').evaluate((body) => {
@@ -369,7 +388,7 @@ test.describe('another document the page shows', () => {
     await card.scrollIntoViewIfNeeded()
     await card.locator('h3').click()
     const drawer = page.locator(DRAWER)
-    await expect(drawer.locator('#field-title')).toBeFocused()
+    await expect(drawer.locator(inDrawer('title'))).toBeFocused()
 
     const pageTitle = frame.locator('h1[data-payload-live-preview-path="title"]')
     await pageTitle.scrollIntoViewIfNeeded()
@@ -386,7 +405,7 @@ test.describe('another document the page shows', () => {
     await card.scrollIntoViewIfNeeded()
     await card.locator('h3').click()
     const drawer = page.locator(DRAWER)
-    const field = drawer.locator('#field-title')
+    const field = drawer.locator(inDrawer('title'))
     await expect(field).toBeFocused()
     // The dev posts have drafts without autosave: typing leaves the form changed.
     await field.press('End')
@@ -415,7 +434,7 @@ test.describe('another document the page shows', () => {
 
     // Page mode hides the page's form while its sheet is down - not the
     // drawer's, which has the same classes.
-    const field = page.locator(DRAWER).locator('#field-title')
+    const field = page.locator(DRAWER).locator(inDrawer('title'))
     await expect(field).toBeVisible()
     await expect(field).toBeFocused()
   })
@@ -428,7 +447,7 @@ test.describe('another document the page shows', () => {
     await section.scrollIntoViewIfNeeded()
     await section.click()
     const drawer = page.locator(DRAWER)
-    await expect(drawer.locator('#field-metaSections__0__title')).toBeFocused()
+    await expect(drawer.locator(inDrawer('metaSections.0.title'))).toBeFocused()
     await page.keyboard.press('Escape')
     await expect(drawer).toHaveCount(0)
 
@@ -437,7 +456,7 @@ test.describe('another document the page shows', () => {
     await card.click({ position: { x: 4, y: 4 } })
 
     await expect(drawer.locator('.tabs-field__tab-button--active').first()).toHaveText('Content')
-    await expect(drawer.locator('#field-title')).toBeVisible()
+    await expect(drawer.locator(inDrawer('title'))).toBeVisible()
   })
 
   test('a document of a collection the admin does not have is nobody’s to open', async ({ page }) => {
@@ -1327,7 +1346,8 @@ test('complex page: opening a row in the admin takes the preview to that section
   await expect(frame.locator('h1')).not.toBeInViewport()
 
   // The blocks field itself has no one place on the page: the preview stays.
-  const addBlock = page.locator('#field-sections').getByRole('button', { name: /add block/i }).last()
+  // Payload's own toggler: Payload 4 names it after the field's rows ("Add Section"), 3.x "Add Block".
+  const addBlock = page.locator('#field-sections .blocks-field__drawer-toggler').last()
   await addBlock.evaluate((el) => el.scrollIntoView({ block: 'center' }))
   await addBlock.click()
   await page.waitForTimeout(1_000)
@@ -1507,9 +1527,11 @@ test('complex page: a click is marked at once, names its field by its admin labe
 test('complex page: the preview takes on the admin accent colour', async ({ page }) => {
   await login(page)
   await openLivePreview(page, 'pages')
+  // Payload 4's accent (`--theme-success-500` on 3.x).
   const admin = await page.evaluate(() =>
-    getComputedStyle(document.documentElement).getPropertyValue('--theme-success-500').trim(),
+    getComputedStyle(document.documentElement).getPropertyValue('--color-bg-success').trim(),
   )
+  expect(admin).not.toBe('')
   const preview = page.frame({ url: /\/preview\/pages\// })!
 
   await expect
@@ -1629,6 +1651,9 @@ const outlineSections = (page: Page) =>
   page.locator('[role=tree] > li > [role=treeitem]').evaluateAll((items) => items.map((item) => item.getAttribute('title')))
 
 test('editor: the divider sets how the screen is shared, and the choice outlasts a reload', async ({ page }) => {
+  // Room to drag 200 px: Payload 4's nav leaves the form only 82 px above its
+  // minimum in a 1280 px window.
+  await page.setViewportSize({ height: 900, width: 1600 })
   await openEditor(page)
   const handle = page.locator('[data-payload-live-preview-inspector-split]')
   const preview = page.locator('.live-preview-window')
@@ -1653,6 +1678,27 @@ test('editor: the divider sets how the screen is shared, and the choice outlasts
   // Double-click puts Payload's own split back.
   await page.locator('[data-payload-live-preview-inspector-split]').dblclick()
   await expect.poll(async () => Math.round((await preview.boundingBox())!.width)).toBe(Math.round(before))
+})
+
+test('editor: Payload’s own expand still gives the preview the whole width, and the divider comes back after', async ({
+  page,
+}) => {
+  await openEditor(page)
+  const preview = page.locator('.live-preview-window')
+  const handle = page.locator('[data-payload-live-preview-inspector-split]')
+  const wrapper = (await page.locator('.collection-edit__main-wrapper').boundingBox())!
+  const shared = (await preview.boundingBox())!.width
+  await expect(handle).toBeVisible()
+
+  // Payload 4's expand button, first at the end of its bar.
+  await page.locator('.live-preview-toolbar-controls__end button').first().click()
+  await expect(preview).toHaveClass(/live-preview-window--is-expanded/)
+  await expect.poll(async () => Math.round((await preview.boundingBox())!.width)).toBe(Math.round(wrapper.width))
+  await expect(handle).toBeHidden()
+
+  await page.locator('.live-preview-toolbar-controls__end button').first().click()
+  await expect.poll(async () => Math.round((await preview.boundingBox())!.width)).toBe(Math.round(shared))
+  await expect(handle).toBeVisible()
 })
 
 test('editor: the outline lists the rows by what they hold, and takes the form to one closed deep inside', async ({
@@ -1749,7 +1795,8 @@ test('editor: add below opens Payload’s block drawer, typing searches it, and 
   // The click was in the preview; the keyboard came along to the drawer.
   await expect(drawer.locator('input').first()).toBeFocused()
   await page.keyboard.type('feat')
-  await drawer.getByText('Feature', { exact: true }).click()
+  // Payload 4's drawer: a click picks the block, a double click (or "Insert") adds it.
+  await drawer.getByText('Feature', { exact: true }).dblclick()
 
   await expect(page.locator('#field-sections__1__heading')).toBeFocused({ timeout: 10_000 })
   // Below the clicked block, before the rest: the tabbed section moved down one.
@@ -1764,8 +1811,11 @@ test('editor: a screen width lays the page out at that width, fitted to the pane
   await page.click('[data-viewport=desktop]')
   await expect.poll(innerWidth).toBeGreaterThanOrEqual(1440)
   expect(await innerWidth()).toBeLessThan(1443)
-  // Shrunk to fit, at a zoom Payload's toolbar prints as a whole number.
-  await expect(page.locator('.live-preview-toolbar-controls__zoom')).toHaveText(/^\d+%/)
+  // Shrunk to fit, at a zoom Payload's toolbar prints as a whole number (in its zoom button's label).
+  await expect(page.locator('.live-preview-toolbar-controls__zoom button').first()).toHaveAttribute(
+    'aria-label',
+    /^Zoom \d+%$/,
+  )
   const frameBox = (await page.locator('#live-preview-iframe').boundingBox())!
   const panelBox = (await page.locator('.live-preview-window').boundingBox())!
   expect(frameBox.x + frameBox.width).toBeLessThanOrEqual(panelBox.x + panelBox.width + 1)
@@ -1819,7 +1869,8 @@ test('editor: the bar above a narrow preview folds what matters least, and nothi
   await openEditor(page, { 'page-mode': false })
   await page.click('[data-viewport=desktop]')
   const sentence = page.locator('[data-payload-live-preview-inspector-hint-sentence]')
-  const size = page.locator('.live-preview-toolbar-controls__device-size')
+  // Payload's width field - and its height field beside it.
+  const size = page.locator('.live-preview-toolbar-controls__center > .toolbar-input').first()
   const breakpoint = page.locator('.live-preview-toolbar-controls__breakpoint')
 
   // With room, all of it.
@@ -1940,6 +1991,10 @@ const dockItem = (name: string) => `[data-payload-live-preview-inspector-dock-it
 test('page mode: Payload’s header folds into the bar with the save buttons, and the button at the bottom right turns it off', async ({
   page,
 }) => {
+  // Room for the sentence in the bar above the preview: Payload 4's nav leaves
+  // the preview 602 px of a 1280 px window, less than the sentence and the
+  // screen widths need, and the bar folds the sentence (see the bar test).
+  await page.setViewportSize({ height: 900, width: 1600 })
   const frame = await openEditor(page)
 
   // Payload's header and the document's title bar are gone; the title, and
@@ -1951,7 +2006,10 @@ test('page mode: Payload’s header folds into the bar with the save buttons, an
   await expect(title).toContainText('A complex page')
   await expect(title.locator('a')).toHaveAttribute('href', '/admin/collections/pages')
   // The screen widths do what Payload's sizes and zoom did.
-  await expect(page.locator('.live-preview-toolbar-controls__device-size')).toBeHidden()
+  await expect(page.locator('.live-preview-toolbar-controls__center > .toolbar-input')).toHaveCount(2)
+  for (const size of await page.locator('.live-preview-toolbar-controls__center > .toolbar-input').all()) {
+    await expect(size).toBeHidden()
+  }
   await expect(page.locator('.live-preview-toolbar-controls__zoom')).toBeHidden()
 
   // The sentence about clicking says it until the editor has clicked.
@@ -2005,7 +2063,11 @@ test('page mode keeps the status and the way to the versions, on a wide screen a
         .poll(async () => {
           const bar = (await page.locator('.doc-controls').boundingBox())!
           const preview = (await page.locator('.live-preview-window').boundingBox())!
-          return [Math.round(preview.y - (bar.y + bar.height)), Math.round(preview.y + preview.height - viewport.height)]
+          // `|| 0`: within half a pixel either way is 0, not -0 (which toEqual tells apart).
+          return [
+            Math.round(preview.y - (bar.y + bar.height)) || 0,
+            Math.round(preview.y + preview.height - viewport.height) || 0,
+          ]
         })
         .toEqual(viewport.width < 500 ? [0, 0] : [expect.any(Number), expect.any(Number)])
     } finally {

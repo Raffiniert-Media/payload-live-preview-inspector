@@ -5,10 +5,10 @@ import { escapeAttributeValue, isRowIDSegment, rowIDFromSegment, rowIDSegment } 
 import {
   collapsibleOf,
   elementID,
-  FIELD_ID_PREFIX,
   FIELD_PATH_ATTRIBUTE,
   fieldIDFromPath,
   isCollapsedCollapsible,
+  pathFromFieldID,
   pathFromRowID,
   PAYLOAD_CLASS,
   ROW_ID_PATTERN,
@@ -51,8 +51,11 @@ export const DEFAULT_SCROLL_OFFSET = 100
  * whichever attribute sits closest to `el` wins - e.g. a field nested inside
  * a Lexical block's sub-editor resolves to that nested field, not the
  * enclosing rich-text field's `data-field-path`.
+ *
+ * `editDepth`: that of the form `el` is in - 2 for a document in a drawer
+ * (see `fieldIDsFromPath`).
  */
-export const pathFromFieldElement = (el: HTMLElement): null | string => {
+export const pathFromFieldElement = (el: HTMLElement, editDepth: number = 1): null | string => {
   let node: HTMLElement | null = el
 
   while (node) {
@@ -61,8 +64,9 @@ export const pathFromFieldElement = (el: HTMLElement): null | string => {
       return dataFieldPath
     }
     const id = elementID(node)
-    if (id.startsWith(FIELD_ID_PREFIX)) {
-      return id.slice(FIELD_ID_PREFIX.length).replace(/__/g, '.')
+    const fieldPath = pathFromFieldID(id, editDepth)
+    if (fieldPath !== null) {
+      return fieldPath
     }
     // A row's header (its toggle, its label) sits inside the row but inside
     // none of its fields. Climbing on would reach the whole Array/Blocks
@@ -524,6 +528,10 @@ export const revealTabForElement = async (
       }
 
       clicked.add(button)
+      // Disabled while the form initialises (see `clickableTabButton`).
+      if (button.disabled) {
+        await waitForElement(() => (button.disabled ? null : button), tabRenderWaitMs, { signal })
+      }
       button.click()
 
       const el = await waitForElement(check, tabRenderWaitMs, { signal })

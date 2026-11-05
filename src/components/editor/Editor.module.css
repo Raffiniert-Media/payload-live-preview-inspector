@@ -16,8 +16,8 @@
 
 .group {
   align-items: center;
-  border: 1px solid var(--theme-elevation-100);
-  border-radius: var(--style-radius-s, 4px);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-medium);
   display: flex;
   flex: 0 0 auto;
   gap: 1px;
@@ -28,33 +28,33 @@
   align-items: center;
   background: transparent;
   border: 0;
-  border-radius: calc(var(--style-radius-s, 4px) - 1px);
-  color: var(--theme-elevation-800);
+  border-radius: calc(var(--radius-medium) - 1px);
+  color: var(--color-text);
   cursor: pointer;
   display: inline-flex;
   flex: 0 0 auto;
   font: inherit;
   font-size: 13px;
   gap: 6px;
-  height: calc(var(--base) * 1.4);
+  height: calc(var(--spacer-6) * 0.7);
   line-height: 1;
   margin: 0;
-  padding: 0 calc(var(--base) * 0.35);
+  padding: 0 calc(var(--spacer-6) * 0.175);
   white-space: nowrap;
 }
 
 .button:hover {
-  background: var(--theme-elevation-100);
+  background: var(--color-bg-hover);
 }
 
 .button:focus-visible {
-  outline: 2px solid var(--theme-success-500);
+  outline: 2px solid var(--color-bg-success);
   outline-offset: 1px;
 }
 
 .button[aria-pressed='true'] {
-  background: var(--theme-elevation-150);
-  color: var(--theme-text);
+  background: var(--color-bg-selected);
+  color: var(--color-text);
 }
 
 .button:disabled {
@@ -66,7 +66,7 @@
   display: none;
 }
 
-/* Spelled out where the form's column has the room (Payload makes it a container). */
+/* Spelled out where the form's column has the room (the path bar, as wide as the column, is the container). */
 @container (min-width: 640px) {
   .buttonLabel {
     display: inline;
@@ -74,7 +74,7 @@
 }
 
 .hint {
-  color: var(--theme-elevation-400, #8f8f8f);
+  color: var(--color-text-tertiary);
   flex: 0 1 auto;
   font-size: 12px;
   min-width: 0;
@@ -84,7 +84,7 @@
 }
 
 .hintActive {
-  color: var(--theme-success-500, #1587ba);
+  color: var(--color-bg-success);
   font-weight: 500;
 }
 
@@ -94,8 +94,8 @@
   align-items: center;
   display: flex;
   flex: 1 1 auto;
-  gap: calc(var(--base) / 2);
-  padding: 0 calc(var(--base) / 2);
+  gap: calc(var(--spacer-6) / 4);
+  padding: 0 calc(var(--spacer-6) / 4);
 }
 
 /*
@@ -117,7 +117,7 @@
 
 .hintIcon {
   align-items: center;
-  color: var(--theme-elevation-400, #8f8f8f);
+  color: var(--color-text-tertiary);
   cursor: help;
   flex: 0 0 auto;
 }
@@ -148,7 +148,7 @@
 }
 
 .split::before {
-  background: var(--theme-elevation-100);
+  background: var(--color-border);
   bottom: 0;
   content: '';
   left: 5px;
@@ -161,7 +161,7 @@
 .split:hover::before,
 .split:focus-visible::before,
 .splitActive::before {
-  background: var(--theme-success-500);
+  background: var(--color-bg-success);
 }
 
 .split:focus-visible {
@@ -169,8 +169,8 @@
 }
 
 .grip {
-  background: var(--theme-elevation-0, var(--theme-bg));
-  border: 1px solid var(--theme-elevation-150);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
   border-radius: 4px;
   height: 36px;
   left: 1px;
@@ -180,7 +180,7 @@
 }
 
 .grip::before {
-  border-left: 2px dotted var(--theme-elevation-400);
+  border-left: 2px dotted var(--color-text-tertiary);
   bottom: 9px;
   content: '';
   left: 3px;
@@ -189,8 +189,8 @@
 }
 
 .splitVertical {
-  background: var(--theme-elevation-50, var(--theme-bg));
-  border-bottom: 1px solid var(--theme-elevation-100);
+  background: var(--color-bg-secondary);
+  border-bottom: 1px solid var(--color-border);
   cursor: row-resize;
   height: 18px;
   position: relative;
@@ -223,8 +223,8 @@
 /* Where the divider lands, while it is dragged. */
 .ghostColumn,
 .ghostRow {
-  background: var(--theme-success-500);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--theme-success-500) 22%, transparent);
+  background: var(--color-bg-success);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-bg-success) 22%, transparent);
   left: 0;
   position: absolute;
   top: 0;
@@ -244,7 +244,7 @@
 }
 
 .ghostBadge {
-  background: var(--theme-success-500);
+  background: var(--color-bg-success);
   border-radius: 4px;
   color: #fff;
   font: 500 12px/1 system-ui, -apple-system, 'Segoe UI', sans-serif;
@@ -265,8 +265,8 @@
 /* ---- Outline ---- */
 
 .outline {
-  background: var(--theme-bg);
-  border-right: 1px solid var(--theme-elevation-100);
+  background: var(--color-bg);
+  border-right: 1px solid var(--color-border);
   display: flex;
   flex-direction: column;
   height: 100%;
@@ -282,15 +282,15 @@
 
 .outlineHeader {
   align-items: center;
-  border-bottom: 1px solid var(--theme-elevation-100);
+  border-bottom: 1px solid var(--color-border);
   box-sizing: border-box;
   display: flex;
   flex: 0 0 auto;
   gap: 8px;
   /* Level with the bars beside it. */
-  height: calc(var(--base) * 1.75);
+  height: calc(var(--spacer-6) * 0.875);
   justify-content: space-between;
-  padding: 0 calc(var(--base) * 0.25) 0 calc(var(--base) * 0.75);
+  padding: 0 calc(var(--spacer-6) / 8) 0 calc(var(--spacer-6) * 0.375);
 }
 
 .outlineTitle {
@@ -300,18 +300,18 @@
 }
 
 .outlineFilter {
-  background: var(--theme-input-bg, var(--theme-elevation-0));
-  border: 1px solid var(--theme-elevation-150);
-  border-radius: var(--style-radius-s, 4px);
-  color: var(--theme-text);
+  background: var(--field-color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-medium);
+  color: var(--color-text);
   font: inherit;
   font-size: 13px;
-  margin: calc(var(--base) * 0.5) calc(var(--base) * 0.5) 0;
+  margin: calc(var(--spacer-6) / 4) calc(var(--spacer-6) / 4) 0;
   padding: 5px 8px;
 }
 
 .outlineFilter:focus {
-  border-color: var(--theme-success-500);
+  border-color: var(--color-bg-success);
   outline: none;
 }
 
@@ -319,16 +319,16 @@
   flex: 1 1 auto;
   overflow: auto;
   overscroll-behavior: contain;
-  padding: calc(var(--base) * 0.35) 0 calc(var(--base) * 2);
+  padding: calc(var(--spacer-6) * 0.175) 0 var(--spacer-6);
 }
 
 .outlineGroup {
-  color: var(--theme-elevation-500);
+  color: var(--color-text-secondary);
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.04em;
-  margin: calc(var(--base) * 0.5) 0 2px;
-  padding: 0 calc(var(--base) * 0.75);
+  margin: calc(var(--spacer-6) / 4) 0 2px;
+  padding: 0 calc(var(--spacer-6) * 0.375);
   text-transform: uppercase;
 }
 
@@ -341,37 +341,37 @@
 
 .item {
   align-items: center;
-  border-radius: var(--style-radius-s, 4px);
+  border-radius: var(--radius-medium);
   cursor: pointer;
   display: flex;
   font-size: 13px;
   gap: 4px;
   line-height: 1.3;
-  margin: 0 calc(var(--base) * 0.25);
+  margin: 0 calc(var(--spacer-6) / 8);
   min-height: 28px;
   padding: 3px 6px 3px calc(4px + var(--depth, 0) * 14px);
   position: relative;
 }
 
 .item:hover {
-  background: var(--theme-elevation-50, var(--theme-elevation-100));
+  background: var(--color-bg-hover);
 }
 
 .item:focus-visible {
-  outline: 2px solid var(--theme-success-500);
+  outline: 2px solid var(--color-bg-success);
   outline-offset: -2px;
 }
 
 .itemActive {
-  background: color-mix(in srgb, var(--theme-success-500) 14%, transparent);
+  background: color-mix(in srgb, var(--color-bg-success) 14%, transparent);
 }
 
 .itemActive:hover {
-  background: color-mix(in srgb, var(--theme-success-500) 20%, transparent);
+  background: color-mix(in srgb, var(--color-bg-success) 20%, transparent);
 }
 
 .itemRoot::after {
-  background: var(--theme-success-500);
+  background: var(--color-bg-success);
   border-radius: 2px;
   bottom: 4px;
   content: '';
@@ -386,7 +386,7 @@
   background: transparent;
   border: 0;
   border-radius: 3px;
-  color: var(--theme-elevation-500);
+  color: var(--color-text-secondary);
   cursor: pointer;
   display: inline-flex;
   flex: 0 0 18px;
@@ -397,7 +397,7 @@
 }
 
 .twisty:hover {
-  background: var(--theme-elevation-150);
+  background: var(--color-bg-hover);
 }
 
 .twistyOpen {
@@ -415,7 +415,7 @@
 }
 
 .itemSummary {
-  color: var(--theme-elevation-500);
+  color: var(--color-text-secondary);
   flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
@@ -424,40 +424,46 @@
 }
 
 .itemError {
-  color: var(--theme-error-500, #d73a49);
+  color: var(--color-text-danger);
   display: inline-flex;
   flex: 0 0 auto;
 }
 
 .outlineEmpty {
-  color: var(--theme-elevation-500);
+  color: var(--color-text-secondary);
   font-size: 13px;
-  padding: calc(var(--base) * 0.75);
+  padding: calc(var(--spacer-6) * 0.375);
 }
 
 /* ---- Path bar ---- */
 
 .pathBar {
   align-items: center;
-  background: var(--theme-bg);
-  border-bottom: 1px solid var(--theme-elevation-100);
+  background: var(--color-bg);
+  border-bottom: 1px solid var(--color-border);
   box-sizing: border-box;
   display: flex;
   font-size: 13px;
-  gap: calc(var(--base) / 2);
+  gap: calc(var(--spacer-6) / 4);
   /* Payload's bar above the preview is this high: the two read as one. */
-  height: calc(var(--base) * 1.75);
-  padding: 0 calc(var(--base) / 2) 0 var(--gutter-h, calc(var(--base) * 2));
+  height: calc(var(--spacer-6) * 0.875);
+  padding: 0 calc(var(--spacer-6) / 4) 0 var(--gutter-h, var(--spacer-6));
   white-space: nowrap;
+  /*
+   * Its own container: Payload 4 made its form the container, not the form's
+   * column (3.x), and a bar sized by its content held the column at the
+   * bar's width - with the outline open, the preview was pushed off screen.
+   */
+  container-type: inline-size;
 }
 
 .pathBarSwitches {
   align-items: center;
-  border-right: 1px solid var(--theme-elevation-100);
+  border-right: 1px solid var(--color-border);
   display: flex;
   flex: 0 0 auto;
   gap: 2px;
-  padding-right: calc(var(--base) / 2);
+  padding-right: calc(var(--spacer-6) / 4);
 }
 
 .crumbs {
@@ -479,7 +485,7 @@
 
 @media (max-width: 1024px) {
   .pathBar {
-    padding-left: calc(var(--base) / 2);
+    padding-left: calc(var(--spacer-6) / 4);
   }
 }
 
@@ -490,15 +496,15 @@
 }
 
 .crumbSeparator {
-  color: var(--theme-elevation-400);
+  color: var(--color-text-tertiary);
   display: inline-flex;
 }
 
 .crumbButton {
   background: transparent;
   border: 0;
-  border-radius: var(--style-radius-s, 4px);
-  color: var(--theme-elevation-600);
+  border-radius: var(--radius-medium);
+  color: var(--color-text-secondary);
   cursor: pointer;
   font: inherit;
   max-width: 260px;
@@ -508,25 +514,25 @@
 }
 
 .crumbButton:hover {
-  background: var(--theme-elevation-100);
-  color: var(--theme-text);
+  background: var(--color-bg-hover);
+  color: var(--color-text);
 }
 
 .crumbButton:focus-visible {
-  outline: 2px solid var(--theme-success-500);
+  outline: 2px solid var(--color-bg-success);
 }
 
 .crumbButton[aria-current='true'] {
-  color: var(--theme-text);
+  color: var(--color-text);
   font-weight: 600;
 }
 
 .crumbRoot {
-  box-shadow: inset 0 -2px 0 var(--theme-success-500);
+  box-shadow: inset 0 -2px 0 var(--color-bg-success);
 }
 
 .crumbSummary {
-  color: var(--theme-elevation-500);
+  color: var(--color-text-secondary);
   font-weight: 400;
 }
 
@@ -547,14 +553,14 @@
   display: flex;
   flex: 0 1 auto;
   gap: 2px;
-  margin-right: calc(var(--base) / 2);
+  margin-right: calc(var(--spacer-6) / 4);
   min-width: 0;
 }
 
 .pageBack {
   align-items: center;
-  border-radius: var(--style-radius-s, 4px);
-  color: var(--theme-elevation-600);
+  border-radius: var(--radius-medium);
+  color: var(--color-text-secondary);
   display: inline-flex;
   flex: 0 0 auto;
   height: 28px;
@@ -563,12 +569,12 @@
 }
 
 .pageBack:hover {
-  background: var(--theme-elevation-100);
-  color: var(--theme-text);
+  background: var(--color-bg-hover);
+  color: var(--color-text);
 }
 
 .pageBack:focus-visible {
-  outline: 2px solid var(--theme-success-500);
+  outline: 2px solid var(--color-bg-success);
 }
 
 .pageTitleText {
@@ -582,29 +588,29 @@
 /* The way to the versions, after the status. */
 .pageVersions {
   align-items: center;
-  border-radius: var(--style-radius-s, 4px);
-  color: var(--theme-elevation-600);
+  border-radius: var(--radius-medium);
+  color: var(--color-text-secondary);
   display: inline-flex;
   flex: 0 0 auto;
   font-size: 13px;
   gap: 6px;
-  margin-left: calc(var(--base) / 2);
+  margin-left: calc(var(--spacer-6) / 4);
   padding: 2px 6px;
   text-decoration: none;
   white-space: nowrap;
 }
 
 .pageVersions:hover {
-  background: var(--theme-elevation-100);
-  color: var(--theme-text);
+  background: var(--color-bg-hover);
+  color: var(--color-text);
 }
 
 .pageVersions:focus-visible {
-  outline: 2px solid var(--theme-success-500);
+  outline: 2px solid var(--color-bg-success);
 }
 
 .pageVersionsCount {
-  background: var(--theme-elevation-100);
+  background: var(--color-bg-tertiary);
   border-radius: 999px;
   font-size: 11px;
   line-height: 1;
@@ -614,12 +620,12 @@
 /* ---- The button at the bottom right, and its menu ---- */
 
 .dock {
-  bottom: calc(var(--base) * 0.8 + env(safe-area-inset-bottom, 0px));
+  bottom: calc(var(--spacer-3) + env(safe-area-inset-bottom, 0px));
   display: grid;
-  gap: calc(var(--base) / 2);
+  gap: calc(var(--spacer-6) / 4);
   justify-items: end;
   position: fixed;
-  right: calc(var(--base) * 0.8 + env(safe-area-inset-right, 0px));
+  right: calc(var(--spacer-3) + env(safe-area-inset-right, 0px));
   /* Under Payload's drawers (--z-modal) and toasts, over the page. */
   z-index: calc(var(--z-modal, 30) - 1);
 }
@@ -627,16 +633,16 @@
 .dockRow {
   align-items: center;
   display: flex;
-  gap: calc(var(--base) * 0.4);
+  gap: var(--spacer-2);
 }
 
 .dockButton {
   align-items: center;
-  background: var(--theme-elevation-800);
+  background: var(--color-bg-inverse);
   border: 0;
   border-radius: 14px;
   box-shadow: 0 6px 20px rgb(0 0 0 / 25%);
-  color: var(--theme-elevation-0, var(--theme-bg));
+  color: var(--color-text-oninverse);
   cursor: pointer;
   display: inline-flex;
   flex: 0 0 auto;
@@ -652,19 +658,19 @@
 }
 
 .dockButton:hover {
-  background: var(--theme-elevation-900, var(--theme-text));
+  background: var(--color-bg-inverse-hover);
 }
 
 .dockButton:focus-visible {
-  outline: 2px solid var(--theme-success-500);
+  outline: 2px solid var(--color-bg-success);
   outline-offset: 2px;
 }
 
 .dockHint {
-  background: var(--theme-elevation-800);
+  background: var(--color-bg-inverse);
   border-radius: 14px;
   box-shadow: 0 6px 20px rgb(0 0 0 / 20%);
-  color: var(--theme-elevation-0, var(--theme-bg));
+  color: var(--color-text-oninverse);
   font-size: 13px;
   line-height: 1.3;
   max-width: min(280px, calc(100vw - 32px));
@@ -672,9 +678,9 @@
 }
 
 .dockMenu {
-  background: var(--theme-elevation-0, var(--theme-bg));
-  border: 1px solid var(--theme-elevation-150);
-  border-radius: var(--style-radius-m, 8px);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-large);
   box-shadow: 0 12px 32px rgb(0 0 0 / 25%);
   display: grid;
   max-height: calc(100dvh - 120px);
@@ -687,9 +693,9 @@
   align-items: center;
   background: transparent;
   border: 0;
-  border-radius: var(--style-radius-s, 4px);
+  border-radius: var(--radius-medium);
   box-sizing: border-box;
-  color: var(--theme-text);
+  color: var(--color-text);
   cursor: pointer;
   display: flex;
   font: inherit;
@@ -702,16 +708,16 @@
 }
 
 .dockItem:hover {
-  background: var(--theme-elevation-50);
+  background: var(--color-bg-hover);
 }
 
 .dockItem:focus-visible {
-  outline: 2px solid var(--theme-success-500);
+  outline: 2px solid var(--color-bg-success);
   outline-offset: -2px;
 }
 
 .dockItemIcon {
-  color: var(--theme-elevation-600);
+  color: var(--color-text-secondary);
   display: inline-flex;
   flex: 0 0 auto;
 }
@@ -728,13 +734,13 @@
 }
 
 .dockItemHelp {
-  color: var(--theme-elevation-500);
+  color: var(--color-text-secondary);
   font-size: 12px;
   line-height: 1.3;
 }
 
 .dockSwitch {
-  background: var(--theme-elevation-200);
+  background: var(--color-bg-tertiary);
   border-radius: 999px;
   flex: 0 0 auto;
   height: 18px;
@@ -744,7 +750,7 @@
 }
 
 .dockSwitch::after {
-  background: var(--theme-elevation-0, #fff);
+  background: var(--color-bg);
   border-radius: 50%;
   box-shadow: 0 1px 2px rgb(0 0 0 / 20%);
   content: '';
@@ -757,7 +763,7 @@
 }
 
 .dockItem[aria-checked='true'] .dockSwitch {
-  background: var(--theme-success-500);
+  background: var(--color-bg-success);
 }
 
 .dockItem[aria-checked='true'] .dockSwitch::after {
@@ -765,7 +771,7 @@
 }
 
 .dockSeparator {
-  border-top: 1px solid var(--theme-elevation-100);
+  border-top: 1px solid var(--color-border);
   margin: 4px 6px;
 }
 
@@ -784,25 +790,25 @@
 
 .replaceButton {
   align-items: center;
-  background: var(--theme-elevation-50);
-  border: 1px solid var(--theme-elevation-150);
-  border-radius: var(--style-radius-s, 4px);
-  color: var(--theme-text);
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-medium);
+  color: var(--color-text);
   cursor: pointer;
   display: inline-flex;
   font: inherit;
   font-size: 13px;
-  height: calc(var(--base) * 1.4);
-  margin-right: calc(var(--base) / 4);
-  padding: 0 calc(var(--base) / 2);
+  height: calc(var(--spacer-6) * 0.7);
+  margin-right: calc(var(--spacer-6) / 8);
+  padding: 0 calc(var(--spacer-6) / 4);
   white-space: nowrap;
 }
 
 .replaceButton:hover {
-  background: var(--theme-elevation-100);
+  background: var(--color-bg-hover);
 }
 
 .replaceButton:focus-visible {
-  outline: 2px solid var(--theme-success-500);
+  outline: 2px solid var(--color-bg-success);
   outline-offset: 1px;
 }

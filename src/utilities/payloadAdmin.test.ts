@@ -5,10 +5,13 @@ import { describe, expect, it } from 'vitest'
 
 import {
   collapsibleIDFromPath,
+  documentPreferencesKey,
   FIELD_ID_PREFIX,
   FIELD_PATH_ATTRIBUTE,
   fieldIDFromPath,
+  fieldIDsFromPath,
   MODAL_CONTAINER_CLASS,
+  pathFromFieldID,
   pathFromRowID,
   PAYLOAD_CLASS,
   PAYLOAD_PROPERTY,
@@ -114,6 +117,23 @@ describe(`the Payload admin this plugin reads (@payloadcms/ui ${JSON.parse(fs.re
     // `field-${path.replace(/\./g, '__')}` in the field components.
     expect(scripts.some((script) => script.includes(`${FIELD_ID_PREFIX}\${`) && script.includes("'__'"))).toBe(true)
     expect(fieldIDFromPath('layout.2.heading')).toBe('field-layout__2__heading')
+  })
+
+  it('still appends the edit depth to some field ids in a drawer - and reads them back', () => {
+    // `generateFieldID`: `${prefix}-${path…}${editDepth > 1 ? `-${editDepth}` : ''}${uuid…}`.
+    expect(scripts.some((script) => script.includes('editDepth > 1 ? `-${editDepth}`'))).toBe(true)
+    expect(fieldIDsFromPath('title', 1)).toEqual(['field-title'])
+    expect(fieldIDsFromPath('layout.1.text', 2)).toEqual(['field-layout__1__text-2', 'field-layout__1__text'])
+    expect(pathFromFieldID('field-title-2', 2)).toBe('title')
+    expect(pathFromFieldID('field-layout__1__text', 2)).toBe('layout.1.text')
+    // At depth 1 nothing is a suffix: a field may be named `col-2`.
+    expect(pathFromFieldID('field-col-2', 1)).toBe('col-2')
+    expect(pathFromFieldID('sections-row-0', 2)).toBeNull()
+  })
+
+  it('still keeps a document\'s preferences under its collection and id', () => {
+    expect(scripts.some((script) => script.includes('`collection-${slug}-${id}`'))).toBe(true)
+    expect(documentPreferencesKey('posts', 1)).toBe('collection-posts-1')
   })
 
   it('still identifies a row by its wrapper id, built from its path and index', () => {

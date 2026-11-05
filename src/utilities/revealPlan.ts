@@ -491,6 +491,8 @@ export const findTabsElement = (
   formState: MinimalFormState,
   blocksMap: BlocksMap = {},
   root: Document | HTMLElement = document,
+  /** That of the form in `root` - see `fieldIDsFromPath`. */
+  editDepth: number = 1,
 ): HTMLElement | null => {
   for (const tabsEl of Array.from(root.querySelectorAll<HTMLElement>(TABS_FIELD_SELECTOR))) {
     const content = tabsEl.querySelector(`:scope > ${selectorOf(PAYLOAD_CLASS.tabsContentWrap)}`)
@@ -501,7 +503,7 @@ export const findTabsElement = (
     const fieldEls = firstFieldsIn(content, MAX_IDENTIFYING_FIELDS)
 
     for (const fieldEl of fieldEls) {
-      const fieldPath = pathFromFieldElement(fieldEl)
+      const fieldPath = pathFromFieldElement(fieldEl, editDepth)
       if (!fieldPath) {
         continue
       }
@@ -535,10 +537,20 @@ export const findTabsElement = (
   return null
 }
 
+const OWN_TAB_BUTTONS = [PAYLOAD_CLASS.tabsList, PAYLOAD_CLASS.tabsTabsWrap, PAYLOAD_CLASS.tabsTabs, TAB_BUTTON_CLASS]
+  .map(selectorOf)
+  .join(' > ')
+
 /** The buttons of a rendered tabs field, in config order (hidden tabs included, as Payload renders them). */
 export const tabButtonsOf = (tabsEl: HTMLElement): HTMLButtonElement[] =>
-  Array.from(
-    tabsEl.querySelectorAll<HTMLButtonElement>(
-      `:scope > ${selectorOf(PAYLOAD_CLASS.tabsTabsWrap)} > ${selectorOf(PAYLOAD_CLASS.tabsTabs)} > .${TAB_BUTTON_CLASS}`,
-    ),
-  )
+  Array.from(tabsEl.querySelectorAll<HTMLButtonElement>(`:scope > ${OWN_TAB_BUTTONS}`))
+
+/**
+ * The `index`-th button of a rendered tabs field once it can be clicked, `null`
+ * until then. Payload 4 disables every tab while its form initialises - a
+ * document just opened in a drawer - and a click on one then does nothing.
+ */
+export const clickableTabButton = (tabsEl: HTMLElement | null, index: number): HTMLButtonElement | null => {
+  const button = tabsEl ? tabButtonsOf(tabsEl)[index] : undefined
+  return button && !button.disabled ? button : null
+}

@@ -1,7 +1,7 @@
 'use client'
 
-import { LoadingOverlay, useDocumentDrawer } from '@payloadcms/ui'
-import React, { Suspense, useEffect, useLayoutEffect, useRef } from 'react'
+import { LoadingOverlay, useDocumentDrawer, useEditDepth, useModal, usePreferences } from '@payloadcms/ui'
+import React, { Suspense, useCallback, useEffect, useLayoutEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 
 import type { CaretHint } from '../../utilities/caret.js'
@@ -20,9 +20,10 @@ import {
 } from '../../utilities/pathResolution.js'
 import {
   collapsibleOf,
+  documentPreferencesKey,
   FIELD_ID_PREFIX,
   FIELD_PATH_ATTRIBUTE,
-  fieldIDFromPath,
+  fieldIDsFromPath,
   isCollapsedCollapsible,
   MODAL_CONTAINER_CLASS,
   PAYLOAD_CLASS,
@@ -32,10 +33,10 @@ import {
   toggleButtonOf,
 } from '../../utilities/payloadAdmin.js'
 import {
+  clickableTabButton,
   findTabsElement,
   formFieldPathOf,
   planReveal,
-  tabButtonsOf,
 } from '../../utilities/revealPlan.js'
 
 /**
@@ -89,8 +90,8 @@ type Props = {
   fields: SchemaField[]
   flash: (el: HTMLElement) => void
   onClose: () => void
-  /** The drawer's element id while it is open, `null` once closed - for the focus listener. */
-  onDrawer: (drawerSlug: null | string) => void
+  /** The drawer's element id and its form's edit depth while it is open, `null` once closed - for the focus listener. */
+  onDrawer: (drawer: { drawerSlug: string; editDepth: number } | null) => void
   onReveal: (outcome: RelatedOutcome) => void
   /** Focuses without the focus being sent back to the preview as the editor's own. */
   quietly: (focus: () => void) => void
@@ -105,21 +106,24 @@ const LOAD_TIMEOUT_MS = 10_000
 /** Room above a field the drawer scrolls to. */
 const SCROLL_MARGIN_PX = 80
 
-/** The element the drawer's form renders for `path`, looked for in the drawer only. */
-const fieldIn = (scope: ParentNode, path: string): HTMLElement | null => {
+/** The element the drawer's form (at `editDepth`) renders for `path`, looked for in the drawer only. */
+const fieldIn = (scope: ParentNode, path: string, editDepth: number): HTMLElement | null => {
   const rowID = rowIDFromPath(path)
+  const byID = fieldIDsFromPath(path, editDepth)
+    .map((id) => `[id="${escapeAttributeValue(id)}"]`)
+    .join(', ')
   return (
-    scope.querySelector<HTMLElement>(`[id="${escapeAttributeValue(fieldIDFromPath(path))}"]`) ??
+    scope.querySelector<HTMLElement>(byID) ??
     (rowID ? scope.querySelector<HTMLElement>(`[id="${escapeAttributeValue(rowID)}"]`) : null) ??
     scope.querySelector<HTMLElement>(`[${FIELD_PATH_ATTRIBUTE}="${escapeAttributeValue(path)}"]`)
   )
 }
 
 /** The deepest part of `path` the drawer renders. */
-const deepestIn = (scope: ParentNode, path: string): HTMLElement | null => {
+const deepestIn = (scope: ParentNode, path: string, editDepth: number): HTMLElement | null => {
   const segments = path.split('.')
   for (let end = segments.length; end > 0; end--) {
-    const el = fieldIn(scope, segments.slice(0, end).join('.'))
+    const el = fieldIn(scope, segments.slice(0, end).join('.'), editDepth)
     if (el) {
       return el
     }
@@ -170,8 +174,12 @@ const scrollIntoDrawer = async (
 
 const revealInDrawer = async (
   drawerSlug: string,
-  { blocksMap, caret, fields, flash, path, quietly, tabSwitchWaitMs }: {
+  { blocksMap, caret, documentPreferences, editDepth, fields, flash, path, quietly, tabSwitchWaitMs }: {
     caret?: CaretHint
+    /** Resolves once Payload has the preferences of the document in the drawer. */
+    documentPreferences: () => Promise<unknown>
+    /** The drawer's form's. */
+    editDepth: number
     path: string
   } & Pick<Props, 'blocksMap' | 'fields' | 'flash' | 'quietly' | 'tabSwitchWaitMs'>,
   signal: AbortSignal,
@@ -212,23 +220,41 @@ const revealInDrawer = async (
   // Every tabs field at the top of the document goes to its first tab, but
   // the one the clicked field is behind.
   //
-  // Clicked even where it is the active one already. A tabs field starts at
-  // its first tab and moves to the remembered one once the preferences have
-  // arrived - unless a tab was chosen by then, which is what a click is to
-  // Payload, active or not.
+  // Clicked even where it is the active one already, and only once the
+  // document's preferences have arrived: a tabs field starts at its first tab
+  // and moves to the remembered one then - on Payload 4 over a tab clicked
+  // before (3.x let a click win).
+  let gaveUp: ReturnType<typeof setTimeout> | undefined
+  await Promise.race([
+    documentPreferences().catch(() => undefined),
+    new Promise((resolve) => (gaveUp = setTimeout(resolve, LOAD_TIMEOUT_MS))),
+  ])
+  clearTimeout(gaveUp)
+  if (signal.aborted) {
+    return 'not-found'
+  }
   const toward = new Set(plan.steps.flatMap((step) => (step.kind === 'tab' ? [step.tabs] : [])))
   for (const tabsField of fields) {
     if (tabsField.type !== 'tabs' || toward.has(tabsField)) {
       continue
     }
-    const tabs = await waitForElement(
-      () => findTabsElement({ index: 0, kind: 'tab', parentPath: '', tabs: tabsField }, fields, formState, blocksMap, scope),
+    const first = await waitForElement(
+      () =>
+        clickableTabButton(
+          findTabsElement(
+            { index: 0, kind: 'tab', parentPath: '', tabs: tabsField },
+            fields,
+            formState,
+            blocksMap,
+            scope,
+            editDepth,
+          ),
+          0,
+        ),
       tabSwitchWaitMs,
       { signal },
     )
-    if (tabs) {
-      tabButtonsOf(tabs)[0]?.click()
-    }
+    first?.click()
   }
   if (!fieldPath || signal.aborted) {
     return signal.aborted ? 'not-found' : 'done'
@@ -259,12 +285,15 @@ const revealInDrawer = async (
       continue
     }
     if (step.kind === 'tab') {
-      const tabs = await waitForElement(
-        () => findTabsElement(step, fields, form?.getFields() ?? {}, blocksMap, scope),
+      const button = await waitForElement(
+        () =>
+          clickableTabButton(
+            findTabsElement(step, fields, form?.getFields() ?? {}, blocksMap, scope, editDepth),
+            step.index,
+          ),
         tabSwitchWaitMs,
         { signal },
       )
-      const button = tabs ? tabButtonsOf(tabs)[step.index] : undefined
       if (!button) {
         break
       }
@@ -289,7 +318,7 @@ const revealInDrawer = async (
     return 'not-found'
   }
 
-  const exact = () => fieldIn(scope, fieldPath)
+  const exact = () => fieldIn(scope, fieldPath, editDepth)
   let el =
     (await waitForElement(exact, tabSwitchWaitMs, { idleMs: IDLE_GIVE_UP_MS, signal })) ??
     (plan.complete ? null : await revealTabForElement(exact, tabSwitchWaitMs, scope, signal))
@@ -298,7 +327,7 @@ const revealInDrawer = async (
   // is brought up, and the field looked for again - as the page's own form
   // is travelled.
   for (let tries = 0; !el && tries < 3 && !signal.aborted; tries++) {
-    const ancestor = deepestIn(scope, fieldPath)
+    const ancestor = deepestIn(scope, fieldPath, editDepth)
     if (!ancestor) {
       break
     }
@@ -306,7 +335,7 @@ const revealInDrawer = async (
     await scrollIntoDrawer(ancestor, signal, { toTop: true })
     el = await waitForElement(exact, tabSwitchWaitMs, { idleMs: IDLE_GIVE_UP_MS, signal })
   }
-  el ??= deepestIn(scope, fieldPath)
+  el ??= deepestIn(scope, fieldPath, editDepth)
   if (!el || signal.aborted) {
     return 'not-found'
   }
@@ -333,6 +362,11 @@ const revealInDrawer = async (
  * meant for the preview beside the drawer. The layer gives way; what is in
  * it - the drawer, and any dialog opened from it - does not.
  *
+ * Payload 4 also makes everything outside the open modal `inert`, the preview
+ * with it (`ModalAccessibility`): the part of the page the preview is in is
+ * given back - for as long as the drawer stands beside it, whenever Payload
+ * takes it again. Payload puts it back as it was once the drawer closes.
+ *
  * A style element rather than the drawer's own `style`: the drawer is
  * Payload's, rendered with a `style` of its own on every update.
  */
@@ -345,9 +379,35 @@ const useBesidePreview = (drawerSlug: string, active: boolean): void => {
     const style = document.createElement('style')
     style.setAttribute('data-payload-live-preview-inspector-related', '')
     document.head.append(style)
+    let beside = false
+    const givenBack = new Set<HTMLElement>()
+    const giveBackPreview = () => {
+      if (!beside) {
+        return
+      }
+      for (const el of document.querySelectorAll<HTMLElement>('[inert]')) {
+        if (el.contains(preview)) {
+          el.inert = false
+          el.removeAttribute('aria-hidden')
+          givenBack.add(el)
+        }
+      }
+    }
+    const inert = new MutationObserver(giveBackPreview)
+    inert.observe(document.body, { attributeFilter: ['inert'], attributes: true, subtree: true })
     const place = () => {
       const left = Math.round(preview.getBoundingClientRect().left)
-      const beside = window.innerWidth > PAYLOAD_MID_BREAK_PX && left >= MIN_BESIDE_WIDTH_PX
+      const wasBeside = beside
+      beside = window.innerWidth > PAYLOAD_MID_BREAK_PX && left >= MIN_BESIDE_WIDTH_PX
+      if (wasBeside && !beside) {
+        // Over everything again, as Payload has it.
+        for (const el of givenBack) {
+          el.inert = true
+          el.setAttribute('aria-hidden', 'true')
+        }
+        givenBack.clear()
+      }
+      giveBackPreview()
       const layer = `.${MODAL_CONTAINER_CLASS}`
       style.textContent = beside
         ? `[id="${escapeAttributeValue(drawerSlug)}"] { left: 0 !important; right: auto !important; width: ${left}px !important; }
@@ -360,6 +420,7 @@ ${layer} > * { pointer-events: auto; }`
     observer.observe(preview)
     window.addEventListener('resize', place)
     return () => {
+      inert.disconnect()
       observer.disconnect()
       window.removeEventListener('resize', place)
       style.remove()
@@ -401,7 +462,7 @@ const DrawerPlaceholder: React.FC<{ box: React.RefObject<DOMRect | null> }> = ({
         <div
           aria-busy="true"
           style={{
-            background: 'var(--theme-bg)',
+            background: 'var(--color-bg)',
             height: rect.height,
             left: rect.left,
             position: 'fixed',
@@ -432,12 +493,23 @@ export const RelatedDocumentDrawer: React.FC<Props> = ({
   tabSwitchWaitMs,
   target,
 }) => {
-  const [DocumentDrawer, , { closeDrawer, drawerSlug, isDrawerOpen, openDrawer }] = useDocumentDrawer({
+  const [DocumentDrawer, , { closeDrawer, drawerSlug, openDrawer }] = useDocumentDrawer({
     id: target.id,
     collectionSlug: target.collection,
     // A collection hidden from the admin is not one to edit from a page.
     overrideEntityVisibility: false,
   })
+  // The document in the drawer is edited one level deeper than the one it was opened from.
+  const editDepth = useEditDepth() + 1
+  // Asked of the modal itself: Payload 4's `useDocumentDrawer` no longer tracks
+  // it, its `isDrawerOpen` is always `false`.
+  const { modalState } = useModal()
+  const isDrawerOpen = Boolean(modalState[drawerSlug]?.isOpen)
+  const { getPreference } = usePreferences()
+  const documentPreferences = useCallback(
+    () => getPreference(documentPreferencesKey(target.collection, target.id)),
+    [getPreference, target.collection, target.id],
+  )
   const wasOpen = useRef(false)
 
   useEffect(() => {
@@ -451,19 +523,30 @@ export const RelatedDocumentDrawer: React.FC<Props> = ({
   useEffect(() => {
     if (isDrawerOpen) {
       wasOpen.current = true
-      onDrawer(drawerSlug)
+      onDrawer({ drawerSlug, editDepth })
     } else if (wasOpen.current) {
       onDrawer(null)
       onClose()
     }
-  }, [drawerSlug, isDrawerOpen, onClose, onDrawer])
+  }, [drawerSlug, editDepth, isDrawerOpen, onClose, onDrawer])
 
   useBesidePreview(drawerSlug, besidePreview && isDrawerOpen)
   const box = useDrawerBox(drawerSlug, isDrawerOpen)
 
   // The latest of everything for the reveal, which runs once per click.
-  const latest = useRef({ blocksMap, fields, flash, onReveal, quietly, tabSwitchWaitMs, target })
-  latest.current = { blocksMap, fields, flash, onReveal, quietly, tabSwitchWaitMs, target }
+  const now = {
+    blocksMap,
+    documentPreferences,
+    editDepth,
+    fields,
+    flash,
+    onReveal,
+    quietly,
+    tabSwitchWaitMs,
+    target,
+  }
+  const latest = useRef(now)
+  latest.current = now
   useEffect(() => {
     if (!isDrawerOpen) {
       return

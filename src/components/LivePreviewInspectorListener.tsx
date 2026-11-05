@@ -103,6 +103,7 @@ import {
   toggleWrapOf,
 } from '../utilities/payloadAdmin.js'
 import {
+  clickableTabButton,
   describeTarget,
   findTabsElement,
   labelOfTarget,
@@ -142,7 +143,7 @@ export type LivePreviewInspectorListenerProps = {
   accordionAnimationMs?: number
   /** The editor's parts beyond click-to-field. Every one is on by default. */
   editor?: EditorFeatures
-  /** Flash outline/background color. Defaults to the admin's accent (`--theme-success-500`). */
+  /** Flash outline/background color. Defaults to the admin's accent (`--color-bg-success`). */
   flashColor?: string
   /** Flash animation duration in ms. Defaults to the shipped CSS (1200ms). */
   flashDurationMs?: number
@@ -589,7 +590,7 @@ const Inspector: React.FC<LivePreviewInspectorListenerProps> = ({
   /** Closes the drawer before the page's own form is travelled; `false` while it has unsaved changes. */
   const closeRelatedRef = useRef<() => boolean>(() => true)
   /** The drawer that document is open in, while it is - for the focus listener. */
-  const relatedDrawerRef = useRef<({ drawerSlug: string } & DocumentRef) | null>(null)
+  const relatedDrawerRef = useRef<({ drawerSlug: string; editDepth: number } & DocumentRef) | null>(null)
 
   /*
    * The veil: the form faded out while a reveal opens rows, switches tabs and
@@ -992,13 +993,21 @@ const Inspector: React.FC<LivePreviewInspectorListenerProps> = ({
 
             if (!button.classList.contains(TAB_BUTTON_ACTIVE_CLASS)) {
               await bringIntoView(button, { atRest: true })
+              // Disabled while the form initialises (see `clickableTabButton`).
+              const clickable = await waitForElement(() => clickableTabButton(find(), step.index), tabSwitchWaitMs, {
+                signal,
+              })
               if (signal.aborted) {
                 return 'not-found'
               }
-              glow(button)
+              if (!clickable) {
+                planApplied = false
+                break
+              }
+              glow(clickable)
               hideWhileRendering(tabContentOf(tabsEl))
               rooms.push(holdScrollRoom(tabContentOf(tabsEl)))
-              button.click()
+              clickable.click()
               clicked = true
             }
           }
@@ -1888,7 +1897,7 @@ const Inspector: React.FC<LivePreviewInspectorListenerProps> = ({
       const drawer = el.closest(selectorOf(PAYLOAD_CLASS.drawer))
       if (drawer) {
         const related = relatedDrawerRef.current
-        const inside = related && drawer.id === related.drawerSlug ? pathFromFieldElement(el) : null
+        const inside = related && drawer.id === related.drawerSlug ? pathFromFieldElement(el, related.editDepth) : null
         if (related && inside) {
           postToPreview({
             type: FOCUS_MESSAGE_TYPE,
@@ -2346,10 +2355,9 @@ const Inspector: React.FC<LivePreviewInspectorListenerProps> = ({
     relatedDrawerRef.current = null
     setRelated(null)
   }, [])
-  const onRelatedDrawer = useCallback((drawerSlug: null | string) => {
+  const onRelatedDrawer = useCallback((drawer: { drawerSlug: string; editDepth: number } | null) => {
     const current = relatedRef.current
-    relatedDrawerRef.current =
-      drawerSlug && current ? { id: current.id, collection: current.collection, drawerSlug } : null
+    relatedDrawerRef.current = drawer && current ? { id: current.id, collection: current.collection, ...drawer } : null
   }, [])
   const quietly = useCallback((focus: () => void) => {
     engineRef.current.suppressFocusEcho = true

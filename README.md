@@ -71,7 +71,7 @@ export default buildConfig({
 })
 ```
 
-Optional overrides (defaults shown): `flashColor` (Payload's accent, `--theme-success-500`), `flashDurationMs: 1200`, `scrollOffset: 100`, `scrollBehavior: 'smooth'`, `accordionAnimationMs: 350`, `tabSwitchWaitMs: 1500` (max wait for freshly mounting fields after a tab switch, an expansion or a scroll; raise it if very heavy tabs get skipped), and `editor` (see [The editor](#the-editor)).
+Optional overrides (defaults shown): `flashColor` (Payload's accent, `--color-bg-success`), `flashDurationMs: 1200`, `scrollOffset: 100`, `scrollBehavior: 'smooth'`, `accordionAnimationMs: 350`, `tabSwitchWaitMs: 1500` (max wait for freshly mounting fields after a tab switch, an expansion or a scroll; raise it if very heavy tabs get skipped), and `editor` (see [The editor](#the-editor)).
 
 After adding the plugin, regenerate Payload's import map (`payload generate:importmap`): the plugin registers its admin component by its package path.
 
@@ -201,7 +201,7 @@ A click that resolves to a field **only** reveals that field. The page's own han
 
 **Hold ⌥/Alt to operate the page instead.** The click is then an ordinary click and no field is revealed, which is how an editor opens a dialog, steps a carousel or expands an accordion to look at what is inside it, and the only way to reach that content in order to click into *it*. `interactionModifier` picks the key (`'alt' | 'ctrl' | 'meta' | 'shift' | 'none'`); `'none'` removes the escape hatch. The hint in the bar above the preview names whichever key is configured, because the preview reports its setting to the admin, so an editor can find it without reading this file.
 
-A click is answered in the frame it happens in: the element is framed and tinted, a ripple spreads from the pointer, and a chip names the field by the label the admin shows for it (`→ Überschrift`). Where the form has to open rows or switch tabs to get there, it does so in one movement; with `scrollBehavior: 'instant'` the form fades out, opens everything unseen and fades back in at the field. If the admin has no field to go to (a row deleted after the preview rendered), the mark turns red and says so. All of it takes the admin's accent colour (Payload's `--theme-success-500`, light or dark theme).
+A click is answered in the frame it happens in: the element is framed and tinted, a ripple spreads from the pointer, and a chip names the field by the label the admin shows for it (`→ Überschrift`). Where the form has to open rows or switch tabs to get there, it does so in one movement; with `scrollBehavior: 'instant'` the form fades out, opens everything unseen and fades back in at the field. If the admin has no field to go to (a row deleted after the preview rendered), the mark turns red and says so. All of it takes the admin's accent colour (Payload's `--color-bg-success`, light or dark theme).
 
 A click that resolves to **no** field is never taken. Anything outside the edited document (a header, a cookie banner) keeps working exactly as it does for a visitor.
 
