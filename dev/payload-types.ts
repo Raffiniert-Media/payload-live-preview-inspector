@@ -65,7 +65,9 @@ export interface Config {
   auth: {
     users: UserAuthOperations;
   };
-  blocks: {};
+  blocks: {
+    pricing: Pricing;
+  };
   collections: {
     posts: Post;
     pages: Page;
@@ -124,6 +126,23 @@ export interface UserAuthOperations {
     email: string;
     password: string;
   };
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "pricing".
+ */
+export interface Pricing {
+  plans?:
+    | {
+        name?: string | null;
+        price?: string | null;
+        id?: string | null;
+      }[]
+    | null;
+  highlight?: boolean | null;
+  id?: string | null;
+  blockName?: string | null;
+  blockType: 'pricing';
 }
 /**
  * This interface was referenced by `Config`'s JSON-Schema
@@ -283,6 +302,33 @@ export interface Page {
             id?: string | null;
             blockName?: string | null;
             blockType: 'cards';
+          }
+        | {
+            /**
+             * Rows divide into columns, and the columns hold the content.
+             */
+            rows?:
+              | {
+                  split?: ('full' | 'halves') | null;
+                  columns?:
+                    | {
+                        /**
+                         * What this column holds.
+                         */
+                        blocks?: Pricing[] | null;
+                        anchor?: string | null;
+                        surface?: ('none' | 'card') | null;
+                        id?: string | null;
+                      }[]
+                    | null;
+                  gap?: ('sm' | 'md' | 'lg') | null;
+                  id?: string | null;
+                }[]
+              | null;
+            background?: ('none' | 'muted') | null;
+            id?: string | null;
+            blockName?: string | null;
+            blockType: 'layoutSection';
           }
       )[]
     | null;
@@ -542,6 +588,28 @@ export interface PagesSelect<T extends boolean = true> {
                         };
                     id?: T;
                   };
+              id?: T;
+              blockName?: T;
+            };
+        layoutSection?:
+          | T
+          | {
+              rows?:
+                | T
+                | {
+                    split?: T;
+                    columns?:
+                      | T
+                      | {
+                          blocks?: T | {};
+                          anchor?: T;
+                          surface?: T;
+                          id?: T;
+                        };
+                    gap?: T;
+                    id?: T;
+                  };
+              background?: T;
               id?: T;
               blockName?: T;
             };

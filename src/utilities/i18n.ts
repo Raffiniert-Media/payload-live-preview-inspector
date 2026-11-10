@@ -12,6 +12,8 @@ export type EditorStrings = {
   addBelow: string
   /** First crumb of the path: the whole document. */
   allFields: string
+  /** Why a full list takes no more rows - by the field's plural label where it has one. */
+  atMost: (max: number, plural?: string) => string
   /** Page mode's way back to the list, which Payload's header otherwise has. */
   back: (list: string) => string
   /** Page mode on a narrow screen: put the form away, the page is all there is again. */
@@ -79,6 +81,7 @@ export type PreviewStrings = Pick<
 const en: EditorStrings = {
   addBelow: 'Add below',
   allFields: 'All fields',
+  atMost: (max, plural) => (plural ? `At most ${max} ${plural}` : 'Maximum reached'),
   back: (list) => `Back to ${list}`,
   closeForm: 'Close the form',
   dock: 'Editor',
@@ -129,6 +132,7 @@ const en: EditorStrings = {
 const de: EditorStrings = {
   addBelow: 'Darunter hinzufügen',
   allFields: 'Alle Felder',
+  atMost: (max, plural) => (plural ? `Höchstens ${max} ${plural}` : 'Höchstzahl erreicht'),
   back: (list) => `Zurück zu ${list}`,
   closeForm: 'Formular schliessen',
   dock: 'Editor',

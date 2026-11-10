@@ -1,5 +1,31 @@
 # Changelog
 
+## 2.1.3
+
+### Focus mode in a document opened after another one
+
+On a site with Next's `cacheComponents` - every site of
+`@raffiniert-media-ag/payload-theme` - the edit view navigated away from stays
+in the document, hidden by React's `<Activity>` for the way back. The editor
+kept the form column it had found in the document opened before and took it
+for the one on screen: focus mode set nothing aside in the form on screen but
+flattened the rows around the selected one, and the path bar and the screen
+widths went into the hidden view. Found on a customer site, with a plan five
+rows deep - section, row, column, block, plan - selected, and every row around
+it shown without spacing. Payload's landmarks are now looked for outside such a
+kept view only (`isStashed` in `utilities/payloadAdmin.ts`), and focus mode
+flattens nothing in a form it sets nothing aside in.
+
+### A full list says so
+
+Duplicate and add below in the preview's block toolbar are off while a list
+holds as many rows as its `maxRows` allows - and now say why, as a tooltip and
+as the buttons' description for assistive technology: "Höchstens 8 Angebote",
+"At most 8 Plans", by the field's plural label ("Höchstzahl erreicht",
+"Maximum reached" without one). The two buttons stay focusable
+(`aria-disabled`), so the keyboard reaches the reason too; a click does
+nothing.
+
 ## 2.1.2
 
 ### A click below a field's description reaches what was clicked

@@ -126,6 +126,16 @@ describe('isolate, flattening the rows around', () => {
     expect(byId('root').hasAttribute(FOCUSING_ATTRIBUTE)).toBe(false)
   })
 
+  // Red with 2.1.2: the rows of a form the root does not hold were flattened, while nothing was set aside.
+  it('flattens nothing for a target outside the root', () => {
+    const other = document.createElement('div')
+    other.innerHTML = '<div id="other-section"><div id="other-rows"><div id="other-row"></div></div></div>'
+    document.body.append(other)
+    expect(isolate(byId('root'), byId('other-row'), byId('other-section'))).toBe(false)
+    expect(document.querySelectorAll(`[${AROUND_ATTRIBUTE}]`)).toHaveLength(0)
+    expect(document.querySelectorAll(`[${ABOVE_ATTRIBUTE}]`)).toHaveLength(0)
+  })
+
   it('flattens nothing for an outermost row that is the target itself', () => {
     isolate(byId('root'), byId('section-1'), byId('section-1'))
     expect(document.querySelectorAll(`[${AROUND_ATTRIBUTE}]`)).toHaveLength(0)

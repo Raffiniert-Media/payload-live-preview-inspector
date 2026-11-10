@@ -101,14 +101,16 @@ const mark = (root: Element, attribute: string, want: Set<Element>) => {
  * Returns whether anything is hidden now.
  */
 export const isolate = (root: Element, target: Element | null, flattenFrom?: Element | null): boolean => {
-  const hide = target ? siblingsToHide(root, target) : new Set<Element>()
+  // A row `root` does not hold is another form's: nothing to set aside, and nothing to flatten either.
+  const shown = target && target !== root && root.contains(target) ? target : null
+  const hide = shown ? siblingsToHide(root, shown) : new Set<Element>()
   mark(root, HIDDEN_ATTRIBUTE, hide)
-  const around = target ? elementsAround(target, flattenFrom) : new Set<Element>()
+  const around = shown ? elementsAround(shown, flattenFrom) : new Set<Element>()
   mark(root, AROUND_ATTRIBUTE, around)
   // From the outermost row - or the target itself - up to the column.
   const above = new Set<Element>()
-  if (target && hide.size > 0) {
-    const outermost = flattenFrom && around.has(flattenFrom) ? flattenFrom : target
+  if (shown && hide.size > 0) {
+    const outermost = flattenFrom && around.has(flattenFrom) ? flattenFrom : shown
     for (let node = outermost.parentElement; node && node !== root; node = node.parentElement) {
       above.add(node)
     }

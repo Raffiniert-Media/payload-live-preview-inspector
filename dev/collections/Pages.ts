@@ -1,12 +1,125 @@
-import type { CollectionConfig } from 'payload'
+import type { Block, CollectionConfig, Field } from 'payload'
+
+/**
+ * Content and look as two unnamed tabs, the way the theme of the first
+ * customer site arranges every section, row, column and block - no path
+ * segment, a tab bar at every level.
+ */
+const contentAndLook = (content: Field[], look: Field[]): Field => ({
+  type: 'tabs',
+  tabs: [
+    { fields: content, label: 'Content' },
+    { fields: look, label: 'Appearance' },
+  ],
+})
+
+/**
+ * A block listed by name in `config.blocks` (`blockReferences`), as that
+ * theme lists the blocks a column holds. `maxRows` is reached by the seed.
+ */
+export const Pricing: Block = {
+  slug: 'pricing',
+  fields: [
+    contentAndLook(
+      [
+        {
+          name: 'plans',
+          type: 'array',
+          admin: { initCollapsed: true },
+          fields: [
+            {
+              type: 'row',
+              fields: [
+                { name: 'name', type: 'text', admin: { width: '50%' } },
+                { name: 'price', type: 'text', admin: { width: '50%' } },
+              ],
+            },
+          ],
+          labels: { plural: 'Plans', singular: 'Plan' },
+          maxRows: 3,
+        },
+      ],
+      [{ name: 'highlight', type: 'checkbox' }],
+    ),
+  ],
+  labels: { plural: 'Pricing', singular: 'Pricing' },
+}
+
+/**
+ * The section of that theme: rows of columns of blocks, each level with its
+ * two tabs, a field beside the columns, a description over the blocks and a
+ * closed "Advanced" fold under them - every level open but the section.
+ */
+const layoutSection: Block = {
+  slug: 'layoutSection',
+  fields: [
+    contentAndLook(
+      [
+        {
+          name: 'rows',
+          type: 'array',
+          admin: { description: 'Rows divide into columns, and the columns hold the content.' },
+          fields: [
+            contentAndLook(
+              [
+                {
+                  name: 'split',
+                  type: 'select',
+                  defaultValue: 'full',
+                  options: [
+                    { label: 'One column', value: 'full' },
+                    { label: 'Two equal', value: 'halves' },
+                  ],
+                },
+                {
+                  name: 'columns',
+                  type: 'array',
+                  fields: [
+                    contentAndLook(
+                      [
+                        {
+                          name: 'blocks',
+                          type: 'blocks',
+                          admin: { description: 'What this column holds.' },
+                          blockReferences: ['pricing'],
+                          blocks: [],
+                          label: 'Content',
+                        },
+                        {
+                          type: 'collapsible',
+                          admin: { initCollapsed: true },
+                          fields: [{ name: 'anchor', type: 'text' }],
+                          label: 'Advanced',
+                        },
+                      ],
+                      [{ name: 'surface', type: 'select', options: ['none', 'card'] }],
+                    ),
+                  ],
+                  labels: { plural: 'Columns', singular: 'Column' },
+                  maxRows: 4,
+                },
+              ],
+              [{ name: 'gap', type: 'select', options: ['sm', 'md', 'lg'] }],
+            ),
+          ],
+          labels: { plural: 'Rows', singular: 'Row' },
+        },
+      ],
+      [{ name: 'background', type: 'select', options: ['none', 'muted'] }],
+    ),
+  ],
+  labels: { plural: 'Layout sections', singular: 'Layout section' },
+}
 
 /**
  * The "complex page" fixture: every structure that used to cost a reveal
  * extra clicks or seconds, in one document - an unnamed root tabs field with
  * a named tab, forty sections that all start collapsed, tabs nested inside a
  * block row (unnamed and named), arrays inside collapsed rows inside
- * collapsed rows, and an array inside a collapsible field in the last tab.
- * The e2e suite holds reveals on it to one click and a time budget.
+ * collapsed rows, a section shaped like the theme's (rows, columns, blocks
+ * by reference, content and look tabs at every level), and an array inside a
+ * collapsible field in the last tab. The e2e suite holds reveals on it to one
+ * click and a time budget.
  */
 export const Pages: CollectionConfig = {
   slug: 'pages',
@@ -138,6 +251,7 @@ export const Pages: CollectionConfig = {
                     },
                   ],
                 },
+                layoutSection,
               ],
             },
           ],
@@ -199,6 +313,27 @@ export const seedPage = () => ({
           ],
         })),
         layout: r === 0 ? ('one' as const) : ('two' as const),
+      })),
+    },
+    {
+      blockType: 'layoutSection' as const,
+      // Two rows, so the one around a plan has a neighbour to hide.
+      rows: Array.from({ length: 2 }, (_, r) => ({
+        columns: [
+          {
+            blocks: [
+              {
+                blockType: 'pricing' as const,
+                // As many as the field allows.
+                plans: Array.from({ length: 3 }, (_, p) => ({
+                  name: `Plan ${p + 1} of layout row ${r + 1}`,
+                  price: `CHF ${(p + 1) * 40 + r}`,
+                })),
+              },
+            ],
+          },
+        ],
+        split: 'full' as const,
       })),
     },
   ],

@@ -1392,7 +1392,7 @@ const Inspector: React.FC<LivePreviewInspectorListenerProps> = ({
     }
     postToPreview({
       type: STRUCTURE_MESSAGE_TYPE,
-      rows: previewRowsOf(outlineRef.current),
+      rows: previewRowsOf(outlineRef.current, stringsRef.current),
       strings: previewStringsOf(stringsRef.current),
     })
   }, [features.blockToolbar, postToPreview])

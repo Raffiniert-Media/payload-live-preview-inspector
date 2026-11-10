@@ -4,6 +4,7 @@ import type { MinimalFormState } from './pathResolution.js'
 import type { BlocksMap, SchemaField } from './revealPlan.js'
 import type { FieldPermissions } from './structure.js'
 
+import { stringsFor } from './i18n.js'
 import {
   buildOutline,
   chainOf,
@@ -188,6 +189,14 @@ describe('buildOutline', () => {
     expect(outline.byPath.get('layout.0')?.abilities.move).toBe(true)
   })
 
+  // Red before 2.1.3: a full list only turned the buttons off.
+  it('says when a list is full, by its plural label', () => {
+    expect(outline.byPath.get('meta.links.0')?.full).toEqual({ max: 2, plural: 'Links' })
+    expect(outline.byPath.get('layout.0.rows.0')?.full).toBeUndefined()
+    // Locked is not full: that is a reason of its own.
+    expect(buildOutline(fields, formState, { blocksMap, readOnly: true }).byPath.get('meta.links.0')?.full).toBeUndefined()
+  })
+
   it('allows nothing inside a read-only field, whatever the rows inside say', () => {
     const locked: SchemaField[] = [
       {
@@ -302,10 +311,25 @@ describe('rowIDPathOf', () => {
 
 describe('previewRowsOf', () => {
   it('gives the preview every row with its parent, by row id', () => {
-    const rows = previewRowsOf(outline)
+    const rows = previewRowsOf(outline, stringsFor('de'))
     const quote = rows.find((row) => row.path.endsWith('$b2'))
     expect(quote).toMatchObject({ count: 1, index: 0, label: 'Quote 1', parent: 'layout.$s1.rows.$r1.columns.$c2' })
     expect(JSON.parse(JSON.stringify(rows))).toEqual(rows)
+  })
+
+  it('says in the admin’s language why a full list takes no more', () => {
+    const link = previewRowsOf(outline, stringsFor('de')).find((row) => row.path === 'meta.links.$l1')
+    expect(link?.full).toBe('Höchstens 2 Links')
+    expect(previewRowsOf(outline, stringsFor('en')).find((row) => row.path === 'meta.links.$l1')?.full).toBe('At most 2 Links')
+    expect(previewRowsOf(outline, stringsFor('de')).find((row) => row.path === 'layout.$s1')?.full).toBeUndefined()
+  })
+})
+
+describe('atMost', () => {
+  it('names the limit by the plural label, and says it plainly without one', () => {
+    expect(stringsFor('de').atMost(8, 'Angebote')).toBe('Höchstens 8 Angebote')
+    expect(stringsFor('de').atMost(8)).toBe('Höchstzahl erreicht')
+    expect(stringsFor('en').atMost(8)).toBe('Maximum reached')
   })
 })
 

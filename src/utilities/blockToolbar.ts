@@ -33,6 +33,9 @@ export type BlockToolbar = {
 /** Attribute the toolbar's layer is found by - tests, and anyone restyling it. */
 export const BLOCK_TOOLBAR_ATTRIBUTE = 'data-payload-live-preview-inspector-block-toolbar'
 
+/** Id of the toolbar's note on why a button is off - one toolbar to a page. */
+const NOTE_ID = 'payload-live-preview-inspector-block-toolbar-note'
+
 /** Room kept between the toolbar and the edge of whatever it would otherwise touch. */
 const GAP_PX = 6
 
@@ -304,17 +307,30 @@ export const createBlockToolbar = (
   view.addEventListener('scroll', onViewChange, { capture: true, passive: true })
   view.addEventListener('resize', onViewChange, { passive: true })
 
-  const button = (action: BlockToolbarAction, title: string, enabled: boolean, content: string) => {
+  /** `why`: the reason a button that is off is off, said where it is (see `note`). */
+  const button = (action: BlockToolbarAction, title: string, enabled: boolean, content: string, why?: string) => {
     const el = doc.createElement('button')
     el.type = 'button'
     el.className = classes.toolbarButton
     el.dataset.action = action
     el.title = title
     el.setAttribute('aria-label', title)
-    el.disabled = !enabled
+    if (enabled || !why) {
+      el.disabled = !enabled
+    } else {
+      // Focusable, unlike a disabled button, so the reason reaches the keyboard too; a click does nothing.
+      el.setAttribute('aria-disabled', 'true')
+      el.setAttribute('aria-describedby', NOTE_ID)
+      el.title = `${title} – ${why}`
+    }
     el.innerHTML = content
     return el
   }
+
+  /** The reason the buttons that point at it are off, for assistive technology. */
+  const note = doc.createElement('span')
+  note.id = NOTE_ID
+  note.hidden = true
 
   const render = () => {
     toolbar.replaceChildren()
@@ -335,16 +351,20 @@ export const createBlockToolbar = (
       return el
     }
     const { abilities } = row
+    // The list is full: nothing more goes into it, and the editor is told so.
+    const full = typeof row.full === 'string' && row.full ? row.full : undefined
+    note.textContent = full ?? ''
     toolbar.append(
       label,
       ...(row.parent ? [button('select', strings.selectParent, true, icon('select'))] : []),
       separator(),
       button('up', strings.moveUp, abilities.move && row.index > 0, icon('up')),
       button('down', strings.moveDown, abilities.move && row.index < row.count - 1, icon('down')),
-      button('duplicate', strings.duplicate, abilities.duplicate, icon('duplicate')),
-      button('insert', strings.addBelow, abilities.insert, icon('insert')),
+      button('duplicate', strings.duplicate, abilities.duplicate, icon('duplicate'), full),
+      button('insert', strings.addBelow, abilities.insert, icon('insert'), full),
       separator(),
       button('remove', strings.remove, abilities.remove, icon('remove')),
+      ...(full ? [note] : []),
     )
   }
 
@@ -352,7 +372,7 @@ export const createBlockToolbar = (
     event.preventDefault()
     event.stopPropagation()
     const target = (event.target as Element | null)?.closest?.('button[data-action]') as HTMLButtonElement | null
-    if (!target || target.disabled || !selected) {
+    if (!target || target.disabled || target.getAttribute('aria-disabled') === 'true' || !selected) {
       return
     }
     const action = target.dataset.action as BlockToolbarAction

@@ -89,6 +89,29 @@ export const PagePreviewClient = ({ initialData, posts }: Props) => {
                   ))}
                 </div>
               ))}
+            {section.blockType === 'layoutSection' &&
+              section.rows?.map((row) => (
+                <div key={row.id} {...pathOf(row)}>
+                  {row.columns?.map((column) => (
+                    <div key={column.id}>
+                      {column.blocks?.map((block) => (
+                        <div
+                          key={block.id}
+                          {...pathOf(block)}
+                          style={{ display: 'grid', gap: '1rem', gridTemplateColumns: 'repeat(3, 1fr)', marginBottom: '1rem' }}
+                        >
+                          {block.plans?.map((plan) => (
+                            <article key={plan.id} {...pathOf(plan)} style={{ border: '1px solid #ddd', padding: '1rem' }}>
+                              <h3 {...pathOf(plan, 'name')}>{plan.name}</h3>
+                              <p {...pathOf(plan, 'price')}>{plan.price}</p>
+                            </article>
+                          ))}
+                        </div>
+                      ))}
+                    </div>
+                  ))}
+                </div>
+              ))}
             {section.blockType === 'cards' && (
               <div style={{ display: 'grid', gap: '1rem', gridTemplateColumns: 'repeat(3, 1fr)' }}>
                 {section.cards?.map((card) => (

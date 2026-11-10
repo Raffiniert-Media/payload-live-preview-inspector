@@ -186,10 +186,33 @@ export const toggleButtonOf = (collapsible: Element | null | undefined): HTMLBut
   null
 
 /**
+ * Whether `el` is in a route kept for the way back: with Next's
+ * `cacheComponents` - on in every site of `@raffiniert-media-ag/payload-theme` -
+ * the page navigated away from is not removed but hidden in React's
+ * `<Activity>`, an inline `display: none !important` on its outermost
+ * elements. The edit view of the document opened before is still in the
+ * document then, with every class and id of the one on screen.
+ *
+ * Only that inline `!important`: a column hidden by a stylesheet - page mode's
+ * on a narrow screen - is still the one in use.
+ */
+export const isStashed = (el: Element): boolean => {
+  for (let node: Element | null = el; node; node = node.parentElement) {
+    const { style } = node as HTMLElement
+    if (style?.getPropertyValue('display') === 'none' && style.getPropertyPriority('display') === 'important') {
+      return true
+    }
+  }
+  return false
+}
+
+/**
  * Payload's landmark elements, kept while they are on the page: the editor
  * asks for them on every frame the form changes in, and a search that has to
  * pass the whole form - the preview comes after it - each time adds up.
- * Asked again once the element left the page or lost the class.
+ * Asked again once the element left the page, lost the class, or went into a
+ * route kept for the way back (`isStashed`) - kept, the editor set nothing
+ * aside in the form on screen and put its bar into the hidden one.
  */
 const landmarks = new WeakMap<Document, Map<string, HTMLElement>>()
 const landmark = (name: (typeof PAYLOAD_CLASS)[keyof typeof PAYLOAD_CLASS], doc: Document): HTMLElement | null => {
@@ -199,10 +222,11 @@ const landmark = (name: (typeof PAYLOAD_CLASS)[keyof typeof PAYLOAD_CLASS], doc:
     landmarks.set(doc, known)
   }
   const kept = known.get(name)
-  if (kept?.isConnected && kept.classList.contains(name)) {
+  if (kept?.isConnected && kept.classList.contains(name) && !isStashed(kept)) {
     return kept
   }
-  const found = doc.querySelector<HTMLElement>(selectorOf(name))
+  const found =
+    Array.from(doc.querySelectorAll<HTMLElement>(selectorOf(name))).find((candidate) => !isStashed(candidate)) ?? null
   if (found) {
     known.set(name, found)
   } else {

@@ -1,3 +1,4 @@
+import type { EditorStrings } from './i18n.js'
 import type { MinimalFormState } from './pathResolution.js'
 import type { BlocksMap, SchemaField } from './revealPlan.js'
 
@@ -38,6 +39,11 @@ export type OutlineNode = {
   depth: number
   /** The Array/Blocks field holding the row, by index path (`layout.2.rows`). */
   fieldPath: string
+  /**
+   * Set while that field holds as many rows as it may (`maxRows`): why
+   * duplicate and add below are off. `plural` is its label in the admin's language.
+   */
+  full?: { max: number; plural?: string }
   /** Some field inside the row fails validation. */
   hasErrors: boolean
   index: number
@@ -290,6 +296,11 @@ const rowsOf = (
   const rows = ctx.formState[fieldPath]?.rows ?? []
   const locked = ctx.readOnly || field.admin?.readOnly === true || !mayUpdate(permission)
   const count = rows.length
+  // Locked says nothing about the limit: that is a reason of its own.
+  const full =
+    !locked && field.maxRows !== undefined && count >= field.maxRows
+      ? { max: field.maxRows, plural: translateLabel(field.labels?.plural, ctx.language) }
+      : undefined
 
   return rows.map((row, index) => {
     const path = `${fieldPath}.${index}`
@@ -301,8 +312,8 @@ const rowsOf = (
 
     const node: OutlineNode = {
       abilities: {
-        duplicate: !locked && (field.maxRows === undefined || count < field.maxRows),
-        insert: !locked && (field.maxRows === undefined || count < field.maxRows),
+        duplicate: !locked && !full,
+        insert: !locked && !full,
         move: !locked && field.admin?.isSortable !== false && count > 1,
         remove: !locked && count > (field.minRows ?? 0),
       },
@@ -311,6 +322,7 @@ const rowsOf = (
       count,
       depth,
       fieldPath,
+      ...(full ? { full } : {}),
       hasErrors: ctx.invalid.some((invalid) => invalid === path || invalid.startsWith(`${path}.`)),
       index,
       kind,
@@ -447,6 +459,8 @@ export { rowIDPathOf } from './pathAttribute.js'
 export type PreviewRow = {
   abilities: RowAbilities
   count: number
+  /** Why duplicate and add below are off - the list is full - in the admin's words. */
+  full?: string
   index: number
   label: string
   parent: null | string
@@ -454,10 +468,11 @@ export type PreviewRow = {
   summary?: string
 }
 
-export const previewRowsOf = (outline: Outline): PreviewRow[] =>
+export const previewRowsOf = (outline: Outline, strings: Pick<EditorStrings, 'atMost'>): PreviewRow[] =>
   Array.from(outline.byRowIDPath.values(), (node) => ({
     abilities: node.abilities,
     count: node.count,
+    ...(node.full ? { full: strings.atMost(node.full.max, node.full.plural) } : {}),
     index: node.index,
     label: node.label,
     parent: node.parent?.rowIDPath ?? null,

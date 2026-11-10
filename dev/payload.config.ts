@@ -6,7 +6,7 @@ import { buildConfig } from 'payload'
 import sharp from 'sharp'
 import { fileURLToPath } from 'url'
 
-import { Pages } from './collections/Pages.js'
+import { Pages, Pricing } from './collections/Pages.js'
 import { testEmailAdapter } from './helpers/testEmailAdapter.js'
 import { seed } from './seed.js'
 
@@ -135,6 +135,8 @@ export default buildConfig({
       },
     },
   ],
+  // Listed by name where a column holds them - see `Pricing`.
+  blocks: [Pricing],
   db: sqliteAdapter({
     client: {
       url: databaseURI,

@@ -61,4 +61,36 @@ describe('landmark lookups', () => {
     replacement.className = 'something-else'
     expect(editMainEl()).toBeNull()
   })
+
+  /*
+   * With Next's `cacheComponents` the edit view navigated away from stays in
+   * the document, hidden by React's `<Activity>`, beside the one on screen.
+   * Red with the 2.1.2 lookup: the form column kept from before (and, first
+   * in the document, the one a query finds) was the hidden one.
+   */
+  it('pass over an edit view a route keeps for the way back', () => {
+    const left = editMainEl()!
+    const leftView = document.querySelector<HTMLElement>('.collection-edit')!
+    leftView.style.setProperty('display', 'none', 'important')
+    document.body.insertAdjacentHTML('beforeend', editView)
+    const onScreen = document.querySelectorAll('.collection-edit__main')[1]
+    expect(onScreen).not.toBe(left)
+    expect(editMainEl()).toBe(onScreen)
+
+    // Kept before the one on screen in the document, too.
+    document.body.prepend(leftView)
+    expect(document.querySelector('.collection-edit__main')).toBe(left)
+    expect(editMainEl()).toBe(onScreen)
+
+    // Back to it: the one on screen again.
+    leftView.style.removeProperty('display')
+    onScreen.closest<HTMLElement>('.collection-edit')!.style.setProperty('display', 'none', 'important')
+    expect(editMainEl()).toBe(left)
+  })
+
+  it('keep a form column hidden any other way - page mode folds it away on a narrow screen', () => {
+    const main = editMainEl()!
+    main.style.display = 'none'
+    expect(editMainEl()).toBe(main)
+  })
 })

@@ -145,6 +145,27 @@ describe('createBlockToolbar', () => {
     expect(buttons()).toEqual(['edit', 'up (off)', 'down (off)', 'duplicate (off)', 'insert (off)', 'remove (off)'])
   })
 
+  // Red before 2.1.3: the two buttons were only off, with nothing to say why.
+  it('says why a full list takes no more, to the pointer and to assistive technology', async () => {
+    toolbar.setStructure(
+      [row('layout.$a', { abilities: { duplicate: false, insert: false, move: true, remove: true }, full: 'Höchstens 8 Angebote' })],
+      strings,
+    )
+    toolbar.select('layout.$a')
+    await frames()
+    for (const action of ['duplicate', 'insert']) {
+      const button = document.querySelector(`[${BLOCK_TOOLBAR_ATTRIBUTE}] button[data-action="${action}"]`) as HTMLButtonElement
+      // Off, but still reachable by the keyboard - a disabled button is skipped, and its reason with it.
+      expect(button.disabled).toBe(false)
+      expect(button.getAttribute('aria-disabled')).toBe('true')
+      expect(button.title).toContain('Höchstens 8 Angebote')
+      const note = document.getElementById(button.getAttribute('aria-describedby') ?? '')
+      expect(note?.textContent).toBe('Höchstens 8 Angebote')
+      button.click()
+    }
+    expect(onAction).not.toHaveBeenCalled()
+  })
+
   it('asks the admin, and steps out to the row around it itself', async () => {
     toolbar.setStructure([row('layout.$a'), row('layout.$a.items.$x', { parent: 'layout.$a' })], strings)
     toolbar.select('layout.$a.items.$x')

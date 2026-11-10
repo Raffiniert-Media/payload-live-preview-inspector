@@ -35,7 +35,13 @@ const openLivePreview = async (page: Page, collection: 'pages' | 'posts' = 'post
   expect(href).toMatch(new RegExp(`/admin/collections/${collection}/(?!create)[^/]+$`))
   await page.goto(href!)
 
-  const toggler = page.locator('#live-preview-toggler')
+  return showLivePreview(page)
+}
+
+/** Opens the live preview of the edit view on screen, and waits for its page to be hydrated. */
+const showLivePreview = async (page: Page) => {
+  // On screen: an edit view a site keeps for the way back has one too (see `stashLikeActivity`).
+  const toggler = page.locator('#live-preview-toggler').filter({ visible: true })
   const iframe = page.locator('#live-preview-iframe')
 
   // Payload renders live preview as an inline toggle button (eye icon) in the
@@ -1591,6 +1597,63 @@ const EDITOR = '[data-payload-live-preview-inspector-toolbar]'
 const BLOCK_TOOLBAR = '[data-payload-live-preview-inspector-block-toolbar] [role=toolbar]'
 const PATH_BAR = '[data-payload-live-preview-inspector-path]'
 const HIDDEN = '[data-payload-live-preview-inspector-hidden]'
+const AROUND = '[data-payload-live-preview-inspector-around]'
+
+/** The form's column on screen - not one a route kept for the way back holds (see `stashLikeActivity`). */
+const formOnScreen = (page: Page) => page.locator('.collection-edit__main').filter({ visible: true })
+
+/**
+ * The words the form on screen shows outside the row with id `rowID` and the
+ * editor's own bars - what focus mode should have set aside.
+ */
+const shownBesideRow = (page: Page, rowID: string) =>
+  page.evaluate((id) => {
+    const form = Array.from(document.querySelectorAll('.collection-edit__main')).find((el) => el.getClientRects().length > 0)
+    const row = form?.querySelector(`[id="${id}"]`)
+    if (!form || !row) {
+      return [`no ${form ? `#${id}` : 'form'} on screen`]
+    }
+    return Array.from(form.querySelectorAll('*')).flatMap((el) => {
+      if (row.contains(el) || el.closest('[data-payload-live-preview-inspector-host]') || el.getClientRects().length === 0) {
+        return []
+      }
+      const own = Array.from(el.childNodes, (node) => (node.nodeType === Node.TEXT_NODE ? node.textContent!.trim() : ''))
+        .join(' ')
+        .trim()
+      return own ? [own] : []
+    })
+  }, rowID)
+
+/**
+ * Leaves the edit view on screen for the list of `collection` the way a site
+ * with Next's `cacheComponents` does - every site of the theme this plugin
+ * was built with: React's `<Activity>` does not remove the view navigated away
+ * from but hides it, an inline `display: none !important` on its outermost
+ * element, and keeps it in the document for the way back. The dev app runs
+ * without `cacheComponents`, so the one removal that would take the view out
+ * hides it instead. By the admin's own link, without a reload, which would
+ * start the editor afresh.
+ */
+const stashLikeActivity = async (page: Page, collection: 'pages' | 'posts') => {
+  await page.evaluate(() => {
+    const view = document.querySelector('.collection-edit')!
+    const removeChild = Node.prototype.removeChild
+    Node.prototype.removeChild = function <T extends Node>(this: Node, child: T): T {
+      if (!(child instanceof HTMLElement) || !child.contains(view)) {
+        return removeChild.call(this, child) as T
+      }
+      Node.prototype.removeChild = removeChild
+      child.style.setProperty('display', 'none', 'important')
+      return child
+    }
+  })
+  await page.evaluate((href) => {
+    document.querySelector<HTMLAnchorElement>(`a[href="${href}"]`)!.click()
+  }, `/admin/collections/${collection}`)
+  await expect(page).toHaveURL(new RegExp(`/admin/collections/${collection}(\\?|$)`), { timeout: 30_000 })
+  await expect(page.locator('.collection-edit')).toHaveCount(1)
+  await expect(page.locator('.collection-edit')).toBeHidden()
+}
 
 /** Every choice the editor remembers, forgotten - each test starts from the defaults. */
 const forgetEditorChoices = (page: Page) =>
@@ -1696,9 +1759,74 @@ test('editor: focus mode shows only the block clicked in the preview, and “All
     })
     .toBeLessThan(40)
 
+  // A plan five rows down - section, row, column, block, plan - with tabs at
+  // every level and a field beside the columns: nothing of the rows around.
+  await frame.locator('h3', { hasText: 'Plan 1 of layout row 2' }).first().click()
+  await expect(page.locator(PATH_BAR)).toContainText('Plan 1')
+  await expect.poll(() => shownBesideRow(page, 'sections-41-rows-1-columns-0-blocks-0-plans-row-0')).toEqual([])
+
   await page.locator(`${PATH_BAR} button`, { hasText: /^All fields$/ }).click()
   await expect(page.locator(HIDDEN)).toHaveCount(0)
   await expect(page.locator('#sections-row-1')).toBeVisible()
+})
+
+/*
+ * Found on a customer site: a plan selected deep in a section, and the form
+ * showed every row around it, flattened - and no path bar. The editor had
+ * opened another document before, and with `cacheComponents` its edit view
+ * was still in the document, hidden: the editor kept taking that one's form
+ * column for the one on screen, set nothing aside in the form on screen and
+ * put its bar into the hidden one. Red with the column read the way 2.1.2
+ * reads it: the path bar not in the form on screen.
+ */
+test('editor: focus mode after another document shows only the block, in the form on screen', async ({ page }) => {
+  test.setTimeout(process.env.CI ? 240_000 : 90_000)
+  await login(page)
+  await forgetEditorChoices(page)
+  await page.goto('/admin/collections/posts')
+  const href = await page.locator('.table tbody tr:first-child a').first().getAttribute('href')
+  await page.goto(href!)
+  // The editor is at work in the post's edit view: its bar is in that form.
+  await expect(page.locator('.collection-edit__main [data-payload-live-preview-inspector-host="path-bar"]')).toBeAttached()
+
+  await stashLikeActivity(page, 'pages')
+  await page.locator('.table tbody tr:first-child a').first().click()
+  await expect(page).toHaveURL(/\/admin\/collections\/pages\/\d+$/, { timeout: 30_000 })
+  const frame = await showLivePreview(page)
+
+  await frame.locator('h3', { hasText: 'Plan 1 of layout row 2' }).first().click()
+  const form = formOnScreen(page)
+  await expect(form.locator('#field-sections__41__rows__1__columns__0__blocks__0__plans__0__name')).toBeVisible({
+    timeout: 10_000,
+  })
+  await expect(form.locator(PATH_BAR)).toContainText('Plan 1')
+  await expect.poll(() => shownBesideRow(page, 'sections-41-rows-1-columns-0-blocks-0-plans-row-0')).toEqual([])
+
+  // Leaving focus mode puts everything back, flat no more.
+  await form.locator(`${PATH_BAR} button`, { hasText: /^All fields$/ }).click()
+  await expect(form.locator(HIDDEN)).toHaveCount(0)
+  await expect(form.locator(AROUND)).toHaveCount(0)
+  await expect(form.locator('#sections-41-rows-row-0')).toBeVisible()
+  await expect(form.locator('#sections-41-rows-1-columns-0-blocks-0-plans-row-1')).toBeVisible()
+})
+
+// Red before 2.1.3: duplicate and add below were off, and said nothing about why.
+test('editor: a full list says so on the buttons that would add to it', async ({ page }) => {
+  const frame = await openEditor(page)
+  await frame.locator('h3', { hasText: 'Plan 1 of layout row 2' }).first().click()
+  const toolbar = frame.locator(BLOCK_TOOLBAR)
+  await expect(toolbar.locator('button').first()).toHaveText('Plan 1')
+  for (const action of ['duplicate', 'insert']) {
+    const button = toolbar.locator(`button[data-action=${action}]`)
+    await expect(button).toBeDisabled()
+    await expect(button).toHaveAccessibleDescription('At most 3 Plans')
+  }
+
+  // A list with room: nothing to explain.
+  await firstSection(frame).click()
+  await expect(toolbar.locator('button').first()).toHaveText('Feature 1')
+  await expect(toolbar.locator('button[data-action=duplicate]')).toBeEnabled()
+  await expect(toolbar.locator('button[data-action=duplicate]')).not.toHaveAttribute('aria-describedby')
 })
 
 test('editor: the block toolbar moves a block, and the move can be taken back', async ({ page }) => {

@@ -276,7 +276,7 @@
   padding: 0 6px;
 }
 
-.toolbarButton:hover:not(:disabled) {
+.toolbarButton:hover:not(:disabled, [aria-disabled='true']) {
   background: rgb(255 255 255 / 12%);
 }
 
@@ -284,7 +284,8 @@
   outline: 2px solid var(--payload-live-preview-inspector-accent, #1587ba);
 }
 
-.toolbarButton:disabled {
+.toolbarButton:disabled,
+.toolbarButton[aria-disabled='true'] {
   cursor: default;
   opacity: 0.35;
 }
