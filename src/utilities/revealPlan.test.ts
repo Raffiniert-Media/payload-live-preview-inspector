@@ -186,6 +186,17 @@ describe('findTabsElement', () => {
     expect(step.kind === 'tab' && findTabsElement(step, fields, state)).toBe(second)
   })
 
+  // Red before 2.1.4: the tabs of the page opened before, hidden for the way back, were found first.
+  it('passes over the tabs of an edit view kept for the way back', () => {
+    const view = tabsMarkup(['Content', 'Meta'], 0, '<input id="field-title" />')
+    document.body.innerHTML = `<div style="display: none !important">${view}</div>${view}`
+    const [, onScreen] = Array.from(document.querySelectorAll<HTMLElement>('.tabs-field'))
+
+    const step = planReveal(fields, 'metaNote', formState).steps[0]
+
+    expect(step.kind === 'tab' && findTabsElement(step, fields, formState)).toBe(onScreen)
+  })
+
   it('returns null when no rendered tabs field can be identified', () => {
     document.body.innerHTML = tabsMarkup(['Empty'], 0, '<p>nothing with a path</p>')
     const step = planReveal(fields, 'title', formState).steps[0]

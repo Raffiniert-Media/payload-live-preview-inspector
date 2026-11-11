@@ -15,6 +15,8 @@
  * class name the test does not know about.
  */
 
+import { escapeAttributeValue } from './pathAttribute.js'
+
 /** Payload's class names, without the leading dot. */
 export const PAYLOAD_CLASS = {
   /** The animated content box of a row or collapsible. */
@@ -204,6 +206,36 @@ export const isStashed = (el: Element): boolean => {
     }
   }
   return false
+}
+
+/**
+ * The first element matching `selector` in `scope` that is not in a route kept
+ * for the way back (`isStashed`) - the one a plain `querySelector` finds, as
+ * long as no kept view comes before it.
+ */
+export const querySelectorOnScreen = <T extends Element = HTMLElement>(
+  scope: Document | Element,
+  selector: string,
+): null | T => {
+  const first = scope.querySelector<T>(selector)
+  if (!first || !isStashed(first)) {
+    return first
+  }
+  return Array.from(scope.querySelectorAll<T>(selector)).find((el) => !isStashed(el)) ?? null
+}
+
+/**
+ * The element with `id` outside a route kept for the way back. Payload's ids
+ * are paths - `sections-row-2`, `field-title` - so every edit view of a
+ * collection has the same ones, and `getElementById` returns whichever comes
+ * first in the document: after one page another, often the hidden one.
+ */
+export const elementByID = (id: string, doc: Document = document): HTMLElement | null => {
+  const first = doc.getElementById(id)
+  if (!first || !isStashed(first)) {
+    return first
+  }
+  return querySelectorOnScreen(doc, `[id="${escapeAttributeValue(id)}"]`)
 }
 
 /**

@@ -4,13 +4,16 @@ import { applyCaretHint } from './caret.js'
 import { escapeAttributeValue, isRowIDSegment, rowIDFromSegment, rowIDSegment } from './pathAttribute.js'
 import {
   collapsibleOf,
+  elementByID,
   elementID,
   FIELD_ID_PREFIX,
   FIELD_PATH_ATTRIBUTE,
   fieldIDFromPath,
   isCollapsedCollapsible,
+  isStashed,
   pathFromRowID,
   PAYLOAD_CLASS,
+  querySelectorOnScreen,
   ROW_ID_PATTERN,
   rowIDFromPath,
   SCROLL_ID_PREFIX,
@@ -89,13 +92,13 @@ export const pathFromFieldElement = (el: HTMLElement): null | string => {
  * lives inside an inactive tab, which Payload unmounts).
  */
 export const resolveExactFieldElement = (path: string): HTMLElement | null => {
-  const fieldEl = document.getElementById(fieldIDFromPath(path))
+  const fieldEl = elementByID(fieldIDFromPath(path))
   if (fieldEl) {
     return fieldEl
   }
 
   const rowID = rowIDFromPath(path)
-  const rowEl = rowID ? document.getElementById(rowID) : null
+  const rowEl = rowID ? elementByID(rowID) : null
   if (rowEl) {
     return rowEl
   }
@@ -105,7 +108,7 @@ export const resolveExactFieldElement = (path: string): HTMLElement | null => {
   // search of the whole form - several a frame while a reveal waits for a
   // field to mount - cost a scan of every element each time.
   const scope = rowScopeOf(path)
-  return scope ? scope.querySelector<HTMLElement>(`[${FIELD_PATH_ATTRIBUTE}="${escapeAttributeValue(path)}"]`) : null
+  return scope ? querySelectorOnScreen(scope, `[${FIELD_PATH_ATTRIBUTE}="${escapeAttributeValue(path)}"]`) : null
 }
 
 /**
@@ -117,7 +120,7 @@ const rowScopeOf = (path: string): Document | HTMLElement | null => {
   for (let end = segments.length - 2; end > 0; end--) {
     if (/^\d+$/.test(segments[end])) {
       const rowID = rowIDFromPath(segments.slice(0, end + 1).join('.'))
-      return rowID ? document.getElementById(rowID) : document
+      return rowID ? elementByID(rowID) : document
     }
   }
   return document
@@ -502,14 +505,15 @@ export const revealTabForElement = async (
     return found
   }
 
+  // Not the tabs of an edit view kept for the way back: they have the same fields.
   const originallyActive = Array.from(
     root.querySelectorAll<HTMLButtonElement>(`.${TAB_BUTTON_ACTIVE_CLASS}`),
-  )
+  ).filter((button) => !isStashed(button))
   const clicked = new Set<Element>()
 
   for (let round = 0; round < MAX_TAB_SWEEP_ROUNDS; round++) {
     const buttons = Array.from(root.querySelectorAll<HTMLButtonElement>(TAB_BUTTON_SELECTOR)).filter(
-      (button) => !clicked.has(button) && !button.classList.contains(TAB_BUTTON_ACTIVE_CLASS),
+      (button) => !clicked.has(button) && !button.classList.contains(TAB_BUTTON_ACTIVE_CLASS) && !isStashed(button),
     )
 
     if (buttons.length === 0) {

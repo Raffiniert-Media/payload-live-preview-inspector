@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { beforeEach, describe, expect, it } from 'vitest'
 
-import { editMainEl, missingLandmarks } from './payloadAdmin.js'
+import { editMainEl, elementByID, missingLandmarks } from './payloadAdmin.js'
 
 /** Payload's edit view with the inline live preview open, as far as the editor cares. */
 const editView = `
@@ -92,5 +92,41 @@ describe('landmark lookups', () => {
     const main = editMainEl()!
     main.style.display = 'none'
     expect(editMainEl()).toBe(main)
+  })
+})
+
+/*
+ * Payload's ids are paths - `sections-row-2`, `field-title` - the same in every
+ * edit view of a collection. Red with `getElementById`: the row of the page
+ * opened before, hidden and first in the document, was the one found.
+ */
+describe('elementByID', () => {
+  const page = `<div class="collection-edit"><div id="sections-row-2"></div><input id="field-title" /></div>`
+
+  beforeEach(() => {
+    document.body.innerHTML = page + page
+  })
+
+  it('finds the element on screen, not its namesake in an edit view kept for the way back', () => {
+    const [kept, onScreen] = Array.from(document.querySelectorAll<HTMLElement>('.collection-edit'))
+    kept.style.setProperty('display', 'none', 'important')
+    expect(document.getElementById('sections-row-2')).toBe(kept.firstElementChild)
+    expect(elementByID('sections-row-2')).toBe(onScreen.firstElementChild)
+    expect(elementByID('field-title')).toBe(onScreen.lastElementChild)
+  })
+
+  it('finds nothing where only the kept view has it', () => {
+    const [kept, onScreen] = Array.from(document.querySelectorAll<HTMLElement>('.collection-edit'))
+    kept.style.setProperty('display', 'none', 'important')
+    onScreen.remove()
+    expect(elementByID('sections-row-2')).toBeNull()
+  })
+
+  it('finds an element hidden any other way - focus mode sets rows aside by a stylesheet', () => {
+    document.body.innerHTML = page
+    const row = document.getElementById('sections-row-2')!
+    row.style.display = 'none'
+    expect(elementByID('sections-row-2')).toBe(row)
+    expect(elementByID('sections-row-3')).toBeNull()
   })
 })

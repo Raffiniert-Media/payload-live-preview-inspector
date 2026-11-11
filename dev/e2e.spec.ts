@@ -42,7 +42,7 @@ const openLivePreview = async (page: Page, collection: 'pages' | 'posts' = 'post
 const showLivePreview = async (page: Page) => {
   // On screen: an edit view a site keeps for the way back has one too (see `stashLikeActivity`).
   const toggler = page.locator('#live-preview-toggler').filter({ visible: true })
-  const iframe = page.locator('#live-preview-iframe')
+  const iframe = page.locator('#live-preview-iframe').filter({ visible: true })
 
   // Payload renders live preview as an inline toggle button (eye icon) in the
   // document controls, not as a separate view tab/link. The button is in the
@@ -63,7 +63,7 @@ const showLivePreview = async (page: Page) => {
 
   // Server-rendered markup is visible - and clickable - before React has
   // attached a single handler; wait for the preview to say it's hydrated.
-  const frame = page.frameLocator('#live-preview-iframe')
+  const frame = iframe.contentFrame()
   await expect(frame.locator('main[data-hydrated]')).toBeAttached({ timeout: 30_000 })
 
   return frame
@@ -1808,6 +1808,37 @@ test('editor: focus mode after another document shows only the block, in the for
   await expect(form.locator(AROUND)).toHaveCount(0)
   await expect(form.locator('#sections-41-rows-row-0')).toBeVisible()
   await expect(form.locator('#sections-41-rows-1-columns-0-blocks-0-plans-row-1')).toBeVisible()
+})
+
+/*
+ * Found on a customer site after 2.1.3: an image deep in a carousel clicked,
+ * the path bar right, but the form showed every row from the top, nothing set
+ * aside. The document opened before was a page too. Payload's ids are paths -
+ * `sections-row-2` on every page - so the hidden view held an element of each
+ * id first, and every lookup by id found that one. Same page twice here: same
+ * ids, as with any two pages of one collection.
+ */
+test('editor: focus mode after another page of the collection shows the block, in the form on screen', async ({ page }) => {
+  test.setTimeout(process.env.CI ? 240_000 : 90_000)
+  const first = await openEditor(page)
+  // The first page with the plan open: the hidden view holds every row on the way to it.
+  await first.locator('h3', { hasText: 'Plan 1 of layout row 2' }).first().click()
+  await expect(page.locator('#field-sections__41__rows__1__columns__0__blocks__0__plans__0__name')).toBeVisible({
+    timeout: 10_000,
+  })
+
+  await stashLikeActivity(page, 'pages')
+  await page.locator('.table tbody tr:first-child a').first().click()
+  await expect(page).toHaveURL(/\/admin\/collections\/pages\/\d+$/, { timeout: 30_000 })
+  const frame = await showLivePreview(page)
+
+  await frame.locator('h3', { hasText: 'Plan 1 of layout row 2' }).first().click()
+  const form = formOnScreen(page)
+  await expect(form.locator(PATH_BAR)).toContainText('Plan 1')
+  const name = form.locator('#field-sections__41__rows__1__columns__0__blocks__0__plans__0__name')
+  await expect(name).toBeVisible({ timeout: 10_000 })
+  await expect(name).toBeInViewport()
+  await expect.poll(() => shownBesideRow(page, 'sections-41-rows-1-columns-0-blocks-0-plans-row-0')).toEqual([])
 })
 
 // Red before 2.1.3: duplicate and add below were off, and said nothing about why.

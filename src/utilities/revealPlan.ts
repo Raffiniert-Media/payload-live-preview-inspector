@@ -9,6 +9,7 @@ import {
   elementID,
   FIELD_ID_PREFIX,
   FIELD_PATH_ATTRIBUTE,
+  isStashed,
   PAYLOAD_CLASS,
   selectorOf,
 } from './payloadAdmin.js'
@@ -491,6 +492,10 @@ export const findTabsElement = (
   root: Document | HTMLElement = document,
 ): HTMLElement | null => {
   for (const tabsEl of Array.from(root.querySelectorAll<HTMLElement>(TABS_FIELD_SELECTOR))) {
+    // An edit view kept for the way back renders the same fields in the same tabs.
+    if (isStashed(tabsEl)) {
+      continue
+    }
     const content = tabsEl.querySelector(`:scope > ${selectorOf(PAYLOAD_CLASS.tabsContentWrap)}`)
     if (!content) {
       continue

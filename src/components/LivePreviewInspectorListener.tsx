@@ -90,6 +90,7 @@ import {
   docControlsEl,
   editMainEl,
   editMainWrapperEl,
+  elementByID,
   elementID,
   isCollapsedCollapsible,
   livePreviewToolbarEl,
@@ -843,7 +844,7 @@ const Inspector: React.FC<LivePreviewInspectorListenerProps> = ({
               return !formState[step.path]?.rows?.[step.index]?.collapsed
             }
             if (step.kind === 'collapsible') {
-              const collapsible = collapsibleOf(document.getElementById(step.id))
+              const collapsible = collapsibleOf(elementByID(step.id))
               return Boolean(collapsible) && !isCollapsedCollapsible(collapsible)
             }
             const tabsEl = findTabsElement(step, schema.fields, formState, schema.blocksMap)
@@ -885,7 +886,7 @@ const Inspector: React.FC<LivePreviewInspectorListenerProps> = ({
             }
           }
           const rowHeaderOf = (rowsPath: string, index: number) =>
-            toggleWrapOf(collapsibleOf(document.getElementById(rowIDFromPath(`${rowsPath}.${index}`) ?? '')))
+            toggleWrapOf(collapsibleOf(elementByID(rowIDFromPath(`${rowsPath}.${index}`) ?? '')))
 
           planApplied = plan.complete
           let clicked = false
@@ -922,7 +923,7 @@ const Inspector: React.FC<LivePreviewInspectorListenerProps> = ({
               // The rows below it on screen step aside too - they would be
               // pushed down in bursts as it fills - and come back where they
               // end up.
-              const rowEl = document.getElementById(rowIDFromPath(`${step.path}.${step.index}`) ?? '')
+              const rowEl = elementByID(rowIDFromPath(`${step.path}.${step.index}`) ?? '')
               hideWhileRendering(openingAreaOf(collapsibleOf(rowEl)))
               for (const below of veiled ? [] : visibleRowsAfter(rowEl)) {
                 hideWhileRendering(below, { fade: true })
@@ -950,7 +951,7 @@ const Inspector: React.FC<LivePreviewInspectorListenerProps> = ({
             // something changed can the next one still be mounting, so only
             // then is it waited for.
             if (step.kind === 'collapsible') {
-              const find = () => document.getElementById(step.id)
+              const find = () => elementByID(step.id)
               const collapsibleEl = clicked ? await waitForElement(find, tabSwitchWaitMs, { signal }) : find()
               if (signal.aborted) {
                 return 'not-found'
@@ -1297,7 +1298,7 @@ const Inspector: React.FC<LivePreviewInspectorListenerProps> = ({
     const chain = chainOf(outlineRef.current?.byRowIDPath.get(target))
     const rowEl = (rowIDPath: string) => {
       const path = resolveRowIDs(rowIDPath, formState)
-      return path ? document.getElementById(rowIDFromPath(path) ?? '') : null
+      return path ? elementByID(rowIDFromPath(path) ?? '') : null
     }
     let el: HTMLElement | null = null
     for (const node of [...chain].reverse()) {
@@ -1539,7 +1540,7 @@ const Inspector: React.FC<LivePreviewInspectorListenerProps> = ({
     let opened = false
     while (Date.now() - started < NEW_ROW_WAIT_MS * 2) {
       const path = resolveRowIDs(rowIDPath, getFieldsRef.current())
-      const row = path ? document.getElementById(rowIDFromPath(path) ?? '') : null
+      const row = path ? elementByID(rowIDFromPath(path) ?? '') : null
       if (!path) {
         return
       }

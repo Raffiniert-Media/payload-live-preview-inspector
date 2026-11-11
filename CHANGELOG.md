@@ -1,5 +1,20 @@
 # Changelog
 
+## 2.1.4
+
+### Focus mode after another page of the same collection
+
+2.1.3 found the form on screen, but not the rows in it. Payload's ids are
+paths - `sections-row-2`, `field-title` - the same in every edit view of a
+collection, and the edit view of the page opened before, kept hidden for the
+way back (`cacheComponents`), comes first in the document. Every lookup by id
+found the row there: focus mode set nothing aside, and the reveal opened and
+scrolled to rows nobody could see. Found on a customer site: an image in a
+carousel clicked, the path bar right, the form showing every row from the top
+until a scroll or a second click. Rows, fields, collapsibles and tabs are now looked for outside a kept
+view only (`elementByID` and `querySelectorOnScreen` in
+`utilities/payloadAdmin.ts`).
+
 ## 2.1.3
 
 ### Focus mode in a document opened after another one

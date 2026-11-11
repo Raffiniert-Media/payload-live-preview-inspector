@@ -131,6 +131,35 @@ describe('resolveExactFieldElement', () => {
     document.body.innerHTML = '<input id="field-title" /><div data-field-path="title" id="wrapper"></div>'
     expect(resolveExactFieldElement('title')?.id).toBe('field-title')
   })
+
+  /*
+   * The page opened before, kept hidden for the way back (Next's
+   * `cacheComponents`), has every id and path of the page on screen. Red with
+   * `getElementById`: each of these was found in the hidden one.
+   */
+  it('passes over the namesakes in an edit view kept for the way back', () => {
+    const view = `<div class="collection-edit">
+      <input id="field-title" />
+      <div data-field-path="body"></div>
+      <div id="sections-row-2"><input id="field-sections__2__heading" /><div data-field-path="sections.2.text"></div></div>
+    </div>`
+    document.body.innerHTML = view + view
+    const [kept, onScreen] = Array.from(document.querySelectorAll<HTMLElement>('.collection-edit'))
+    kept.style.setProperty('display', 'none', 'important')
+    const inView = (el: Element | null) => Boolean(el && onScreen.contains(el))
+
+    expect(inView(resolveExactFieldElement('title'))).toBe(true)
+    expect(inView(resolveExactFieldElement('body'))).toBe(true)
+    expect(inView(resolveExactFieldElement('sections.2'))).toBe(true)
+    expect(inView(resolveExactFieldElement('sections.2.heading'))).toBe(true)
+    expect(inView(resolveExactFieldElement('sections.2.text'))).toBe(true)
+    expect(inView(resolveFieldElement('sections.2.cards.0.title'))).toBe(true)
+
+    // A row only the kept view has is not rendered here.
+    onScreen.querySelector('#sections-row-2')!.remove()
+    expect(resolveExactFieldElement('sections.2')).toBeNull()
+    expect(resolveExactFieldElement('sections.2.text')).toBeNull()
+  })
 })
 
 describe('resolvedPathDepth', () => {
